@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       workspace:
-        description: Workspace package name to publish (primary public package: @delexec/ops)
+        description: "Workspace package name to publish (primary public package: @delexec/ops)"
         required: true
         type: string
 
