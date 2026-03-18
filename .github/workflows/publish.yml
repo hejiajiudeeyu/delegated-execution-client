@@ -11,9 +11,6 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -24,4 +21,6 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run test:packages
-      - run: npm publish --workspace "${{ inputs.workspace }}" --access public --provenance
+      - run: npm publish --workspace "${{ inputs.workspace }}" --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
