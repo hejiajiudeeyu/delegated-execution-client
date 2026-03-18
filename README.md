@@ -44,6 +44,8 @@ Some shared packages from this repository are still published separately because
 
 They should be treated as implementation support packages, not the main client product surface.
 
+See also: `docs/current/guides/release-surface.md`
+
 ## How To Develop Here
 
 - Start here when the change affects end-user CLI flows, local buyer/seller behavior, local persistence, or client-side transport wiring.
