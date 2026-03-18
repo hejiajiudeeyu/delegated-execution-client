@@ -1,0 +1,26 @@
+{
+  "name": "delegated-execution-client",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Buyer, seller, and ops client runtime for delegated execution.",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/transports/*"
+  ],
+  "scripts": {
+    "test:unit": "vitest run --config tests/config/vitest.unit.config.mjs",
+    "test:integration": "vitest run --config tests/config/vitest.integration.config.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@vitest/ui": "^3.2.4",
+    "happy-dom": "^20.8.3",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2"
+  }
+}

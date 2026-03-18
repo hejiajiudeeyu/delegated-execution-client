@@ -1,0 +1,26 @@
+{
+  "name": "@delexec/transport-gmail",
+  "version": "0.1.0",
+  "description": "Gmail transport adapter for delegated execution",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "delegated-execution",
+    "transport",
+    "gmail"
+  ],
+  "dependencies": {
+    "@delexec/transport-email": "0.1.0"
+  }
+}

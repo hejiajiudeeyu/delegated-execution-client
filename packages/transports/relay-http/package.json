@@ -1,0 +1,23 @@
+{
+  "name": "@delexec/transport-relay-http",
+  "version": "0.1.0",
+  "description": "HTTP relay transport adapter for delegated execution",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "delegated-execution",
+    "transport",
+    "relay"
+  ]
+}

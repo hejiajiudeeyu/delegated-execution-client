@@ -1,0 +1,26 @@
+{
+  "name": "@delexec/sqlite-store",
+  "version": "0.1.0",
+  "description": "SQLite snapshot store for delegated execution services",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "delegated-execution",
+    "sqlite",
+    "storage"
+  ],
+  "dependencies": {
+    "better-sqlite3": "^12.6.2"
+  }
+}

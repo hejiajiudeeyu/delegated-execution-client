@@ -1,0 +1,23 @@
+{
+  "name": "@delexec/runtime-utils",
+  "version": "0.1.0",
+  "description": "Shared runtime utilities for delegated execution services",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "delegated-execution",
+    "runtime",
+    "utilities"
+  ]
+}
