@@ -3,7 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createBuyerControllerServer, createBuyerState, hydrateBuyerState, serializeBuyerState } from "@delexec/buyer-controller-core";
-import { createPostgresSnapshotStore } from "@delexec/postgres-store";
 import { createSqliteSnapshotStore } from "@delexec/sqlite-store";
 import { createEmailEngineTransportAdapter } from "@delexec/transport-emailengine";
 import { createGmailTransportAdapter } from "@delexec/transport-gmail";
@@ -74,16 +73,6 @@ function loadTransportConfigFromEnv(serviceName) {
 }
 
 async function createOptionalPersistence(serviceName) {
-  const connectionString = process.env.DATABASE_URL || null;
-  if (connectionString) {
-    const store = await createPostgresSnapshotStore({
-      connectionString,
-      serviceName
-    });
-    await store.migrate();
-    return store;
-  }
-
   const sqlitePath = process.env.SQLITE_DATABASE_PATH || null;
   if (!sqlitePath) {
     return null;

@@ -8,8 +8,6 @@
     "croc-seller-controller": "src/server.js"
   },
   "bundleDependencies": [
-    "@delexec/contracts",
-    "@delexec/postgres-store",
     "@delexec/runtime-utils",
     "@delexec/seller-runtime-core",
     "@delexec/sqlite-store",
@@ -42,7 +40,7 @@
     "controller"
   ],
   "dependencies": {
-    "@delexec/postgres-store": "0.1.0",
+    "@delexec/contracts": "^0.1.0",
     "@delexec/runtime-utils": "0.1.0",
     "@delexec/seller-runtime-core": "0.1.0",
     "@delexec/sqlite-store": "0.1.0",
@@ -50,7 +48,6 @@
     "@delexec/transport-emailengine": "0.1.0",
     "@delexec/transport-gmail": "0.1.0",
     "@delexec/transport-relay-http": "0.1.0",
-    "better-sqlite3": "^12.6.2",
-    "pg": "^8.20.0"
+    "better-sqlite3": "^12.6.2"
   }
 }

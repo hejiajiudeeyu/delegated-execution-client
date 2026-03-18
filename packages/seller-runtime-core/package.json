@@ -21,6 +21,6 @@
     "runtime"
   ],
   "dependencies": {
-    "@delexec/contracts": "0.1.0"
+    "@delexec/contracts": "^0.1.0"
   }
 }
