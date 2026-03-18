@@ -1,10 +1,10 @@
-name: Publish Package
+name: Publish Client Package
 
 on:
   workflow_dispatch:
     inputs:
       workspace:
-        description: Workspace package name to publish (for example @delexec/runtime-utils)
+        description: Workspace package name to publish (primary public package: @delexec/ops)
         required: true
         type: string
 
