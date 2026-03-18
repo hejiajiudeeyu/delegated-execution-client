@@ -4,6 +4,11 @@ Client-side runtime and CLI for delegated execution.
 
 This repository contains the client-side implementation split from the original monorepo.
 
+## AI Collaboration
+
+- `CLAUDE.md` defines the repository-specific development and validation rules.
+- `AGENTS.md` gives a minimal routing and ownership summary for AI coding agents.
+
 ## Public Product Surface
 
 The only end-user installation entry for this repository is:
