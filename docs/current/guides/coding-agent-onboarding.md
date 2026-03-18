@@ -5,8 +5,8 @@ This repo now includes a stable local demo path for coding agents.
 The shortest bootstrap path is:
 
 ```bash
-npm install
-npm run ops -- bootstrap --email coding-agent@local.test --platform http://127.0.0.1:8080
+npm install -g @delexec/ops
+delexec-ops bootstrap --email coding-agent@local.test --platform http://127.0.0.1:8080
 ```
 
 The wrapper script remains available and delegates to the same CLI flow:
@@ -58,8 +58,8 @@ If admin approval is missing, the command exits with:
 Useful follow-up commands:
 
 ```bash
-npm run ops -- add-example-subagent
-npm run ops -- run-example --text "Summarize this request."
+delexec-ops add-example-subagent
+delexec-ops run-example --text "Summarize this request."
 ```
 
 Useful logs and snapshots:

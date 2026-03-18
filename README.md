@@ -12,6 +12,13 @@ The only end-user installation entry for this repository is:
 
 Users should install or run the client through `delexec-ops`, not by assembling buyer, seller, storage, or transport packages manually.
 
+Recommended user-facing entrypoints:
+
+```bash
+npm install -g @delexec/ops
+delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
+```
+
 ## Status
 
 `@delexec/contracts` is now published on npm, so this repository can run standalone CI and clean-room package checks.
@@ -20,15 +27,8 @@ Users should install or run the client through `delexec-ops`, not by assembling 
 
 This repository still contains internal implementation packages such as buyer/seller controllers, local storage, and transport adapters. They remain testable and publishable because `@delexec/ops` depends on them, but they are not the primary product surface.
 
-## Shared Package Publish Order
+## Maintainer Notes
 
-Before `delegated-execution-platform-selfhost` can install cleanly from npm, publish these shared packages from this repository first:
+Some shared packages from this repository are still published separately because other repositories consume them during the split transition.
 
-1. `@delexec/runtime-utils`
-2. `@delexec/sqlite-store`
-3. `@delexec/buyer-controller-core`
-4. `@delexec/seller-runtime-core`
-5. transport packages
-6. app packages as needed for clean-room verification
-
-After that, the main client-facing package to publish and document is `@delexec/ops`.
+They should be treated as implementation support packages, not the main client product surface.

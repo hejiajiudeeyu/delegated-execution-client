@@ -4,28 +4,19 @@ This guide describes the current supported path for letting an AI help an end us
 
 ## Current Supported Install Strategy
 
-Current truth:
-
-- the repository contains the real `@delexec/ops` CLI workspace
-- the repository does **not** yet contain a verified npm publish flow for `@delexec/ops`
-- current user-facing install guidance should therefore use the **repo-local** path
-
-Use:
+The supported user-facing install path is the published CLI package:
 
 ```bash
-npm install
-npm run ops -- bootstrap --email you@example.com --platform http://127.0.0.1:8080
+npm install -g @delexec/ops
+delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 ```
-
-Do not assume `npx @delexec/ops ...` is available unless a separate publish workflow has been completed and documented.
 
 ## What The AI Should Do
 
 The recommended AI flow is:
 
-1. clone or open the repository on the user's machine
-2. run `npm install`
-3. run the single bootstrap command
+1. install `@delexec/ops`
+2. run the single bootstrap command
 4. inspect the JSON output
 5. if approval is pending, tell the user or operator exactly that
 6. after approval, rerun bootstrap or `run-example`
@@ -33,7 +24,7 @@ The recommended AI flow is:
 ## Single-Command Bootstrap
 
 ```bash
-npm run ops -- bootstrap --email you@example.com --platform http://127.0.0.1:8080
+delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 ```
 
 This flow attempts to:
@@ -72,9 +63,9 @@ Pending-approval shape:
 ## Useful Follow-Up Commands
 
 ```bash
-npm run ops -- run-example --text "Summarize this request."
-npm run ops -- doctor
-npm run ops -- debug-snapshot
+delexec-ops run-example --text "Summarize this request."
+delexec-ops doctor
+delexec-ops debug-snapshot
 ```
 
 ## What The AI Should Report Back
@@ -92,5 +83,4 @@ The AI should summarize only these user-relevant outcomes:
 
 - platform must already be reachable
 - seller and subagent still require admin approval
-- this is a repo-local install path, not yet a package-manager distribution promise
 - email transport is optional and not required for the bootstrap path
