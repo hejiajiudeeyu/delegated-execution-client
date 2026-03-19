@@ -123,7 +123,8 @@ export function normalizeTransportConfig(config = {}, env = {}) {
   const defaults = defaultTransportConfig();
   const source = config?.runtime?.transport || null;
   const legacyBaseUrl = getLegacyTransportBaseUrl(config, env);
-  const type = normalizedString(source?.type) || (legacyBaseUrl ? "relay_http" : DEFAULT_TRANSPORT_TYPE);
+  const envType = normalizedString(env.TRANSPORT_TYPE);
+  const type = envType || normalizedString(source?.type) || (legacyBaseUrl ? "relay_http" : DEFAULT_TRANSPORT_TYPE);
   const provider = normalizedString(source?.email?.provider) || DEFAULT_EMAIL_PROVIDER;
 
   return {
@@ -323,7 +324,11 @@ export function createDefaultOpsConfig(env = {}) {
 export function ensureOpsState() {
   ensureOpsDirectories();
   const envFile = getOpsEnvFile();
-  const env = readEnvFile(envFile);
+  const fileEnv = readEnvFile(envFile);
+  const env = {
+    ...fileEnv,
+    ...process.env
+  };
   const secretsFile = getOpsSecretsFile();
   const opsConfigFile = getOpsConfigFile();
   let config = readJsonFile(opsConfigFile, null);

@@ -51,7 +51,8 @@ Manual fallback path:
 7. `npm run ops -- start`
 8. `npm run ops -- run-example --text "Summarize this request."`
 
-This path stores local ops state under `~/.delexec`, starts a local supervisor, and manages relay internally.
+This path stores local ops state under `~/.delexec`, starts a local supervisor, and manages relay internally when the relay package is available in the current install shape.
+In the split-repository source integration shape, prefer `relay_http` pointed at a relay process started from `delegated-execution-platform-selfhost`. See `docs/current/guides/source-integration-runbook.md`.
 Local runtime logs are written under `~/.delexec/logs`, and `ops-console` reads logs and debug snapshot data from the supervisor.
 `ops-console` also provides a setup wizard that guides the user through buyer registration, official example installation, review submission, seller enablement, and local example self-call.
 `ops-console` now also supports a local passphrase-backed unlock flow. Sensitive local credentials are stored in `~/.delexec/secrets.enc.json` rather than browser storage.
