@@ -348,7 +348,7 @@ async function heartbeatPlatform(state, platform, status = "healthy") {
     return { ok: false, skipped: true };
   }
 
-  const response = await postJson(platform.baseUrl, `/v2/responders/${state.identity.responder_id}/heartbeat`, {
+  const response = await postJson(platform.baseUrl, `/v1/responders/${state.identity.responder_id}/heartbeat`, {
     headers: {
       Authorization: `Bearer ${platform.apiKey}`
     },
@@ -558,8 +558,8 @@ export function createResponderState(options = {}) {
     workerConcurrency,
     signing,
     identity: {
-      responder_id: options.responderId || "responder_foxlab",
-      hotline_ids: options.hotlineIds || ["foxlab.text.classifier.v1"]
+      responder_id: options.responderId || "responder_starlight",
+      hotline_ids: options.hotlineIds || ["starlight.creative.studio.v1"]
     },
     hotlines: Array.isArray(options.hotlines) ? options.hotlines : [],
     heartbeat: {

@@ -26,8 +26,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: delegated-execution-client/package-lock.json
-      - name: Install platform deps (provides @delexec/platform-api for integration tests)
-        run: npm install --ignore-scripts
+      - name: Install platform deps (provides @delexec/platform-api and transport-relay for integration tests)
+        run: npm install
         working-directory: platform
       - run: npm ci
         working-directory: delegated-execution-client

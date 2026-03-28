@@ -699,7 +699,8 @@ export function createOpsSupervisorServer() {
 
   function resolveRelayPackageEntry() {
     const candidatePackageJsons = [
-      path.resolve(__dirname, "../node_modules/@delexec/transport-relay/package.json")
+      path.resolve(__dirname, "../node_modules/@delexec/transport-relay/package.json"),
+      path.resolve(__dirname, "../../../../platform/apps/transport-relay/package.json")
     ];
 
     for (const packageJsonPath of candidatePackageJsons) {

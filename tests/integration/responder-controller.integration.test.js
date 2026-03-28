@@ -44,8 +44,8 @@ describe("responder-controller integration", () => {
 
     expect(result.body.result_package.status).toBe("ok");
     expect(result.body.result_package.result_version).toBe("0.1.0");
-    expect(result.body.result_package.responder_id).toBe("responder_foxlab");
-    expect(result.body.result_package.hotline_id).toBe("foxlab.text.classifier.v1");
+    expect(result.body.result_package.responder_id).toBe("responder_starlight");
+    expect(result.body.result_package.hotline_id).toBe("starlight.creative.studio.v1");
     expect(result.body.result_package.timing.accepted_at).toBeTypeOf("string");
     expect(result.body.result_package.timing.finished_at).toBeTypeOf("string");
     expect(result.body.result_package.timing.elapsed_ms).toBeTypeOf("number");

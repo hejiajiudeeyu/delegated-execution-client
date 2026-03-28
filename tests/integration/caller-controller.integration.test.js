@@ -297,6 +297,7 @@ describe("caller-controller integration", () => {
     const platformState = createPlatformState();
     const platformServer = createPlatformServer({ serviceName: "platform-caller-contract-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
+    const bootstrapResponder = platformState.bootstrap.responders[0];
 
     const registered = await jsonRequest(platformUrl, "/v1/users/register", {
       method: "POST",
@@ -318,8 +319,8 @@ describe("caller-controller integration", () => {
         body: {
           request_id: requestId,
           caller_id: "caller_contract",
-          responder_id: "responder_foxlab",
-          hotline_id: "foxlab.text.classifier.v1",
+          responder_id: bootstrapResponder.responder_id,
+          hotline_id: bootstrapResponder.hotline_id,
           soft_timeout_s: 90,
           hard_timeout_s: 300
         }
@@ -366,8 +367,8 @@ describe("caller-controller integration", () => {
           }
         },
         responder: {
-          responder_id: "responder_foxlab",
-          hotline_id: "foxlab.text.classifier.v1"
+          responder_id: bootstrapResponder.responder_id,
+          hotline_id: bootstrapResponder.hotline_id
         },
         task: {
           task_type: "text_classification",
