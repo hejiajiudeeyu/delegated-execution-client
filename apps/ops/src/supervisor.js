@@ -1054,6 +1054,10 @@ export function createOpsSupervisorServer() {
     }
     const processInfo = runtime.processes.get("responder");
     if (processInfo && !processInfo.exited) {
+      // Mark exited synchronously before kill so ensureService (called below)
+      // sees the process as dead and spawns a fresh one. The OS exit event fires
+      // asynchronously and would arrive too late for ensureService to observe.
+      processInfo.exited = true;
       processInfo.child.kill();
     }
     await ensureService("responder");
@@ -1826,6 +1830,17 @@ export function createOpsSupervisorServer() {
         });
         return;
       }
+      if (method === "DELETE" && pathname === "/runtime/logs") {
+        const service = url.searchParams.get("service");
+        if (!service) {
+          sendError(res, 400, "service_required", "service query parameter is required");
+          return;
+        }
+        const logFile = getServiceLogFile(service);
+        if (fs.existsSync(logFile)) fs.writeFileSync(logFile, "", "utf8");
+        sendJson(res, 200, { ok: true });
+        return;
+      }
       if (method === "GET" && pathname === "/runtime/alerts") {
         const service = url.searchParams.get("service");
         if (!service) {
@@ -1858,6 +1873,27 @@ export function createOpsSupervisorServer() {
             responder: readServiceLogTail("responder", { maxLines: 50 })
           }
         });
+        return;
+      }
+
+      const serviceRestartMatch = pathname.match(/^\/runtime\/services\/([^/]+)\/restart$/);
+      if (method === "POST" && serviceRestartMatch) {
+        const name = serviceRestartMatch[1];
+        if (!["caller", "responder", "relay"].includes(name)) {
+          sendError(res, 400, "invalid_service", "service must be caller, responder, or relay");
+          return;
+        }
+        const existing = runtime.processes.get(name);
+        if (existing && !existing.exited) {
+          existing.child.kill();
+          const deadline = Date.now() + 3000;
+          while (!existing.exited && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 100));
+          }
+        }
+        await ensureService(name);
+        appendSupervisorEvent({ type: "service_restarted", service: name });
+        sendJson(res, 200, { ok: true, service: name });
         return;
       }
 

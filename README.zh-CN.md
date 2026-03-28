@@ -1,69 +1,138 @@
-# delegated-execution-client（中文）
+# delegated-execution-client
 
-> 英文版：README.md
+> 英文版：[README.md](README.md)
 > 说明：中文文档为准。
 
-客户端运行时与 CLI，用于委托执行。
+委托执行的客户端运行时与本地 Web 控制台。
 
-本仓库包含从原始单体仓库拆分后的客户端侧实现。
+安装 `delexec-ops` 后，可作为 **Caller**（将任务委托给远端 Hotline）或 **Responder**（将本地项目发布为 Hotline 供他人调用）。
 
-## AI 协作
+---
 
-- `CLAUDE.md` 定义仓库级开发与验证规则。
-- `AGENTS.md` 提供面向 AI 编码代理的最小路由与归属说明。
-
-## 对外产品边界
-
-本仓库唯一面向终端用户的安装入口是：
-
-- `@delexec/ops`
-
-用户应通过 `delexec-ops` 安装或运行客户端，而不是手工拼装 caller、responder、storage、transport 等内部包。
-
-推荐的用户入口：
+## 快速开始
 
 ```bash
 npm install -g @delexec/ops
 delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 ```
 
+Bootstrap 完成后打开本地 Web 控制台：
+
+```bash
+delexec-ops ui start --open
+```
+
+初始化向导引导你完成本地口令设置与 Caller 身份注册。
+
+![初始化向导](docs/screenshots/setup-wizard.png)
+
+---
+
+## Dashboard
+
+登录后，Dashboard 实时展示所有本地服务进程的运行状态及其与平台的连通性。
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+服务健康度卡片展示以下状态：
+
+- **Caller 进程** — 本地 caller-controller 运行时
+- **Responder 进程** — 本地 responder-controller 运行时
+- **Relay** — 本地传输中继（如启用）
+- **Platform API** — 已连接平台的可达性
+
+---
+
+## Transport 配置
+
+在 Transport 页面无需重启即可切换 **Local**、**Relay HTTP**、**Email** 三种传输通道。
+
+![Transport 配置](docs/screenshots/transport-config.png)
+
+- **Local** — 进程内直接通信，无需网络。适合开发与测试场景。
+- **Relay HTTP** — 消息经 HTTP Relay 中转。适合跨机器部署或防火墙场景。
+- **Email** — 基于 EmailEngine / Gmail 的异步邮件传输，支持需要人工介入的工作流。
+
+---
+
+## Caller — 发起委托
+
+### Hotline Catalog
+
+浏览并调用平台上发布的 Hotline。
+
+![Hotline Catalog](docs/screenshots/caller-catalog.png)
+
+每张 Hotline 卡片展示 Hotline ID、描述及能力标签，点击**调用**即可发起请求。
+
+### Call 请求
+
+实时追踪所有出站 Call 请求及其状态。下方的手动测试面板支持直接向任意 Hotline ID 发送测试调用。
+
+![Call 请求](docs/screenshots/caller-calls.png)
+
+---
+
+## Responder — 响应委托
+
+### Hotline 管理
+
+将本地项目注册为 Hotline，通过一个开关即可启用或停用。Responder 侧管理哪些 Hotline 处于激活状态，并在 Hotline 进入目录前追踪其审核状态。
+
+![Hotline 管理](docs/screenshots/responder-hotlines.png)
+
+将本地项目挂载为 Hotline：
+
+```bash
+delexec-ops attach-project \
+  --project-path /absolute/path/to/project \
+  --project-name "My Local Project" \
+  --project-description "说明这个项目能为远端 Caller 做什么" \
+  --hotline-id local.my-project.v1 \
+  --cmd "node worker.js"
+```
+
+---
+
 ## 仓库职责
 
-本仓库负责终端用户客户端运行时：
+本仓库负责端用户客户端运行时：
 
-- `@delexec/ops` 产品包与 `delexec-ops` CLI
-- caller 侧本地控制流与 responder 侧本地运行时管理
-- 本地状态、密钥处理、基于 SQLite 的客户端存储与本地传输适配
-- 客户端侧 onboarding、bootstrap、诊断与排障文档
+- `@delexec/ops` 产品包及 `delexec-ops` CLI
+- Caller 侧本地控制流与 Responder 侧本地运行时管理
+- 本地状态、密钥处理、SQLite 客户端存储及本地传输适配器
+- 客户端引导、Bootstrap、诊断与排障文档
 
-本仓库不负责协议真相源定义，也不负责面向运维的自托管平台部署面。
+本仓库不负责协议真实来源定义，也不负责运维侧自托管平台部署。
 
-## 当前状态
+## 公开产品面
 
-`@delexec/contracts` 已发布到 npm，因此本仓库可独立运行 CI 与 clean-room 包校验。
+本仓库唯一的端用户安装入口为 `@delexec/ops`。用户应通过 `delexec-ops` 使用客户端，而不是手动组合内部包。
 
 ## 内部包
 
-本仓库仍包含 caller/responder 控制器、本地存储、传输适配器等内部实现包。它们因为 `@delexec/ops` 依赖而继续可测试、可发布，但不属于主要产品界面。
+本仓库包含内部实现包（caller/responder 控制器、本地存储、传输适配器）。因 `@delexec/ops` 依赖它们而保持可测试与可发布状态，但它们不是主要产品面。
 
-## 维护者说明
+## 状态
 
-拆分过渡期间，本仓库的一些共享包仍会单独发布，因为其他仓库仍在依赖它们。
+`@delexec/contracts` 已发布到 npm，本仓库可独立运行 CI 与隔离环境包检查。
 
-应将这些包视为实现支撑层，而非客户端主产品界面。
+## 维护说明
 
-另见：`docs/current/guides/release-surface.md`  
-另见：`docs/current/guides/source-integration-runbook.md`
+本仓库中部分共享包因其他仓库在拆分过渡期间仍依赖它们而单独发布。它们应被视为实现支撑包，而非主要客户端产品面。
 
-## 在本仓库开发
+参见：`docs/current/guides/release-surface.md`
+参见：`docs/current/guides/source-integration-runbook.md`
 
-- 当改动影响终端 CLI 流程、本地 caller/responder 行为、本地持久化或客户端传输接线时，从这里开始。
-- 保持产品边界：普通用户只应需要 `@delexec/ops`，而不是一组内部包。
-- 共享内部包需维持足够稳定以支撑测试与打包，但文档与示例应优先优化 `delexec-ops` 路径。
+## 如何在此仓库开发
+
+- 当变更涉及端用户 CLI 流程、本地 caller/responder 行为、本地持久化或客户端传输连接时，从本仓库开始。
+- 保持产品边界：普通用户只需要 `@delexec/ops`。
+- 保持共享内部包足够稳定以支持测试与打包，但文档与示例以 `delexec-ops` 路径为核心进行优化。
 
 推荐变更流程：
 
-1. 若改动涉及协议语义，先更新 `delegated-execution-protocol` 并消费已发布的 `@delexec/contracts`。
-2. 在本仓库实现客户端运行时与 CLI 改动。
-3. 发布前执行仓库 CI 与包级检查。
-4. 仅当其他仓库仍依赖时发布共享支撑包；否则发布 `@delexec/ops` 作为用户侧产物。
+1. 若变更影响协议语义，先更新 `delegated-execution-protocol` 并消费已发布的 `@delexec/contracts`。
+2. 在本仓库实现客户端运行时与 CLI 变更。
+3. 发布前运行仓库 CI 与包检查。
+4. 仅在其他仓库依赖时发布共享支撑包；否则以 `@delexec/ops` 作为面向用户的发布产物。

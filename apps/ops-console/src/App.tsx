@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom"
 import { useEffect } from "react"
+import { Toaster } from "sonner"
 import { AuthProvider, useAuth } from "@/hooks/useAuth"
 import { getSessionToken } from "@/lib/api"
 import { AppShell } from "@/components/layout/AppShell"
@@ -91,6 +92,7 @@ export function App() {
     <BrowserRouter>
       <AuthProvider>
         <AppRoutes />
+        <Toaster position="bottom-right" richColors />
       </AuthProvider>
     </BrowserRouter>
   )

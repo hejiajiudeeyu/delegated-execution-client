@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react"
 import { useStatus } from "@/hooks/useStatus"
+import { requestJson } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Activity, Server, Wifi, Zap, Globe } from "lucide-react"
+import { Server, Wifi, Zap, Globe, RotateCcw } from "lucide-react"
+import { toast } from "sonner"
 
 function HealthDot({ ok }: { ok: boolean | undefined | null }) {
   if (ok === undefined || ok === null)
@@ -18,10 +20,14 @@ function ServiceRow({
   name,
   ok,
   label,
+  onRestart,
+  restarting,
 }: {
   name: string
   ok: boolean | undefined | null
   label: string
+  onRestart?: () => void
+  restarting?: boolean
 }) {
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-border last:border-0">
@@ -29,16 +35,34 @@ function ServiceRow({
         <HealthDot ok={ok} />
         <span className="text-sm font-medium">{name}</span>
       </div>
-      <Badge variant={ok ? "outline" : "destructive"} className="text-xs font-mono">
-        {label}
-      </Badge>
+      <div className="flex items-center gap-2">
+        {onRestart && ok === false && (
+          <button
+            onClick={onRestart}
+            disabled={restarting}
+            title="重启服务"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors px-1.5 py-0.5 rounded hover:bg-muted"
+          >
+            <RotateCcw className={`h-3 w-3 ${restarting ? "animate-spin" : ""}`} />
+            {restarting ? "重启中" : "重启"}
+          </button>
+        )}
+        <Badge
+          variant={ok === false ? "solid" : "outline"}
+          tone={ok === false ? "destructive" : undefined}
+          className="text-xs font-mono"
+        >
+          {label}
+        </Badge>
+      </div>
     </div>
   )
 }
 
 export function DashboardPage() {
-  const status = useStatus(8000)
+  const { data: status, refresh } = useStatus(8000)
   const [platformOk, setPlatformOk] = useState<boolean | null>(null)
+  const [restarting, setRestarting] = useState<Record<string, boolean>>({})
 
   const callerHealth = status?.runtime?.caller?.health?.body?.ok
   const responderHealth = status?.runtime?.responder?.health?.body?.ok
@@ -51,6 +75,26 @@ export function DashboardPage() {
   const platformUrl =
     (status?.config as { platform?: { base_url?: string } } | undefined)?.platform?.base_url ??
     "http://127.0.0.1:8080"
+
+  async function handleRestart(service: string) {
+    setRestarting((prev) => ({ ...prev, [service]: true }))
+    try {
+      const res = await requestJson(`/runtime/services/${service}/restart`, { method: "POST" })
+      if (res.status === 200) {
+        toast.success(`${service} 重启指令已发送`, { description: "正在等待服务恢复…" })
+        // 重启后快速连续刷新状态，让用户看到恢复结果
+        for (const delay of [1500, 3000, 5000]) {
+          setTimeout(refresh, delay)
+        }
+      } else {
+        toast.error(`${service} 重启失败`, { description: `服务器返回 ${res.status}` })
+      }
+    } catch {
+      toast.error(`${service} 重启请求失败`, { description: "请检查 ops supervisor 是否运行" })
+    } finally {
+      setRestarting((prev) => ({ ...prev, [service]: false }))
+    }
+  }
 
   useEffect(() => {
     if (!status) return
@@ -153,17 +197,37 @@ export function DashboardPage() {
           <ServiceRow
             name="caller-controller"
             ok={callerHealth}
-            label={callerRegistered ? "已注册" : "未注册"}
+            label={
+              callerHealth === false
+                ? "ERROR"
+                : callerHealth === true
+                ? callerRegistered ? "已注册" : "未注册"
+                : "–"
+            }
+            onRestart={() => handleRestart("caller")}
+            restarting={restarting["caller"]}
           />
           <ServiceRow
             name="responder-controller"
             ok={responderEnabled ? responderHealth : null}
-            label={responderEnabled ? "enabled" : "disabled"}
+            label={
+              !responderEnabled
+                ? "disabled"
+                : responderHealth === true
+                ? "ok"
+                : responderHealth === false
+                ? "error"
+                : "enabled"
+            }
+            onRestart={responderEnabled ? () => handleRestart("responder") : undefined}
+            restarting={restarting["responder"]}
           />
           <ServiceRow
             name="transport-relay"
             ok={relayHealth}
             label={relayHealth === undefined ? "–" : relayHealth ? "ok" : "down"}
+            onRestart={() => handleRestart("relay")}
+            restarting={restarting["relay"]}
           />
           <ServiceRow
             name="platform-api"

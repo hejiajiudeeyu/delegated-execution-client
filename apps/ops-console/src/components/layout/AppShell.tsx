@@ -2,19 +2,65 @@ import { Outlet } from "react-router-dom"
 import { Header } from "./Header"
 import { ConsoleSidebar, useCurrentTab } from "./Sidebar"
 
+function BrandBackdrop() {
+  return (
+    <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-40">
+        {["#FACC15", "#8B5CF6", "#3B82F6", "#EC4899", "#A3E635", "#F97316", "#6366F1", "#EF4444", "#14B8A6"].map(
+          (color, i) => <div key={i} style={{ backgroundColor: color }} />
+        )}
+      </div>
+      <div className="absolute inset-0 opacity-20">
+        <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="brand-grid" x="0" y="0" width="200" height="200" patternUnits="userSpaceOnUse">
+              <rect width="200" height="200" fill="none" />
+              <rect x="0" y="0" width="200" height="200" fill="none" stroke="#111111" strokeWidth="5" strokeLinecap="square" />
+              <g stroke="#111111" strokeWidth="5" fill="none" strokeLinecap="square">
+                <line x1="0" y1="0" x2="60" y2="60" />
+                <line x1="200" y1="0" x2="140" y2="60" />
+                <line x1="0" y1="200" x2="60" y2="140" />
+                <line x1="200" y1="200" x2="140" y2="140" />
+                <rect x="60" y="60" width="80" height="80" />
+                <circle cx="100" cy="100" r="40" />
+                <line x1="60" y1="60" x2="140" y2="140" />
+                <line x1="140" y1="60" x2="60" y2="140" />
+              </g>
+              <g fill="#111111" fontFamily="'Inter', 'Helvetica Neue', Arial, sans-serif" fontWeight="900" letterSpacing="0.05em">
+                <text x="12" y="38" fontSize="22" textAnchor="start">CALL</text>
+                <text x="188" y="180" fontSize="22" textAnchor="end">ANYTHING</text>
+              </g>
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#brand-grid)" />
+        </svg>
+      </div>
+      <div className="absolute left-[10%] top-24 h-52 w-64 bg-black/10" />
+      <div className="absolute bottom-32 right-[15%] h-60 w-72 bg-black/10 -rotate-6" />
+      <div className="absolute top-[42%] right-[8%] h-56 w-56 rounded-full bg-black/10" />
+      <div className="absolute bottom-[48%] left-[12%] h-48 w-48 rounded-full bg-black/10" />
+      <div className="absolute left-20 top-20 h-64 w-64 rotate-12 bg-[#A3E635]/30" />
+      <div className="absolute bottom-20 right-20 h-80 w-80 -rotate-12 bg-[#8B5CF6]/25" />
+    </div>
+  )
+}
+
 export function AppShell() {
   const currentTab = useCurrentTab()
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background" data-tab-ctx={currentTab}>
-      <Header currentTab={currentTab} />
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-52 shrink-0 border-r border-border overflow-y-auto bg-sidebar">
-          <ConsoleSidebar currentTab={currentTab} />
-        </aside>
-        <main className="flex-1 overflow-y-auto p-6">
-          <Outlet />
-        </main>
+    <div className="isolate relative flex h-screen flex-col overflow-hidden" data-tab-ctx={currentTab}>
+      <BrandBackdrop />
+      <div className="relative z-10 flex h-full flex-col overflow-hidden">
+        <Header currentTab={currentTab} />
+        <div className="flex flex-1 overflow-hidden">
+          <aside className="w-52 shrink-0 border-r border-border overflow-y-auto bg-sidebar/90 backdrop-blur-sm">
+            <ConsoleSidebar currentTab={currentTab} />
+          </aside>
+          <main className="flex-1 overflow-y-auto p-6">
+            <Outlet />
+          </main>
+        </div>
       </div>
     </div>
   )

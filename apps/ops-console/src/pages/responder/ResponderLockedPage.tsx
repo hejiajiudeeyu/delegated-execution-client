@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { Alert } from "@/components/ui/alert"
-import { LockKeyhole, CheckCircle2, UserCheck, BookOpen, FileCheck } from "lucide-react"
+import { LockKeyhole, CheckCircle2, UserCheck, BookOpen, FileCheck, KeyRound } from "lucide-react"
 import { cn } from "@/components/ui/utils"
 
 const STEPS = [
@@ -17,7 +17,7 @@ const STEPS = [
     description: "Responder 注册需要先有 Caller 身份（API Key）",
   },
   {
-    icon: Lock,
+    icon: KeyRound,
     title: "填写 Responder 身份",
     description: "设置 Responder ID 和显示名称",
   },

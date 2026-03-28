@@ -6,7 +6,7 @@ export function useStatus(intervalMs = 10000) {
   const [data, setData] = useState<StatusData | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const fetch = async () => {
+  const fetchStatus = async () => {
     try {
       const res = await requestJson<StatusData>("/status")
       if (res.body) setData(res.body)
@@ -16,12 +16,12 @@ export function useStatus(intervalMs = 10000) {
   }
 
   useEffect(() => {
-    fetch()
-    timerRef.current = setInterval(fetch, intervalMs)
+    fetchStatus()
+    timerRef.current = setInterval(fetchStatus, intervalMs)
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
   }, [intervalMs])
 
-  return data
+  return { data, refresh: fetchStatus }
 }

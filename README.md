@@ -1,48 +1,86 @@
 # delegated-execution-client
 
-Client-side runtime and CLI for delegated execution.
+Client-side runtime and local web console for delegated execution.
 
-This repository contains the client-side implementation split from the original monorepo.
+Install once and use `delexec-ops` to act as a **Caller** (delegate tasks to remote Hotlines) or a **Responder** (expose local projects as Hotlines for others to call).
 
-## AI Collaboration
+> 中文版：[README.zh-CN.md](README.zh-CN.md)
 
-- `CLAUDE.md` defines the repository-specific development and validation rules.
-- `AGENTS.md` gives a minimal routing and ownership summary for AI coding agents.
+---
 
-## Public Product Surface
-
-The only end-user installation entry for this repository is:
-
-- `@delexec/ops`
-
-Users should install or run the client through `delexec-ops`, not by assembling caller, responder, storage, or transport packages manually.
-
-User-facing terminology follows the cross-repo mapping in [`../../docs/architecture/terminology.md`](../../docs/architecture/terminology.md):
-
-- `Caller` is the preferred product term for `Caller`
-- `Responder` is the preferred product term for `Responder`
-- `Hotline` is the marketplace-facing label for a published service entry
-
-Recommended user-facing entrypoints:
+## Quick Start
 
 ```bash
 npm install -g @delexec/ops
 delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 ```
 
-For a local web-first onboarding flow in the source workspace:
-
-```bash
-delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080 --open-ui
-```
-
-After bootstrap completes, reopen the local web UI with:
+Open the local web console after bootstrap:
 
 ```bash
 delexec-ops ui start --open
 ```
 
-To attach a local project as a responder Hotline:
+The setup wizard guides you through setting a local passphrase and registering your Caller identity in one flow.
+
+![Setup Wizard](docs/screenshots/setup-wizard.png)
+
+---
+
+## Dashboard
+
+After login, the Dashboard gives a live overview of all local service processes and their connectivity to the platform.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+Service health cards show the status of:
+
+- **Caller process** — the local caller-controller runtime
+- **Responder process** — the local responder-controller runtime
+- **Relay** — the local transport relay (if used)
+- **Platform API** — reachability of the connected platform
+
+---
+
+## Transport Configuration
+
+Switch the transport channel between **Local**, **Relay HTTP**, and **Email** from the Transport page without restarting any services.
+
+![Transport Configuration](docs/screenshots/transport-config.png)
+
+- **Local** — direct in-process communication; no network required. Best for development and testing.
+- **Relay HTTP** — routes messages through an HTTP relay. Suitable for cross-machine deployments or behind firewalls.
+- **Email** — asynchronous email-based transport via EmailEngine or Gmail. Supports human-in-the-loop workflows.
+
+---
+
+## Caller — Delegate Tasks
+
+### Hotline Catalog
+
+Browse and invoke available Hotlines published on the platform.
+
+![Hotline Catalog](docs/screenshots/caller-catalog.png)
+
+Each Hotline card shows the Hotline ID, a description, and capability tags. Click **调用** to send a call request.
+
+### Call Requests
+
+Track all outgoing call requests and their status in real time. The manual test panel lets you send a test call to any Hotline ID directly.
+
+![Call Requests](docs/screenshots/caller-calls.png)
+
+---
+
+## Responder — Expose Local Projects
+
+### Hotline Management
+
+Register your local project as a Hotline and enable or disable it with a single toggle. The Responder side manages which Hotlines are active and tracks their review status before they appear in the catalog.
+
+![Hotline Management](docs/screenshots/responder-hotlines.png)
+
+To attach a local project as a Hotline:
 
 ```bash
 delexec-ops attach-project \
@@ -53,30 +91,39 @@ delexec-ops attach-project \
   --cmd "node worker.js"
 ```
 
+---
+
 ## Repository Responsibility
 
 This repository owns the end-user client runtime:
 
 - the `@delexec/ops` product package and `delexec-ops` CLI
-- caller-side local control flow and responder-side local runtime management, implemented by caller/responder runtimes
+- caller-side local control flow and responder-side local runtime management
 - local state, secret handling, SQLite-backed client storage, and local transport adapters
 - client-side onboarding, bootstrap, diagnostics, and troubleshooting docs
 
 This repository does not own protocol truth-source definitions or the operator-facing self-hosted platform deployment surface.
 
+## AI Collaboration
+
+- `CLAUDE.md` defines the repository-specific development and validation rules.
+- `AGENTS.md` gives a minimal routing and ownership summary for AI coding agents.
+
+## Public Product Surface
+
+The only end-user installation entry for this repository is `@delexec/ops`. Users should install or run the client through `delexec-ops`, not by assembling internal packages manually.
+
+## Internal Packages
+
+This repository contains internal implementation packages (caller/responder controllers, local storage, transport adapters). They remain testable and publishable because `@delexec/ops` depends on them, but they are not the primary product surface.
+
 ## Status
 
 `@delexec/contracts` is now published on npm, so this repository can run standalone CI and clean-room package checks.
 
-## Internal Packages
-
-This repository still contains internal implementation packages such as caller/responder controllers, local storage, and transport adapters. They remain testable and publishable because `@delexec/ops` depends on them, but they are not the primary product surface.
-
 ## Maintainer Notes
 
-Some shared packages from this repository are still published separately because other repositories consume them during the split transition.
-
-They should be treated as implementation support packages, not the main client product surface.
+Some shared packages from this repository are still published separately because other repositories consume them during the split transition. They should be treated as implementation support packages, not the main client product surface.
 
 See also: `docs/current/guides/release-surface.md`
 See also: `docs/current/guides/source-integration-runbook.md`
@@ -84,7 +131,7 @@ See also: `docs/current/guides/source-integration-runbook.md`
 ## How To Develop Here
 
 - Start here when the change affects end-user CLI flows, local caller/responder behavior, local persistence, or client-side transport wiring.
-- Preserve the product boundary: normal users should only need `@delexec/ops`, not a bundle of internal packages.
+- Preserve the product boundary: normal users should only need `@delexec/ops`.
 - Keep shared internal packages stable enough for tests and packaging, but optimize docs and examples for the `delexec-ops` path.
 
 Recommended change flow:

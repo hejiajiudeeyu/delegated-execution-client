@@ -320,7 +320,10 @@ export function RuntimePage() {
               <Button
                 variant="ghost" size="sm"
                 className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                onClick={() => setEntries([])}
+                onClick={async () => {
+                  setEntries([])
+                  await requestJson(`/runtime/logs?service=${activeService}`, { method: "DELETE" })
+                }}
               >
                 <Trash2 className="h-3 w-3 mr-1" />清除
               </Button>

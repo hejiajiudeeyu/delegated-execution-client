@@ -9,6 +9,53 @@ import { useAuth } from "@/hooks/useAuth"
 import { requestJson } from "@/lib/api"
 import { cn } from "@/components/ui/utils"
 
+const BRAND_COLORS = ["#FACC15", "#8B5CF6", "#3B82F6", "#EC4899", "#A3E635", "#F97316", "#6366F1", "#EF4444", "#14B8A6"]
+
+function BrandBackdrop() {
+  return (
+    <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-40">
+        {BRAND_COLORS.map((color, index) => (
+          <div key={`${color}-${index}`} style={{ backgroundColor: color }} />
+        ))}
+      </div>
+
+      <div className="absolute inset-0 opacity-20">
+        <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="brand-grid" x="0" y="0" width="200" height="200" patternUnits="userSpaceOnUse">
+              <rect width="200" height="200" fill="none" />
+              <rect x="0" y="0" width="200" height="200" fill="none" stroke="#111111" strokeWidth="5" strokeLinecap="square" />
+              <g stroke="#111111" strokeWidth="5" fill="none" strokeLinecap="square">
+                <line x1="0" y1="0" x2="60" y2="60" />
+                <line x1="200" y1="0" x2="140" y2="60" />
+                <line x1="0" y1="200" x2="60" y2="140" />
+                <line x1="200" y1="200" x2="140" y2="140" />
+                <rect x="60" y="60" width="80" height="80" />
+                <circle cx="100" cy="100" r="40" />
+                <line x1="60" y1="60" x2="140" y2="140" />
+                <line x1="140" y1="60" x2="60" y2="140" />
+              </g>
+              <g fill="#111111" fontFamily="'Inter', 'Helvetica Neue', Arial, sans-serif" fontWeight="900" letterSpacing="0.05em">
+                <text x="12" y="38" fontSize="22" textAnchor="start">CALL</text>
+                <text x="188" y="180" fontSize="22" textAnchor="end">ANYTHING</text>
+              </g>
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#brand-grid)" />
+        </svg>
+      </div>
+
+      <div className="absolute left-[10%] top-24 h-52 w-64 bg-black/11" />
+      <div className="absolute bottom-32 right-[15%] h-60 w-72 bg-black/10 -rotate-6" />
+      <div className="absolute top-[42%] right-[8%] h-56 w-56 rounded-full bg-black/12" />
+      <div className="absolute bottom-[48%] left-[12%] h-48 w-48 rounded-full bg-black/10" />
+      <div className="absolute left-20 top-20 h-64 w-64 rotate-12 bg-[#A3E635]/30" />
+      <div className="absolute bottom-20 right-20 h-80 w-80 -rotate-12 bg-[#8B5CF6]/25" />
+    </div>
+  )
+}
+
 type Step = "passphrase" | "register" | "done"
 
 const STEPS: { id: Step; label: string }[] = [
@@ -116,11 +163,12 @@ export function SetupPage() {
   const handleSkipRegister = () => setStep("done")
 
   return (
-    <div className="flex h-screen items-center justify-center bg-background">
-      <div className="w-full max-w-sm">
+    <div className="isolate relative flex h-screen items-center justify-center">
+      <BrandBackdrop />
+      <div className="relative z-10 w-full max-w-sm rounded-none border-4 border-black bg-white/80 backdrop-blur-sm p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
         <div className="flex flex-col items-center gap-2 text-center mb-6">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-primary bg-primary/10">
-            <Terminal className="h-5 w-5 text-primary" />
+          <div className="flex h-12 w-12 items-center justify-center border-4 border-black bg-[#A3E635] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+            <Terminal className="h-5 w-5 text-black" />
           </div>
           <h1 className="text-lg font-bold">初始化 Ops Console</h1>
         </div>
@@ -273,11 +321,12 @@ export function UnlockPage() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-background">
-      <div className="w-full max-w-sm space-y-6">
+    <div className="isolate relative flex h-screen items-center justify-center">
+      <BrandBackdrop />
+      <div className="relative z-10 w-full max-w-sm space-y-6 rounded-none border-4 border-black bg-white/80 backdrop-blur-sm p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
         <div className="flex flex-col items-center gap-2 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-primary bg-primary/10">
-            <LockKeyhole className="h-5 w-5 text-primary" />
+          <div className="flex h-12 w-12 items-center justify-center border-4 border-black bg-[#A3E635] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+            <LockKeyhole className="h-5 w-5 text-black" />
           </div>
           <h1 className="text-lg font-bold">解锁 Ops Console</h1>
           <p className="text-sm text-muted-foreground">输入口令以解锁</p>

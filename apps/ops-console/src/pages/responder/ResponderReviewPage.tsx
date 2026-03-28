@@ -38,7 +38,7 @@ export function ResponderReviewPage() {
     setSubmitting(true); setSubmitResult(null)
     const res = await requestJson<{ submitted: number }>("/responder/submit-review", { method: "POST" })
     setSubmitting(false)
-    if (res.status === 200) {
+    if (res.status === 200 || res.status === 201) {
       setSubmitResult({ ok: true, message: `已提交 ${res.body?.submitted ?? 0} 个 Hotline 审核` })
       load()
     } else {
