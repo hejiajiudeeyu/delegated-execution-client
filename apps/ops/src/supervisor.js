@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -719,6 +719,21 @@ export function createOpsSupervisorServer() {
       }
       if (typeof manifest.main === "string") {
         return path.resolve(packageRoot, manifest.main);
+      }
+    }
+
+    // Fall back to PATH lookup for delexec-relay / croc-relay binary.
+    // @delexec/transport-relay is a platform package and is no longer bundled
+    // with @delexec/ops. Operators who install it separately (globally or via
+    // the platform compose stack) will have the binary available in PATH.
+    for (const binName of ["delexec-relay", "croc-relay"]) {
+      try {
+        const resolved = execFileSync("which", [binName], { encoding: "utf8" }).trim();
+        if (resolved) {
+          return resolved;
+        }
+      } catch (_) {
+        // not in PATH, try next
       }
     }
 
