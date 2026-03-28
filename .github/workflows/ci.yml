@@ -9,10 +9,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          path: delegated-execution-client
+      - name: Checkout protocol (local contracts dependency)
+        uses: actions/checkout@v5
+        with:
+          repository: hejiajiudeeyu/delegated-execution-protocol
+          path: protocol
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: delegated-execution-client/package-lock.json
       - run: npm ci
+        working-directory: delegated-execution-client
       - run: npm test
+        working-directory: delegated-execution-client
       - run: npm run test:packages
+        working-directory: delegated-execution-client
