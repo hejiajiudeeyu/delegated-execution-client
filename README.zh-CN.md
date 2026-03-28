@@ -18,7 +18,7 @@
 
 - `@delexec/ops`
 
-用户应通过 `delexec-ops` 安装或运行客户端，而不是手工拼装 buyer、seller、storage、transport 等内部包。
+用户应通过 `delexec-ops` 安装或运行客户端，而不是手工拼装 caller、responder、storage、transport 等内部包。
 
 推荐的用户入口：
 
@@ -32,7 +32,7 @@ delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 本仓库负责终端用户客户端运行时：
 
 - `@delexec/ops` 产品包与 `delexec-ops` CLI
-- buyer 侧本地控制流与 seller 侧本地运行时管理
+- caller 侧本地控制流与 responder 侧本地运行时管理
 - 本地状态、密钥处理、基于 SQLite 的客户端存储与本地传输适配
 - 客户端侧 onboarding、bootstrap、诊断与排障文档
 
@@ -44,7 +44,7 @@ delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 
 ## 内部包
 
-本仓库仍包含 buyer/seller 控制器、本地存储、传输适配器等内部实现包。它们因为 `@delexec/ops` 依赖而继续可测试、可发布，但不属于主要产品界面。
+本仓库仍包含 caller/responder 控制器、本地存储、传输适配器等内部实现包。它们因为 `@delexec/ops` 依赖而继续可测试、可发布，但不属于主要产品界面。
 
 ## 维护者说明
 
@@ -57,7 +57,7 @@ delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 
 ## 在本仓库开发
 
-- 当改动影响终端 CLI 流程、本地 buyer/seller 行为、本地持久化或客户端传输接线时，从这里开始。
+- 当改动影响终端 CLI 流程、本地 caller/responder 行为、本地持久化或客户端传输接线时，从这里开始。
 - 保持产品边界：普通用户只应需要 `@delexec/ops`，而不是一组内部包。
 - 共享内部包需维持足够稳定以支撑测试与打包，但文档与示例应优先优化 `delexec-ops` 路径。
 

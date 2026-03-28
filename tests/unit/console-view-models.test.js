@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  renderBuyerSummaryCard,
+  renderCallerSummaryCard,
   renderCatalogItemsMarkup,
   renderRequestDetailMarkup,
   renderRequestsMarkup,
   renderRuntimeCardsMarkup,
   renderSetupWizardMarkup,
-  renderSellerSubagentsMarkup
+  renderResponderHotlinesMarkup
 } from "../../apps/ops-console/src/view-model.js";
 import {
   renderAdminRequestCardsMarkup,
@@ -25,8 +25,8 @@ describe("console view models", () => {
     const markup = renderRequestDetailMarkup({
       request: {
         request_id: "req_1",
-        seller_id: "seller_1",
-        subagent_id: "subagent_1",
+        responder_id: "responder_1",
+        hotline_id: "hotline_1",
         status: "SUCCEEDED",
         updated_at: "2026-03-08T00:00:00Z"
       },
@@ -44,41 +44,41 @@ describe("console view models", () => {
     expect(markup).toContain("Result Payload");
     expect(markup).toContain("Timeline");
     expect(markup).toContain("Result Summary");
-    expect(renderSetupWizardMarkup({ config: { buyer: { api_key: "sk" }, seller: { enabled: false, subagents: [] } }, runtime: { supervisor: { port: 1 } } })).toContain("Register Buyer");
-    expect(renderSetupWizardMarkup({ config: { buyer: {}, seller: { enabled: false, subagents: [] } }, runtime: { supervisor: { port: 1 } } })).toContain("Blocked:");
+    expect(renderSetupWizardMarkup({ config: { caller: { api_key: "sk" }, responder: { enabled: false, hotlines: [] } }, runtime: { supervisor: { port: 1 } } })).toContain("Register Caller");
+    expect(renderSetupWizardMarkup({ config: { caller: {}, responder: { enabled: false, hotlines: [] } }, runtime: { supervisor: { port: 1 } } })).toContain("Blocked:");
   });
 
   it("renders ops collections", () => {
-    expect(renderBuyerSummaryCard({ health: { body: { ok: true } }, root: { body: { service: "buyer-controller" } } })).toContain(
-      "buyer-controller"
+    expect(renderCallerSummaryCard({ health: { body: { ok: true } }, root: { body: { service: "caller-controller" } } })).toContain(
+      "caller-controller"
     );
     expect(
-      renderCatalogItemsMarkup([{ subagent_id: "s1", seller_id: "seller", capabilities: ["text.classify"] }])
+      renderCatalogItemsMarkup([{ hotline_id: "s1", responder_id: "responder", capabilities: ["text.classify"] }])
     ).toContain("text.classify");
     expect(renderRequestsMarkup([{ request_id: "req_2", status: "SENT" }])).toContain("req_2");
-    const sellerMarkup = renderSellerSubagentsMarkup([{ subagent_id: "local.s1", adapter_type: "process", review_status: "pending" }]);
-    expect(sellerMarkup).toContain("pending");
-    expect(sellerMarkup).toContain("Disable");
-    expect(sellerMarkup).toContain("Remove");
+    const responderMarkup = renderResponderHotlinesMarkup([{ hotline_id: "local.s1", adapter_type: "process", review_status: "pending" }]);
+    expect(responderMarkup).toContain("pending");
+    expect(responderMarkup).toContain("Disable");
+    expect(responderMarkup).toContain("Remove");
     expect(
       renderRuntimeCardsMarkup({
-        buyer: { running: true, pid: 100, health: { body: { ok: true } } },
-        seller: { running: false, pid: null, health: null },
+        caller: { running: true, pid: 100, health: { body: { ok: true } } },
+        responder: { running: false, pid: null, health: null },
         relay: { running: true, pid: 101, health: { body: { ok: false } } }
       })
-    ).toContain("buyer");
+    ).toContain("caller");
   });
 
   it("renders platform collections and pagination summary", () => {
-    expect(renderEntityCardsMarkup([{ seller_id: "seller_a", subagent_count: 2, status: "disabled" }], "sellers")).toContain(
+    expect(renderEntityCardsMarkup([{ responder_id: "responder_a", hotline_count: 2, status: "disabled" }], "responders")).toContain(
       "Approve"
     );
     expect(renderAdminRequestCardsMarkup([{ request_id: "req_a", event_count: 1 }])).toContain("req_a");
-    expect(renderAuditCardsMarkup([{ id: "audit_1", action: "seller.disabled", target_type: "seller", target_id: "seller_a", actor_type: "admin", recorded_at: "now" }])).toContain("seller.disabled");
-    expect(renderReviewCardsMarkup([{ id: "review_1", target_type: "seller", target_id: "seller_a", review_status: "pending", actor_type: "buyer", recorded_at: "now" }])).toContain("pending");
-    expect(renderPaginationSummary({ total: 24, offset: 10, limit: 10 }, "sellers")).toBe("sellers: 11-20 / 24");
-    expect(renderDetailSummary({ seller_id: "seller_a", status: "disabled" })).toContain("seller_a");
+    expect(renderAuditCardsMarkup([{ id: "audit_1", action: "responder.disabled", target_type: "responder", target_id: "responder_a", actor_type: "admin", recorded_at: "now" }])).toContain("responder.disabled");
+    expect(renderReviewCardsMarkup([{ id: "review_1", target_type: "responder", target_id: "responder_a", review_status: "pending", actor_type: "caller", recorded_at: "now" }])).toContain("pending");
+    expect(renderPaginationSummary({ total: 24, offset: 10, limit: 10 }, "responders")).toBe("responders: 11-20 / 24");
+    expect(renderDetailSummary({ responder_id: "responder_a", status: "disabled" })).toContain("responder_a");
     expect(renderHistorySummary([{ review_status: "pending", recorded_at: "now" }], "Review History")).toContain("Review History");
-    expect(renderReviewActionSummary({ seller_id: "seller_a", status: "disabled" }, "manual check", [{ reason: "policy" }])).toContain("manual check");
+    expect(renderReviewActionSummary({ responder_id: "responder_a", status: "disabled" }, "manual check", [{ reason: "policy" }])).toContain("manual check");
   });
 });

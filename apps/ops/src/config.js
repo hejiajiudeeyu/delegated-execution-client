@@ -5,7 +5,7 @@ import {
   getOpsConfigFile,
   getOpsEnvFile,
   getOpsSecretsFile,
-  getSellerConfigFile,
+  getResponderConfigFile,
   readEnvFile,
   readJsonFile,
   secretStoreExists,
@@ -18,8 +18,8 @@ import {
 export const DEFAULT_PORTS = Object.freeze({
   supervisor: 8079,
   relay: 8090,
-  buyer: 8081,
-  seller: 8082
+  caller: 8081,
+  responder: 8082
 });
 
 export const DEFAULT_TRANSPORT_TYPE = "local";
@@ -37,8 +37,8 @@ const TRANSPORT_SECRET_ENV_KEYS = Object.freeze({
 });
 
 export const OPS_SECRET_KEYS = Object.freeze({
-  buyer_api_key: "buyer_api_key",
-  seller_platform_api_key: "seller_platform_api_key",
+  caller_api_key: "caller_api_key",
+  responder_platform_api_key: "responder_platform_api_key",
   transport_emailengine_access_token: "transport_emailengine_access_token",
   transport_gmail_client_secret: "transport_gmail_client_secret",
   transport_gmail_refresh_token: "transport_gmail_refresh_token",
@@ -46,7 +46,7 @@ export const OPS_SECRET_KEYS = Object.freeze({
 });
 
 const LEGACY_SECRET_CONFIG_PATHS = Object.freeze({
-  [OPS_SECRET_KEYS.buyer_api_key]: ["buyer", "api_key"],
+  [OPS_SECRET_KEYS.caller_api_key]: ["caller", "api_key"],
   [OPS_SECRET_KEYS.platform_admin_api_key]: ["platform_console", "admin_api_key"]
 });
 
@@ -54,13 +54,13 @@ function resolveDefaultPorts() {
   return {
     supervisor: Number(process.env.OPS_PORT_SUPERVISOR || DEFAULT_PORTS.supervisor),
     relay: Number(process.env.OPS_PORT_RELAY || DEFAULT_PORTS.relay),
-    buyer: Number(process.env.OPS_PORT_BUYER || DEFAULT_PORTS.buyer),
-    seller: Number(process.env.OPS_PORT_SELLER || DEFAULT_PORTS.seller)
+    caller: Number(process.env.OPS_PORT_CALLER || DEFAULT_PORTS.caller),
+    responder: Number(process.env.OPS_PORT_RESPONDER || DEFAULT_PORTS.responder)
   };
 }
 
-function randomSellerId() {
-  return `seller_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+function randomResponderId() {
+  return `responder_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
 function encodePemForEnv(pem) {
@@ -301,17 +301,20 @@ export function createDefaultOpsConfig(env = {}) {
     platform_console: {
       base_url: resolvedEnv.PLATFORM_API_BASE_URL || "http://127.0.0.1:8080"
     },
-    buyer: {
+    caller: {
       enabled: true,
       api_key: null,
-      api_key_configured: Boolean(resolvedEnv.BUYER_PLATFORM_API_KEY || resolvedEnv.PLATFORM_API_KEY),
-      contact_email: resolvedEnv.BUYER_CONTACT_EMAIL || null
+      api_key_configured: Boolean(resolvedEnv.CALLER_PLATFORM_API_KEY || resolvedEnv.PLATFORM_API_KEY),
+      contact_email: resolvedEnv.CALLER_CONTACT_EMAIL || null
     },
-    seller: {
+    responder: {
       enabled: false,
-      seller_id: resolvedEnv.SELLER_ID || null,
-      display_name: "Local Seller",
-      subagents: []
+      responder_id: resolvedEnv.RESPONDER_ID || null,
+      display_name: "Local Responder",
+      hotlines: []
+    },
+    preferences: {
+      task_types: {}
     },
     runtime: {
       ports,
@@ -334,41 +337,43 @@ export function ensureOpsState() {
   let config = readJsonFile(opsConfigFile, null);
 
   if (!config) {
-    const legacySeller = readJsonFile(getSellerConfigFile(), null);
+    const legacyResponder = readJsonFile(getResponderConfigFile(), null);
     config = createDefaultOpsConfig(env);
-    if (legacySeller) {
-      config.seller = {
-        enabled: legacySeller.enabled !== false,
-        seller_id: legacySeller.seller_id || env.SELLER_ID || null,
-        display_name: legacySeller.display_name || "Local Seller",
-        subagents: Array.isArray(legacySeller.subagents) ? legacySeller.subagents : []
+    if (legacyResponder) {
+      config.responder = {
+        enabled: legacyResponder.enabled !== false,
+        responder_id: legacyResponder.responder_id || env.RESPONDER_ID || null,
+        display_name: legacyResponder.display_name || "Local Responder",
+        hotlines: Array.isArray(legacyResponder.hotlines) ? legacyResponder.hotlines : []
       };
     }
   }
 
   config.platform ||= { base_url: env.PLATFORM_API_BASE_URL || process.env.PLATFORM_API_BASE_URL || "http://127.0.0.1:8080" };
   config.platform_console ||= { base_url: config.platform.base_url || env.PLATFORM_API_BASE_URL || "http://127.0.0.1:8080" };
-  config.buyer ||= {
+  config.caller ||= {
     enabled: true,
     api_key: null,
     api_key_configured: false,
-    contact_email: env.BUYER_CONTACT_EMAIL || process.env.BUYER_CONTACT_EMAIL || null
+    contact_email: env.CALLER_CONTACT_EMAIL || process.env.CALLER_CONTACT_EMAIL || null
   };
-  const buyerApiKey =
-    config.buyer.api_key ||
-    env.BUYER_PLATFORM_API_KEY ||
+  const callerApiKey =
+    config.caller.api_key ||
+    env.CALLER_PLATFORM_API_KEY ||
     env.PLATFORM_API_KEY ||
-    process.env.BUYER_PLATFORM_API_KEY ||
+    process.env.CALLER_PLATFORM_API_KEY ||
     process.env.PLATFORM_API_KEY ||
     null;
-  config.buyer.api_key = normalizedString(config.buyer.api_key);
-  config.buyer.api_key_configured = Boolean(buyerApiKey);
-  config.seller ||= {
+  config.caller.api_key = normalizedString(config.caller.api_key);
+  config.caller.api_key_configured = Boolean(callerApiKey);
+  config.responder ||= {
     enabled: false,
-    seller_id: env.SELLER_ID || process.env.SELLER_ID || null,
-    display_name: "Local Seller",
-    subagents: []
+    responder_id: env.RESPONDER_ID || process.env.RESPONDER_ID || null,
+    display_name: "Local Responder",
+    hotlines: []
   };
+  config.preferences ||= { task_types: {} };
+  config.preferences.task_types ||= {};
   const defaultPorts = resolveDefaultPorts();
   config.runtime ||= { ports: defaultPorts, external_relay: null, transport: defaultTransportConfig() };
   config.runtime.ports ||= defaultPorts;
@@ -398,11 +403,11 @@ export function readLegacyOpsSecrets(state) {
   const config = state?.config || {};
   const transport = readTransportSecretsFromEnv(env);
   return {
-    [OPS_SECRET_KEYS.buyer_api_key]:
-      getLegacyConfigSecret(config, OPS_SECRET_KEYS.buyer_api_key) ||
-      normalizedString(env.BUYER_PLATFORM_API_KEY) ||
+    [OPS_SECRET_KEYS.caller_api_key]:
+      getLegacyConfigSecret(config, OPS_SECRET_KEYS.caller_api_key) ||
+      normalizedString(env.CALLER_PLATFORM_API_KEY) ||
       normalizedString(env.PLATFORM_API_KEY),
-    [OPS_SECRET_KEYS.seller_platform_api_key]: normalizedString(env.SELLER_PLATFORM_API_KEY),
+    [OPS_SECRET_KEYS.responder_platform_api_key]: normalizedString(env.RESPONDER_PLATFORM_API_KEY),
     [OPS_SECRET_KEYS.transport_emailengine_access_token]: transport.emailengine.access_token,
     [OPS_SECRET_KEYS.transport_gmail_client_secret]: transport.gmail.client_secret,
     [OPS_SECRET_KEYS.transport_gmail_refresh_token]: transport.gmail.refresh_token,
@@ -438,9 +443,9 @@ export function readResolvedOpsSecrets(state, unlockedSecrets = null) {
   const legacy = readLegacyOpsSecrets(state);
   const encrypted = unlockedSecrets || {};
   return {
-    buyer_api_key: normalizedString(encrypted[OPS_SECRET_KEYS.buyer_api_key]) || legacy[OPS_SECRET_KEYS.buyer_api_key] || null,
-    seller_platform_api_key:
-      normalizedString(encrypted[OPS_SECRET_KEYS.seller_platform_api_key]) || legacy[OPS_SECRET_KEYS.seller_platform_api_key] || null,
+    caller_api_key: normalizedString(encrypted[OPS_SECRET_KEYS.caller_api_key]) || legacy[OPS_SECRET_KEYS.caller_api_key] || null,
+    responder_platform_api_key:
+      normalizedString(encrypted[OPS_SECRET_KEYS.responder_platform_api_key]) || legacy[OPS_SECRET_KEYS.responder_platform_api_key] || null,
     transport: {
       emailengine: {
         access_token:
@@ -468,9 +473,9 @@ export function scrubLegacySecrets(state) {
   if (!state?.config || !state?.envFile) {
     return state;
   }
-  if (state.config.buyer) {
-    state.config.buyer.api_key = null;
-    state.config.buyer.api_key_configured = true;
+  if (state.config.caller) {
+    state.config.caller.api_key = null;
+    state.config.caller.api_key_configured = true;
   }
   state.config.platform_console ||= {};
   state.config.platform_console.admin_api_key = null;
@@ -478,9 +483,9 @@ export function scrubLegacySecrets(state) {
   state.env = updateEnvFile(
     state.envFile,
     {
-      BUYER_PLATFORM_API_KEY: null,
+      CALLER_PLATFORM_API_KEY: null,
       PLATFORM_API_KEY: null,
-      SELLER_PLATFORM_API_KEY: null,
+      RESPONDER_PLATFORM_API_KEY: null,
       PLATFORM_ADMIN_API_KEY: null,
       TRANSPORT_EMAILENGINE_ACCESS_TOKEN: null,
       TRANSPORT_GMAIL_CLIENT_SECRET: null,
@@ -493,19 +498,19 @@ export function scrubLegacySecrets(state) {
 
 export function saveOpsState({ envFile, opsConfigFile, env, config }) {
   const encryptedStoreConfigured = secretStoreExists(getConfiguredSecretFile());
-  const resolvedBuyerApiKey =
-    normalizedString(env.BUYER_PLATFORM_API_KEY) ||
+  const resolvedCallerApiKey =
+    normalizedString(env.CALLER_PLATFORM_API_KEY) ||
     normalizedString(env.PLATFORM_API_KEY) ||
-    normalizedString(config.buyer?.api_key);
-  const resolvedSellerPlatformApiKey = normalizedString(env.SELLER_PLATFORM_API_KEY);
+    normalizedString(config.caller?.api_key);
+  const resolvedResponderPlatformApiKey = normalizedString(env.RESPONDER_PLATFORM_API_KEY);
   const resolvedPlatformAdminApiKey =
     normalizedString(env.PLATFORM_ADMIN_API_KEY) ||
     normalizedString(config.platform_console?.admin_api_key);
   const transportSecrets = readTransportSecretsFromEnv(env);
 
-  config.buyer ||= {};
-  config.buyer.api_key = null;
-  config.buyer.api_key_configured = Boolean(config.buyer.api_key_configured || resolvedBuyerApiKey);
+  config.caller ||= {};
+  config.caller.api_key = null;
+  config.caller.api_key_configured = Boolean(config.caller.api_key_configured || resolvedCallerApiKey);
   config.platform_console ||= {};
   config.platform_console.admin_api_key = null;
   writeJsonFile(opsConfigFile, config);
@@ -516,12 +521,12 @@ export function saveOpsState({ envFile, opsConfigFile, env, config }) {
       : transportEnv.TRANSPORT_BASE_URL;
   const updates = {
     PLATFORM_API_BASE_URL: config.platform?.base_url || env.PLATFORM_API_BASE_URL || null,
-    BUYER_PLATFORM_API_KEY: encryptedStoreConfigured ? null : resolvedBuyerApiKey,
-    PLATFORM_API_KEY: encryptedStoreConfigured ? null : resolvedBuyerApiKey,
-    BUYER_CONTACT_EMAIL: config.buyer?.contact_email || env.BUYER_CONTACT_EMAIL || null,
-    SELLER_PLATFORM_API_KEY: encryptedStoreConfigured ? null : resolvedSellerPlatformApiKey,
-    SELLER_ID: config.seller?.seller_id || env.SELLER_ID || null,
-    SUBAGENT_IDS: (config.seller?.subagents || []).map((item) => item.subagent_id).filter(Boolean).join(","),
+    CALLER_PLATFORM_API_KEY: encryptedStoreConfigured ? null : resolvedCallerApiKey,
+    PLATFORM_API_KEY: encryptedStoreConfigured ? null : resolvedCallerApiKey,
+    CALLER_CONTACT_EMAIL: config.caller?.contact_email || env.CALLER_CONTACT_EMAIL || null,
+    RESPONDER_PLATFORM_API_KEY: encryptedStoreConfigured ? null : resolvedResponderPlatformApiKey,
+    RESPONDER_ID: config.responder?.responder_id || env.RESPONDER_ID || null,
+    HOTLINE_IDS: (config.responder?.hotlines || []).map((item) => item.hotline_id).filter(Boolean).join(","),
     TRANSPORT_BASE_URL: relayBaseUrl,
     TRANSPORT_TYPE: transportEnv.TRANSPORT_TYPE,
     TRANSPORT_PROVIDER: transportEnv.TRANSPORT_PROVIDER,
@@ -543,46 +548,46 @@ export function saveOpsState({ envFile, opsConfigFile, env, config }) {
   return updateEnvFile(envFile, updates, { removeNull: true });
 }
 
-export function ensureSellerIdentity(state, { sellerId = null, displayName = null } = {}) {
+export function ensureResponderIdentity(state, { responderId = null, displayName = null } = {}) {
   const { env, config } = state;
-  const currentSellerId = sellerId || config.seller?.seller_id || env.SELLER_ID || randomSellerId();
-  config.seller ||= {};
-  config.seller.seller_id = currentSellerId;
-  config.seller.display_name = displayName || config.seller.display_name || "Local Seller";
-  config.seller.subagents ||= [];
+  const currentResponderId = responderId || config.responder?.responder_id || env.RESPONDER_ID || randomResponderId();
+  config.responder ||= {};
+  config.responder.responder_id = currentResponderId;
+  config.responder.display_name = displayName || config.responder.display_name || "Local Responder";
+  config.responder.hotlines ||= [];
 
-  if (!env.SELLER_SIGNING_PUBLIC_KEY_PEM || !env.SELLER_SIGNING_PRIVATE_KEY_PEM) {
+  if (!env.RESPONDER_SIGNING_PUBLIC_KEY_PEM || !env.RESPONDER_SIGNING_PRIVATE_KEY_PEM) {
     const signing = generateSigningKeyPair();
     updateEnvFile(state.envFile, {
-      SELLER_SIGNING_PUBLIC_KEY_PEM: encodePemForEnv(signing.publicKeyPem),
-      SELLER_SIGNING_PRIVATE_KEY_PEM: encodePemForEnv(signing.privateKeyPem),
-      SELLER_ID: currentSellerId
+      RESPONDER_SIGNING_PUBLIC_KEY_PEM: encodePemForEnv(signing.publicKeyPem),
+      RESPONDER_SIGNING_PRIVATE_KEY_PEM: encodePemForEnv(signing.privateKeyPem),
+      RESPONDER_ID: currentResponderId
     });
     state.env = readEnvFile(state.envFile);
   }
 
   return {
-    seller_id: currentSellerId,
-    display_name: config.seller.display_name,
-    public_key_pem: decodePemFromEnv(state.env.SELLER_SIGNING_PUBLIC_KEY_PEM),
-    private_key_pem: decodePemFromEnv(state.env.SELLER_SIGNING_PRIVATE_KEY_PEM)
+    responder_id: currentResponderId,
+    display_name: config.responder.display_name,
+    public_key_pem: decodePemFromEnv(state.env.RESPONDER_SIGNING_PUBLIC_KEY_PEM),
+    private_key_pem: decodePemFromEnv(state.env.RESPONDER_SIGNING_PRIVATE_KEY_PEM)
   };
 }
 
-export function upsertSubagent(state, definition) {
-  state.config.seller ||= { enabled: false, seller_id: null, display_name: "Local Seller", subagents: [] };
-  state.config.seller.subagents ||= [];
-  state.config.seller.subagents = [
-    ...state.config.seller.subagents.filter((item) => item.subagent_id !== definition.subagent_id),
+export function upsertHotline(state, definition) {
+  state.config.responder ||= { enabled: false, responder_id: null, display_name: "Local Responder", hotlines: [] };
+  state.config.responder.hotlines ||= [];
+  state.config.responder.hotlines = [
+    ...state.config.responder.hotlines.filter((item) => item.hotline_id !== definition.hotline_id),
     definition
   ];
   return definition;
 }
 
-export function setSubagentEnabled(state, subagentId, enabled) {
-  state.config.seller ||= { enabled: false, seller_id: null, display_name: "Local Seller", subagents: [] };
-  state.config.seller.subagents ||= [];
-  const item = state.config.seller.subagents.find((entry) => entry.subagent_id === subagentId);
+export function setHotlineEnabled(state, hotlineId, enabled) {
+  state.config.responder ||= { enabled: false, responder_id: null, display_name: "Local Responder", hotlines: [] };
+  state.config.responder.hotlines ||= [];
+  const item = state.config.responder.hotlines.find((entry) => entry.hotline_id === hotlineId);
   if (!item) {
     return null;
   }
@@ -590,13 +595,13 @@ export function setSubagentEnabled(state, subagentId, enabled) {
   return item;
 }
 
-export function removeSubagent(state, subagentId) {
-  state.config.seller ||= { enabled: false, seller_id: null, display_name: "Local Seller", subagents: [] };
-  state.config.seller.subagents ||= [];
-  const existing = state.config.seller.subagents.find((entry) => entry.subagent_id === subagentId);
+export function removeHotline(state, hotlineId) {
+  state.config.responder ||= { enabled: false, responder_id: null, display_name: "Local Responder", hotlines: [] };
+  state.config.responder.hotlines ||= [];
+  const existing = state.config.responder.hotlines.find((entry) => entry.hotline_id === hotlineId);
   if (!existing) {
     return null;
   }
-  state.config.seller.subagents = state.config.seller.subagents.filter((entry) => entry.subagent_id !== subagentId);
+  state.config.responder.hotlines = state.config.responder.hotlines.filter((entry) => entry.hotline_id !== hotlineId);
   return existing;
 }

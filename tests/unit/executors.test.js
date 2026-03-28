@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   createFunctionExecutor,
   createSimulatorExecutor,
-  createSubagentRouterExecutor,
+  createHotlineRouterExecutor,
   deferTask
-} from "@delexec/seller-runtime-core";
+} from "@delexec/responder-runtime-core";
 
 describe("deferTask", () => {
   it("returns deferred marker with default reason", () => {
@@ -20,7 +20,7 @@ describe("deferTask", () => {
 describe("createFunctionExecutor", () => {
   it("throws TypeError when fn is not a function", () => {
     expect(() => createFunctionExecutor("not-a-function")).toThrow(TypeError);
-    expect(() => createFunctionExecutor("not-a-function")).toThrow("seller_executor_fn_required");
+    expect(() => createFunctionExecutor("not-a-function")).toThrow("responder_executor_fn_required");
   });
 
   it("throws TypeError for null", () => {
@@ -59,7 +59,7 @@ describe("createFunctionExecutor", () => {
 
     const result = await executor.execute({});
     expect(result.status).toBe("error");
-    expect(result.error.code).toBe("SUBAGENT_INVALID_RESULT");
+    expect(result.error.code).toBe("HOTLINE_INVALID_RESULT");
   });
 
   it("normalizes undefined result as error", async () => {
@@ -67,7 +67,7 @@ describe("createFunctionExecutor", () => {
 
     const result = await executor.execute({});
     expect(result.status).toBe("error");
-    expect(result.error.code).toBe("SUBAGENT_INVALID_RESULT");
+    expect(result.error.code).toBe("HOTLINE_INVALID_RESULT");
   });
 
   it("normalizes string result as error", async () => {
@@ -75,7 +75,7 @@ describe("createFunctionExecutor", () => {
 
     const result = await executor.execute({});
     expect(result.status).toBe("error");
-    expect(result.error.code).toBe("SUBAGENT_INVALID_RESULT");
+    expect(result.error.code).toBe("HOTLINE_INVALID_RESULT");
   });
 
   it("normalizes number result as error", async () => {
@@ -161,11 +161,11 @@ describe("createSimulatorExecutor", () => {
   });
 });
 
-describe("createSubagentRouterExecutor", () => {
-  it("routes to configured subagent", async () => {
-    const router = createSubagentRouterExecutor([
+describe("createHotlineRouterExecutor", () => {
+  it("routes to configured hotline", async () => {
+    const router = createHotlineRouterExecutor([
       {
-        subagent_id: "agent.v1",
+        hotline_id: "agent.v1",
         adapter_type: "function",
         adapter: {
           fn: async () => ({
@@ -178,36 +178,36 @@ describe("createSubagentRouterExecutor", () => {
       }
     ]);
 
-    const result = await router.execute({ subagentId: "agent.v1", task: {} });
+    const result = await router.execute({ hotlineId: "agent.v1", task: {} });
     expect(result.status).toBe("ok");
     expect(result.output.routed).toBe(true);
   });
 
-  it("falls back to default executor when subagent not found", async () => {
-    const router = createSubagentRouterExecutor([]);
+  it("falls back to default executor when hotline not found", async () => {
+    const router = createHotlineRouterExecutor([]);
     const result = await router.execute({
-      subagentId: "unknown.agent",
+      hotlineId: "unknown.agent",
       task: { task_type: "text.classify" }
     });
     expect(result.status).toBe("ok");
     expect(result.output.summary).toBe("Task completed");
   });
 
-  it("returns SUBAGENT_NOT_CONFIGURED when no fallback", async () => {
-    const router = createSubagentRouterExecutor([], null);
+  it("returns HOTLINE_NOT_CONFIGURED when no fallback", async () => {
+    const router = createHotlineRouterExecutor([], null);
     const result = await router.execute({
-      subagentId: "unknown.agent",
+      hotlineId: "unknown.agent",
       task: {}
     });
     expect(result.status).toBe("error");
-    expect(result.error.code).toBe("SUBAGENT_NOT_CONFIGURED");
+    expect(result.error.code).toBe("HOTLINE_NOT_CONFIGURED");
   });
 
-  it("falls back when subagent is disabled", async () => {
-    const router = createSubagentRouterExecutor(
+  it("falls back when hotline is disabled", async () => {
+    const router = createHotlineRouterExecutor(
       [
         {
-          subagent_id: "agent.v1",
+          hotline_id: "agent.v1",
           enabled: false,
           adapter_type: "function",
           adapter: { fn: async () => ({ status: "ok", output: {} }) }
@@ -217,17 +217,17 @@ describe("createSubagentRouterExecutor", () => {
     );
 
     const result = await router.execute({
-      subagentId: "agent.v1",
+      hotlineId: "agent.v1",
       task: { task_type: "test" }
     });
     expect(result.status).toBe("ok");
     expect(result.output.summary).toBe("Task completed");
   });
 
-  it("lists configured subagents", () => {
-    const router = createSubagentRouterExecutor([
+  it("lists configured hotlines", () => {
+    const router = createHotlineRouterExecutor([
       {
-        subagent_id: "agent.v1",
+        hotline_id: "agent.v1",
         display_name: "Agent One",
         adapter_type: "function",
         task_types: ["text.classify"],
@@ -237,17 +237,17 @@ describe("createSubagentRouterExecutor", () => {
       }
     ]);
 
-    const list = router.listSubagents();
+    const list = router.listHotlines();
     expect(list).toHaveLength(1);
-    expect(list[0].subagent_id).toBe("agent.v1");
+    expect(list[0].hotline_id).toBe("agent.v1");
     expect(list[0].display_name).toBe("Agent One");
     expect(list[0].task_types).toEqual(["text.classify"]);
   });
 
-  it("returns allowed task types for configured subagent", () => {
-    const router = createSubagentRouterExecutor([
+  it("returns allowed task types for configured hotline", () => {
+    const router = createHotlineRouterExecutor([
       {
-        subagent_id: "agent.v1",
+        hotline_id: "agent.v1",
         adapter_type: "function",
         task_types: ["text.classify", "text.summarize"],
         adapter: { fn: async () => ({}) }
@@ -257,21 +257,21 @@ describe("createSubagentRouterExecutor", () => {
     expect(router.getAllowedTaskTypes("agent.v1")).toEqual(["text.classify", "text.summarize"]);
   });
 
-  it("returns fallback task types for unknown subagent", () => {
+  it("returns fallback task types for unknown hotline", () => {
     const fallback = createFunctionExecutor(async () => ({}), {
       allowedTaskTypes: ["fallback.type"]
     });
-    const router = createSubagentRouterExecutor([], fallback);
+    const router = createHotlineRouterExecutor([], fallback);
     expect(router.getAllowedTaskTypes("unknown")).toEqual(["fallback.type"]);
   });
 
-  it("handles empty subagents array", () => {
-    const router = createSubagentRouterExecutor([]);
-    expect(router.listSubagents()).toEqual([]);
+  it("handles empty hotlines array", () => {
+    const router = createHotlineRouterExecutor([]);
+    expect(router.listHotlines()).toEqual([]);
   });
 
-  it("handles non-array subagents input", () => {
-    const router = createSubagentRouterExecutor(null);
-    expect(router.listSubagents()).toEqual([]);
+  it("handles non-array hotlines input", () => {
+    const router = createHotlineRouterExecutor(null);
+    expect(router.listHotlines()).toEqual([]);
   });
 });

@@ -18,20 +18,20 @@ node scripts/coding-agent-bootstrap.mjs --email coding-agent@local.test --platfo
 The bootstrap flow will attempt to complete:
 
 1. `delexec-ops setup`
-2. buyer registration
-3. official example subagent install
-4. seller review submission
-5. seller enable
+2. caller registration
+3. official example hotline install
+4. responder review submission
+5. responder enable
 6. supervisor start
-7. seller/subagent approval when a local operator environment has access to `PLATFORM_ADMIN_API_KEY`
-8. local example self-call through the normal buyer -> seller protocol path
+7. responder/hotline approval when a local operator environment has access to `PLATFORM_ADMIN_API_KEY`
+8. local example self-call through the normal caller -> responder protocol path
 
 Recommended environment:
 
 ```bash
 export PLATFORM_API_BASE_URL=http://127.0.0.1:8080
 export PLATFORM_ADMIN_API_KEY=sk_admin_xxx
-export BOOTSTRAP_BUYER_EMAIL=coding-agent@local.test
+export BOOTSTRAP_CALLER_EMAIL=coding-agent@local.test
 ```
 
 `PLATFORM_ADMIN_API_KEY` is intended for local bootstrap automation or
@@ -40,7 +40,7 @@ export BOOTSTRAP_BUYER_EMAIL=coding-agent@local.test
 Success criteria:
 
 - output is JSON
-- `steps` contains `setup_ok`, `buyer_registered`, `example_subagent_added`, `review_submitted`, `seller_enabled`
+- `steps` contains `setup_ok`, `caller_registered`, `example_hotline_added`, `review_submitted`, `responder_enabled`
 - terminal success returns:
 
 ```json
@@ -58,7 +58,7 @@ If admin approval is missing, the command exits with:
 Useful follow-up commands:
 
 ```bash
-delexec-ops add-example-subagent
+delexec-ops add-example-hotline
 delexec-ops run-example --text "Summarize this request."
 ```
 

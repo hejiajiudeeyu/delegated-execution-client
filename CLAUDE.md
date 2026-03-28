@@ -18,7 +18,7 @@ This repository owns:
 
 - `@delexec/ops`
 - `delexec-ops`
-- local buyer and seller orchestration
+- local caller and responder orchestration
 - local persistence, secret handling, and SQLite-backed client state
 - client-side transport wiring and end-user onboarding flows
 

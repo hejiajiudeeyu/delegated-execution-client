@@ -15,7 +15,13 @@ The only end-user installation entry for this repository is:
 
 - `@delexec/ops`
 
-Users should install or run the client through `delexec-ops`, not by assembling buyer, seller, storage, or transport packages manually.
+Users should install or run the client through `delexec-ops`, not by assembling caller, responder, storage, or transport packages manually.
+
+User-facing terminology follows the cross-repo mapping in [`../../docs/architecture/terminology.md`](../../docs/architecture/terminology.md):
+
+- `Caller` is the preferred product term for `Caller`
+- `Responder` is the preferred product term for `Responder`
+- `Hotline` is the marketplace-facing label for a published service entry
 
 Recommended user-facing entrypoints:
 
@@ -24,12 +30,35 @@ npm install -g @delexec/ops
 delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 ```
 
+For a local web-first onboarding flow in the source workspace:
+
+```bash
+delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080 --open-ui
+```
+
+After bootstrap completes, reopen the local web UI with:
+
+```bash
+delexec-ops ui start --open
+```
+
+To attach a local project as a responder Hotline:
+
+```bash
+delexec-ops attach-project \
+  --project-path /absolute/path/to/project \
+  --project-name "My Local Project" \
+  --project-description "Explain what this project can do for remote callers" \
+  --hotline-id local.my-project.v1 \
+  --cmd "node worker.js"
+```
+
 ## Repository Responsibility
 
 This repository owns the end-user client runtime:
 
 - the `@delexec/ops` product package and `delexec-ops` CLI
-- buyer-side local control flow and seller-side local runtime management
+- caller-side local control flow and responder-side local runtime management, implemented by caller/responder runtimes
 - local state, secret handling, SQLite-backed client storage, and local transport adapters
 - client-side onboarding, bootstrap, diagnostics, and troubleshooting docs
 
@@ -41,7 +70,7 @@ This repository does not own protocol truth-source definitions or the operator-f
 
 ## Internal Packages
 
-This repository still contains internal implementation packages such as buyer/seller controllers, local storage, and transport adapters. They remain testable and publishable because `@delexec/ops` depends on them, but they are not the primary product surface.
+This repository still contains internal implementation packages such as caller/responder controllers, local storage, and transport adapters. They remain testable and publishable because `@delexec/ops` depends on them, but they are not the primary product surface.
 
 ## Maintainer Notes
 
@@ -54,7 +83,7 @@ See also: `docs/current/guides/source-integration-runbook.md`
 
 ## How To Develop Here
 
-- Start here when the change affects end-user CLI flows, local buyer/seller behavior, local persistence, or client-side transport wiring.
+- Start here when the change affects end-user CLI flows, local caller/responder behavior, local persistence, or client-side transport wiring.
 - Preserve the product boundary: normal users should only need `@delexec/ops`, not a bundle of internal packages.
 - Keep shared internal packages stable enough for tests and packaging, but optimize docs and examples for the `delexec-ops` path.
 

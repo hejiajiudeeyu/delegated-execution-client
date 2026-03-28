@@ -16,7 +16,7 @@ describe("createLocalTransportAdapter", () => {
 describe("local transport send", () => {
   it("assigns message_id and queued_at when not provided", async () => {
     const hub = createLocalTransportHub();
-    const adapter = createLocalTransportAdapter({ hub, receiver: "seller_1" });
+    const adapter = createLocalTransportAdapter({ hub, receiver: "responder_1" });
 
     const msg = await adapter.send({ payload: "test" });
     expect(msg.message_id).toMatch(/^msg_/);
@@ -25,7 +25,7 @@ describe("local transport send", () => {
 
   it("preserves provided message_id and queued_at", async () => {
     const hub = createLocalTransportHub();
-    const adapter = createLocalTransportAdapter({ hub, receiver: "seller_1" });
+    const adapter = createLocalTransportAdapter({ hub, receiver: "responder_1" });
 
     const msg = await adapter.send({
       message_id: "custom_id",
@@ -38,24 +38,24 @@ describe("local transport send", () => {
 
   it("routes to envelope.to when present", async () => {
     const hub = createLocalTransportHub();
-    const senderAdapter = createLocalTransportAdapter({ hub, receiver: "buyer_1" });
-    const sellerAdapter = createLocalTransportAdapter({ hub, receiver: "seller_1" });
+    const senderAdapter = createLocalTransportAdapter({ hub, receiver: "caller_1" });
+    const responderAdapter = createLocalTransportAdapter({ hub, receiver: "responder_1" });
 
-    await senderAdapter.send({ to: "seller_1", payload: "routed" });
+    await senderAdapter.send({ to: "responder_1", payload: "routed" });
 
-    const { items } = await sellerAdapter.poll();
+    const { items } = await responderAdapter.poll();
     expect(items).toHaveLength(1);
     expect(items[0].payload).toBe("routed");
   });
 
-  it("routes to envelope.seller_id when to is not present", async () => {
+  it("routes to envelope.responder_id when to is not present", async () => {
     const hub = createLocalTransportHub();
-    const senderAdapter = createLocalTransportAdapter({ hub, receiver: "buyer_1" });
-    const sellerAdapter = createLocalTransportAdapter({ hub, receiver: "seller_1" });
+    const senderAdapter = createLocalTransportAdapter({ hub, receiver: "caller_1" });
+    const responderAdapter = createLocalTransportAdapter({ hub, receiver: "responder_1" });
 
-    await senderAdapter.send({ seller_id: "seller_1", payload: "by-seller-id" });
+    await senderAdapter.send({ responder_id: "responder_1", payload: "by-responder-id" });
 
-    const { items } = await sellerAdapter.poll();
+    const { items } = await responderAdapter.poll();
     expect(items).toHaveLength(1);
   });
 
@@ -71,26 +71,26 @@ describe("local transport send", () => {
 });
 
 describe("local transport resolveReceiver via send", () => {
-  it("resolves local://relay/seller_id to seller_id", async () => {
+  it("resolves local://relay/responder_id to responder_id", async () => {
     const hub = createLocalTransportHub();
-    const senderAdapter = createLocalTransportAdapter({ hub, receiver: "buyer" });
-    const sellerAdapter = createLocalTransportAdapter({ hub, receiver: "seller_x" });
+    const senderAdapter = createLocalTransportAdapter({ hub, receiver: "caller" });
+    const responderAdapter = createLocalTransportAdapter({ hub, receiver: "responder_x" });
 
-    await senderAdapter.send({ to: "local://relay/seller_x", payload: "relay-route" });
+    await senderAdapter.send({ to: "local://relay/responder_x", payload: "relay-route" });
 
-    const { items } = await sellerAdapter.poll();
+    const { items } = await responderAdapter.poll();
     expect(items).toHaveLength(1);
     expect(items[0].payload).toBe("relay-route");
   });
 
-  it("resolves local://seller_y to seller_y", async () => {
+  it("resolves local://responder_y to responder_y", async () => {
     const hub = createLocalTransportHub();
-    const senderAdapter = createLocalTransportAdapter({ hub, receiver: "buyer" });
-    const sellerAdapter = createLocalTransportAdapter({ hub, receiver: "seller_y" });
+    const senderAdapter = createLocalTransportAdapter({ hub, receiver: "caller" });
+    const responderAdapter = createLocalTransportAdapter({ hub, receiver: "responder_y" });
 
-    await senderAdapter.send({ to: "local://seller_y", payload: "direct" });
+    await senderAdapter.send({ to: "local://responder_y", payload: "direct" });
 
-    const { items } = await sellerAdapter.poll();
+    const { items } = await responderAdapter.poll();
     expect(items).toHaveLength(1);
   });
 

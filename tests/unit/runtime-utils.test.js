@@ -37,7 +37,7 @@ describe("runtime-utils local state migration", () => {
     delete process.env.DELEXEC_HOME;
     delete process.env.CROC_OPS_HOME;
 
-    const legacyHome = path.join(fakeHome, ".remote-subagent");
+    const legacyHome = path.join(fakeHome, ".remote-hotline");
     fs.mkdirSync(path.join(legacyHome, "logs"), { recursive: true });
     fs.writeFileSync(path.join(legacyHome, "ops.config.json"), "{\"ok\":true}\n", "utf8");
     fs.writeFileSync(path.join(legacyHome, "croc.sqlite"), "legacy-sqlite", "utf8");
@@ -47,7 +47,7 @@ describe("runtime-utils local state migration", () => {
     expect(migrated).toBe(path.join(fakeHome, ".delexec"));
     expect(fs.existsSync(path.join(migrated, "ops.config.json"))).toBe(true);
     expect(fs.existsSync(path.join(migrated, "delexec.sqlite"))).toBe(true);
-    expect(fs.existsSync(path.join(fakeHome, ".remote-subagent"))).toBe(false);
+    expect(fs.existsSync(path.join(fakeHome, ".remote-hotline"))).toBe(false);
   });
 
   it("respects explicit DELEXEC_HOME while still migrating legacy sqlite filenames in place", () => {

@@ -33,10 +33,10 @@ delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 该流程会尝试：
 
 1. 初始化 `~/.delexec`
-2. 注册 buyer
-3. 安装官方示例 subagent
-4. 提交 seller 与 subagent 审核
-5. 启用本地 seller 运行时
+2. 注册 caller
+3. 安装官方示例 hotline
+4. 提交 responder 与 hotline 审核
+5. 启用本地 responder 运行时
 6. 启动本地 supervisor
 7. 执行本地示例自调用
 
@@ -76,14 +76,14 @@ delexec-ops debug-snapshot
 AI 应仅总结以下用户相关结果：
 
 - setup 是否完成
-- buyer 注册是否完成
+- caller 注册是否完成
 - review 是否已提交
-- seller 是否已启用
+- responder 是否已启用
 - 是否仍需管理员审批
 - 示例请求是否成功
 
 ## 当前限制
 
 - platform 必须已可访问
-- seller 与 subagent 仍需管理员审批
+- responder 与 hotline 仍需管理员审批
 - 邮件 transport 为可选项，不是 bootstrap 必需项

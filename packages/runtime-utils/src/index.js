@@ -7,7 +7,7 @@ const SECRET_STORE_VERSION = 1;
 const KEY_LENGTH = 32;
 const LEGACY_OPS_HOME_ENV = "CROC_OPS_HOME";
 const OPS_HOME_ENV = "DELEXEC_HOME";
-const LEGACY_OPS_HOME_BASENAME = ".remote-subagent";
+const LEGACY_OPS_HOME_BASENAME = ".remote-hotline";
 const OPS_HOME_BASENAME = ".delexec";
 const LEGACY_SQLITE_FILENAME = "croc.sqlite";
 const OPS_SQLITE_FILENAME = "delexec.sqlite";
@@ -228,8 +228,8 @@ export function getOpsSecretsFile() {
   return path.join(getOpsHomeDir(), "secrets.enc.json");
 }
 
-export function getSellerConfigFile() {
-  return path.join(getOpsHomeDir(), "seller.config.json");
+export function getResponderConfigFile() {
+  return path.join(getOpsHomeDir(), "responder.config.json");
 }
 
 export function getOpsConfigFile() {

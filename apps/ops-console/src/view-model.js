@@ -1,17 +1,17 @@
-export function renderBuyerSummaryCard({ health, root }) {
+export function renderCallerSummaryCard({ health, root }) {
   const usingLocalCredential = root?.body?.local_defaults?.platform_api_key_configured;
-  const contactEmail = root?.body?.local_defaults?.buyer_contact_email;
+  const contactEmail = root?.body?.local_defaults?.caller_contact_email;
   return `
     <article class="item-card">
       <div class="item-head">
         <div>
-          <strong>${root?.body?.service || "buyer-controller"}</strong>
+          <strong>${root?.body?.service || "caller-controller"}</strong>
           <p>${root?.body?.platform?.configured ? "Platform connected" : "Platform not configured"}</p>
         </div>
         <span class="status ${health?.body?.ok ? "healthy" : "disabled"}">${health?.body?.ok ? "healthy" : "down"}</span>
       </div>
-      <p class="meta">Mode: buyer runtime${usingLocalCredential ? " · local env credential loaded" : ""}</p>
-      ${contactEmail ? `<p class="meta">Buyer: ${contactEmail}</p>` : ""}
+      <p class="meta">Mode: caller runtime${usingLocalCredential ? " · local env credential loaded" : ""}</p>
+      ${contactEmail ? `<p class="meta">Caller: ${contactEmail}</p>` : ""}
     </article>
   `;
 }
@@ -39,13 +39,13 @@ export function renderRequestSummaryMarkup(summary) {
 
 export function renderSetupWizardMarkup(status) {
   const config = status?.config || {};
-  const seller = config.seller || {};
-  const buyer = config.buyer || {};
-  const buyerRegistered = buyer.api_key_configured === true;
-  const subagents = seller.subagents || [];
-  const exampleConfigured = subagents.some((item) => item.subagent_id === "local.summary.v1");
-  const submittedCount = subagents.filter((item) => item.submitted_for_review === true).length;
-  const pendingReviewCount = subagents.filter((item) => item.submitted_for_review !== true).length;
+  const responder = config.responder || {};
+  const caller = config.caller || {};
+  const callerRegistered = caller.api_key_configured === true;
+  const hotlines = responder.hotlines || [];
+  const exampleConfigured = hotlines.some((item) => item.hotline_id === "local.summary.v1");
+  const submittedCount = hotlines.filter((item) => item.submitted_for_review === true).length;
+  const pendingReviewCount = hotlines.filter((item) => item.submitted_for_review !== true).length;
   const steps = [
     {
       title: "Setup Local Client",
@@ -55,47 +55,47 @@ export function renderSetupWizardMarkup(status) {
       actionLabel: "Run Setup"
     },
     {
-      title: "Register Buyer",
-      done: buyerRegistered,
-      detail: buyer.contact_email ? `Buyer: ${buyer.contact_email}` : "Create a buyer API key for local use.",
-      action: "register-buyer",
-      actionLabel: "Register Buyer"
+      title: "Register Caller",
+      done: callerRegistered,
+      detail: caller.contact_email ? `Caller: ${caller.contact_email}` : "Create a caller API key for local use.",
+      action: "register-caller",
+      actionLabel: "Register Caller"
     },
     {
       title: "Add Local Example",
       done: exampleConfigured,
       detail: exampleConfigured
-        ? "Official local.summary.v1 demo subagent is configured."
-        : "Install the official example subagent to learn the local seller shape.",
-      action: "add-example-subagent",
+        ? "Official local.summary.v1 demo hotline is configured."
+        : "Install the official example hotline to learn the local responder shape.",
+      action: "add-example-hotline",
       actionLabel: "Add Example"
     },
     {
       title: "Submit Review",
       done: submittedCount > 0,
       detail: submittedCount > 0
-        ? "At least one local subagent has been submitted for review."
-        : "Submit local subagents to the platform review queue.",
+        ? "At least one local hotline has been submitted for review."
+        : "Submit local hotlines to the platform review queue.",
       action: "submit-review",
       actionLabel: "Submit Review",
-      blockedReason: !buyerRegistered
-        ? "Register buyer before submitting review."
-        : subagents.length === 0
-          ? "Add at least one local subagent before review."
+      blockedReason: !callerRegistered
+        ? "Register caller before submitting review."
+        : hotlines.length === 0
+          ? "Add at least one local hotline before review."
           : pendingReviewCount === 0
-            ? "No pending local subagents to submit."
+            ? "No pending local hotlines to submit."
             : null
     },
     {
-      title: "Enable Seller",
-      done: seller.enabled === true,
-      detail: seller.enabled === true ? "Seller runtime enabled locally." : "Enable the local seller runtime after review submission.",
-      action: "enable-seller",
-      actionLabel: "Enable Seller",
-      blockedReason: !buyerRegistered
-        ? "Register buyer before enabling seller."
-        : subagents.length === 0
-          ? "Add a local subagent before enabling seller."
+      title: "Enable Responder",
+      done: responder.enabled === true,
+      detail: responder.enabled === true ? "Responder runtime enabled locally." : "Enable the local responder runtime after review submission.",
+      action: "enable-responder",
+      actionLabel: "Enable Responder",
+      blockedReason: !callerRegistered
+        ? "Register caller before enabling responder."
+        : hotlines.length === 0
+          ? "Add a local hotline before enabling responder."
           : null
     }
   ];
@@ -127,9 +127,9 @@ export function renderSetupWizardMarkup(status) {
       <div class="item-head">
         <div>
           <strong>Onboarding Summary</strong>
-          <p>buyer ${buyerRegistered ? "registered" : "pending"} · seller ${seller.enabled ? "enabled" : "disabled"}</p>
+          <p>caller ${callerRegistered ? "registered" : "pending"} · responder ${responder.enabled ? "enabled" : "disabled"}</p>
         </div>
-        <span class="status ${buyerRegistered ? "healthy" : "disabled"}">${subagents.length} subagents</span>
+        <span class="status ${callerRegistered ? "healthy" : "disabled"}">${hotlines.length} hotlines</span>
       </div>
       <p class="meta">Submitted: ${submittedCount} · Pending review: ${pendingReviewCount}</p>
     </article>
@@ -144,24 +144,83 @@ export function renderCatalogItemsMarkup(items) {
   return items
     .map(
       (item) => `
-        <article class="item-card" data-subagent-detail-id="${item.subagent_id}">
+        <article class="item-card" data-hotline-detail-id="${item.hotline_id}">
           <div class="item-head">
             <div>
-              <strong>${item.display_name || item.subagent_id}</strong>
-              <p>${item.subagent_id}</p>
+              <strong>${item.display_name || item.hotline_id}</strong>
+              <p>${item.hotline_id}</p>
             </div>
             <span class="status ${item.availability_status || "healthy"}">${item.availability_status || "healthy"}</span>
           </div>
-          <p class="meta">${item.seller_id} · ${(item.capabilities || []).join(", ") || "no capabilities"}</p>
+          <p class="meta">${item.responder_id} · ${(item.capabilities || []).join(", ") || "no capabilities"}</p>
           <p class="meta">${
-            item.subagent_id === "local.summary.v1" || (item.tags || []).includes("demo")
-              ? "local demo seller"
-              : "catalog / remote seller"
+            item.hotline_id === "local.summary.v1" || (item.tags || []).includes("demo")
+              ? "local demo responder"
+              : "catalog / remote responder"
           }</p>
         </article>
       `
     )
     .join("");
+}
+
+function candidateKey(item) {
+  return `${item?.responder_id || ""}:${item?.hotline_id || ""}`;
+}
+
+export function renderCallConfirmationMarkup(preparedCall, selectedCandidateKey = null) {
+  if (!preparedCall?.selected_hotline) {
+    return `<div class="empty">Prepare a call to inspect the selected hotline, candidates, and task-type preference.</div>`;
+  }
+
+  const selected =
+    preparedCall.candidate_hotlines?.find((item) => candidateKey(item) === selectedCandidateKey) ||
+    preparedCall.selected_hotline;
+  const candidates = Array.isArray(preparedCall.candidate_hotlines) ? preparedCall.candidate_hotlines : [];
+
+  const candidateMarkup = candidates
+    .map(
+      (item) => `
+        <article class="item-card candidate-card ${candidateKey(item) === candidateKey(selected) ? "selected" : ""}">
+          <div class="item-head">
+            <div>
+              <strong>${item.display_name || item.hotline_id}</strong>
+              <p>${item.responder_display_name || item.responder_id}</p>
+            </div>
+            <span class="status ${item.availability_status || "healthy"}">${item.availability_status || "healthy"}</span>
+          </div>
+          <p class="meta">${(item.capabilities || []).join(", ") || "no capabilities"}</p>
+          <p class="meta">${item.difference_note || "candidate route"}</p>
+          <div class="actions">
+            <button
+              class="${candidateKey(item) === candidateKey(selected) ? "ghost" : ""}"
+              data-candidate-hotline-id="${item.hotline_id}"
+              data-candidate-responder-id="${item.responder_id}"
+            >${candidateKey(item) === candidateKey(selected) ? "Selected" : "Choose this hotline"}</button>
+          </div>
+        </article>
+      `
+    )
+    .join("");
+
+  return `
+    <article class="item-card confirmation-selected">
+      <div class="item-head">
+        <div>
+          <strong>${selected.display_name || selected.hotline_id}</strong>
+          <p>${selected.responder_display_name || selected.responder_id}</p>
+        </div>
+        <span class="status ${selected.availability_status || "healthy"}">${selected.availability_status || "healthy"}</span>
+      </div>
+      <p class="meta">Why this match: ${preparedCall.selection_reason || (selected.match_reasons || []).join(" · ") || "selected candidate"}</p>
+      <p class="meta">Task type: ${preparedCall.task_type || "n/a"}${preparedCall.remembered_preference ? " · remembered preference available" : ""}</p>
+      <p class="meta">Capabilities: ${(selected.capabilities || []).join(", ") || "n/a"}</p>
+      <p class="meta">Template: ${selected.template_summary?.template_ref || "n/a"} · output ${
+        (selected.template_summary?.output_properties || []).join(", ") || "n/a"
+      }</p>
+    </article>
+    <div class="confirmation-grid">${candidateMarkup || `<div class="empty">No alternative hotlines available.</div>`}</div>
+  `;
 }
 
 export function renderRequestsMarkup(items) {
@@ -175,7 +234,7 @@ export function renderRequestsMarkup(items) {
           <div class="item-head">
             <div>
               <strong>${item.request_id}</strong>
-              <p>${item.seller_id || "unbound seller"} · ${item.subagent_id || "unbound subagent"}</p>
+              <p>${item.responder_id || "unbound responder"} · ${item.hotline_id || "unbound hotline"}</p>
             </div>
             <span class="status ${String(item.status || "").toLowerCase()}">${item.status}</span>
           </div>
@@ -211,7 +270,7 @@ export function renderRequestDetailMarkup({ request, result }) {
   const resultPayload = result?.result_package || request.result_package || null;
   const topSummary =
     result?.available === false
-      ? "Waiting for seller result."
+      ? "Waiting for responder result."
       : resultPayload?.error?.message || resultPayload?.output?.summary || "No result payload yet.";
 
   return `
@@ -219,7 +278,7 @@ export function renderRequestDetailMarkup({ request, result }) {
       <div class="item-head">
         <div>
           <strong>${request.request_id}</strong>
-          <p>${request.seller_id || "unbound seller"} · ${request.subagent_id || "unbound subagent"}</p>
+          <p>${request.responder_id || "unbound responder"} · ${request.hotline_id || "unbound hotline"}</p>
         </div>
         <span class="status ${String(request.status || "unknown").toLowerCase()}">${request.status || "UNKNOWN"}</span>
       </div>
@@ -294,9 +353,9 @@ export function renderTransportConfigMarkup(transport, lastTest = null) {
   `;
 }
 
-export function renderSellerSubagentsMarkup(items) {
+export function renderResponderHotlinesMarkup(items) {
   if (!Array.isArray(items) || items.length === 0) {
-    return `<div class="empty">No local subagents configured yet.</div>`;
+    return `<div class="empty">No local hotlines configured yet.</div>`;
   }
   return items
     .map(
@@ -304,22 +363,24 @@ export function renderSellerSubagentsMarkup(items) {
         <article class="item-card">
           <div class="item-head">
             <div>
-              <strong>${item.display_name || item.subagent_id}</strong>
-              <p>${item.subagent_id}</p>
+              <strong>${item.display_name || item.hotline_id}</strong>
+              <p>${item.hotline_id}</p>
             </div>
             <span class="status ${item.enabled === false ? "disabled" : "healthy"}">${item.enabled === false ? "disabled" : "enabled"}</span>
           </div>
           <p class="meta">${item.adapter_type || "process"} · ${(item.capabilities || []).join(", ") || "no capabilities"}</p>
           <p class="meta">Review: ${item.review_status || "local_only"} · ${item.submitted_for_review ? "submitted" : "local only"}</p>
-          <p class="meta">${item.subagent_id === "local.summary.v1" ? "official local demo seller" : "custom local seller"}</p>
+          ${item.metadata?.project?.path ? `<p class="meta">Project: ${item.metadata.project.path}</p>` : ""}
+          ${item.metadata?.project?.description ? `<p class="meta">Project Summary: ${item.metadata.project.description}</p>` : ""}
+          <p class="meta">${item.hotline_id === "local.summary.v1" ? "official local demo responder" : "custom local responder"}</p>
           <div class="actions">
-            <button data-subagent-action="edit" data-subagent-id="${item.subagent_id}">Edit</button>
+            <button data-hotline-action="edit" data-hotline-id="${item.hotline_id}">Edit</button>
             ${
               item.enabled === false
-                ? `<button data-subagent-action="enable" data-subagent-id="${item.subagent_id}">Enable</button>`
-                : `<button data-subagent-action="disable" data-subagent-id="${item.subagent_id}" class="ghost">Disable</button>`
+                ? `<button data-hotline-action="enable" data-hotline-id="${item.hotline_id}">Enable</button>`
+                : `<button data-hotline-action="disable" data-hotline-id="${item.hotline_id}" class="ghost">Disable</button>`
             }
-            <button data-subagent-action="remove" data-subagent-id="${item.subagent_id}" class="ghost">Remove</button>
+            <button data-hotline-action="remove" data-hotline-id="${item.hotline_id}" class="ghost">Remove</button>
           </div>
         </article>
       `
@@ -332,7 +393,7 @@ export function renderRuntimeCardsMarkup(runtime) {
     return `<div class="empty">No runtime status available yet.</div>`;
   }
 
-  const services = ["relay", "buyer", "seller"];
+  const services = ["relay", "caller", "responder"];
   return services
     .map((name) => {
       const item = runtime[name] || {};

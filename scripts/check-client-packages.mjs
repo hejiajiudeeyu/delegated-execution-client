@@ -9,12 +9,12 @@ const ROOT_DIR = process.cwd();
 
 const LIBRARY_PACKAGES = [
   {
-    workspace: "@delexec/buyer-controller-core",
-    assertExpression: '(mod) => typeof mod.createBuyerState === "function"'
+    workspace: "@delexec/caller-controller-core",
+    assertExpression: '(mod) => typeof mod.createCallerState === "function"'
   },
   {
-    workspace: "@delexec/seller-runtime-core",
-    assertExpression: '(mod) => typeof mod.createSellerState === "function"'
+    workspace: "@delexec/responder-runtime-core",
+    assertExpression: '(mod) => typeof mod.createResponderState === "function"'
   },
   {
     workspace: "@delexec/runtime-utils",
@@ -48,12 +48,12 @@ const LIBRARY_PACKAGES = [
 
 const SERVICE_PACKAGES = [
   {
-    workspace: "@delexec/buyer-controller",
-    bin: "delexec-buyer-controller"
+    workspace: "@delexec/caller-controller",
+    bin: "delexec-caller-controller"
   },
   {
-    workspace: "@delexec/seller-controller",
-    bin: "delexec-seller-controller"
+    workspace: "@delexec/responder-controller",
+    bin: "delexec-responder-controller"
   }
 ];
 

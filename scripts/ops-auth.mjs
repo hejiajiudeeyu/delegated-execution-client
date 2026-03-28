@@ -48,7 +48,7 @@ async function requestJson(baseUrl, pathname, { method = "GET", body } = {}) {
   };
 }
 
-async function registerBuyer({ email, platformUrl, envFile }) {
+async function registerCaller({ email, platformUrl, envFile }) {
   const response = await requestJson(platformUrl, "/v1/users/register", {
     method: "POST",
     body: {
@@ -57,14 +57,14 @@ async function registerBuyer({ email, platformUrl, envFile }) {
   });
 
   if (response.status !== 201 || !response.body?.api_key) {
-    throw new Error(`buyer_registration_failed:${response.status}:${response.body?.error?.code || response.body?.error || "unknown_error"}`);
+    throw new Error(`caller_registration_failed:${response.status}:${response.body?.error?.code || response.body?.error || "unknown_error"}`);
   }
 
   const written = updateEnvFile(envFile, {
     PLATFORM_API_BASE_URL: platformUrl,
-    BUYER_PLATFORM_API_KEY: response.body.api_key,
+    CALLER_PLATFORM_API_KEY: response.body.api_key,
     PLATFORM_API_KEY: response.body.api_key,
-    BUYER_CONTACT_EMAIL: response.body.contact_email || email
+    CALLER_CONTACT_EMAIL: response.body.contact_email || email
   });
 
   console.log(
@@ -75,7 +75,7 @@ async function registerBuyer({ email, platformUrl, envFile }) {
         contact_email: response.body.contact_email || email,
         env_file: envFile,
         persisted_keys: Object.keys(written).filter((key) =>
-          ["PLATFORM_API_BASE_URL", "BUYER_PLATFORM_API_KEY", "PLATFORM_API_KEY", "BUYER_CONTACT_EMAIL"].includes(key)
+          ["PLATFORM_API_BASE_URL", "CALLER_PLATFORM_API_KEY", "PLATFORM_API_KEY", "CALLER_CONTACT_EMAIL"].includes(key)
         )
       },
       null,
@@ -105,7 +105,7 @@ async function main() {
 
   const platformUrl = String(args.platform || "http://127.0.0.1:8080").trim();
   const envFile = path.resolve(args.output || args["env-file"] || getOpsEnvFile());
-  await registerBuyer({ email, platformUrl, envFile });
+  await registerCaller({ email, platformUrl, envFile });
 }
 
 main().catch((error) => {

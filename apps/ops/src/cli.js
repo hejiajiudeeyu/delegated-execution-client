@@ -6,37 +6,55 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { createOpsSupervisorServer } from "./supervisor.js";
-import { ensureOpsState, ensureSellerIdentity, removeSubagent, saveOpsState, setSubagentEnabled, upsertSubagent } from "./config.js";
-import { buildExampleSubagentDefinition, LOCAL_EXAMPLE_SUBAGENT_ID } from "./example-subagent.js";
+import { ensureOpsState, ensureResponderIdentity, removeHotline, saveOpsState, setHotlineEnabled, upsertHotline } from "./config.js";
+import { buildExampleHotlineDefinition, LOCAL_EXAMPLE_HOTLINE_ID } from "./example-hotline.js";
 
 const execFileAsync = promisify(execFile);
 const CLI_PATH = fileURLToPath(import.meta.url);
+const CLIENT_ROOT = path.resolve(path.dirname(CLI_PATH), "../../..");
+const OPS_CONSOLE_DIR = path.join(CLIENT_ROOT, "apps/ops-console");
+const DEFAULT_CONSOLE_HOST = "127.0.0.1";
+const DEFAULT_CONSOLE_PORT = 4173;
 
 function usage() {
   console.log(`Usage:
   delexec-ops setup
   delexec-ops start
   delexec-ops status
-  delexec-ops bootstrap [--email <email>] [--platform <url>] [--text <text>]
+  delexec-ops bootstrap [--email <email>] [--platform <url>] [--text <text>] [--open-ui] [--ui-port <port>] [--ui-host <host>] [--no-browser]
+  delexec-ops ui start [--host <host>] [--port <port>] [--open] [--no-browser]
   delexec-ops auth register --email <email> [--platform <url>]
-  delexec-ops enable-seller [--seller-id <id>] [--display-name <name>]
-  delexec-ops add-subagent --type <process|http> --subagent-id <id> [options]
-  delexec-ops add-example-subagent
-  delexec-ops remove-subagent --subagent-id <id>
-  delexec-ops enable-subagent --subagent-id <id>
-  delexec-ops disable-subagent --subagent-id <id>
+  delexec-ops enable-responder [--responder-id <id>] [--display-name <name>]
+  delexec-ops add-hotline --type <process|http> --hotline-id <id> [options]
+  delexec-ops attach-project --project-path <path> [--project-name <name>] [--project-description <text>] [--hotline-id <id>] [--cmd <command> | --url <url>] [--task-type <type>] [--capability <capability>]
+  delexec-ops add-example-hotline
+  delexec-ops remove-hotline --hotline-id <id>
+  delexec-ops enable-hotline --hotline-id <id>
+  delexec-ops disable-hotline --hotline-id <id>
   delexec-ops submit-review
   delexec-ops run-example [--text <text>]
   delexec-ops doctor
   delexec-ops debug-snapshot
 
+Product terms:
+  Caller = Caller
+  Responder = Responder
+  Hotline = catalog-facing service entry backed by a responder/hotline pair
+  Platform Control = web UI for operator review and oversight
+
 Compatibility:
-  delexec-ops seller init
-  delexec-ops seller register
-  delexec-ops seller add-subagent ...
-  delexec-ops seller start
-  delexec-ops seller status
-  delexec-ops seller doctor`);
+  delexec-ops responder init
+  delexec-ops responder register
+  delexec-ops responder add-hotline ...
+  delexec-ops responder start
+  delexec-ops responder status
+  delexec-ops responder doctor
+  delexec-ops responder init
+  delexec-ops responder register
+  delexec-ops responder add-hotline ...
+  delexec-ops responder start
+  delexec-ops responder status
+  delexec-ops responder doctor`);
 }
 
 function parseArgs(argv) {
@@ -79,6 +97,15 @@ function getValues(value) {
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
+function sanitizeIdSegment(value) {
+  return (
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ".")
+      .replace(/^\.+|\.+$/g, "") || "project"
+  );
+}
+
 async function requestJson(baseUrl, pathname, { method = "GET", headers = {}, body } = {}) {
   const response = await fetch(new URL(pathname, baseUrl), {
     method,
@@ -111,23 +138,170 @@ async function waitFor(check, { timeoutMs = 15000, intervalMs = 250 } = {}) {
   throw new Error("timeout");
 }
 
-function buildSellerRegisterHeaders(state) {
-  const apiKey = state.config.buyer.api_key || state.env.SELLER_PLATFORM_API_KEY || state.env.PLATFORM_API_KEY;
+function parsePort(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.trunc(parsed);
+}
+
+function resolveUiConfig(args = {}) {
+  return {
+    host: String(args["ui-host"] || args.host || process.env.DELEXEC_OPS_UI_HOST || DEFAULT_CONSOLE_HOST).trim() || DEFAULT_CONSOLE_HOST,
+    port: parsePort(args["ui-port"] || args.port || process.env.DELEXEC_OPS_UI_PORT, DEFAULT_CONSOLE_PORT),
+    openBrowser: args["no-browser"] ? false : args["open-ui"] === true || args.open === true
+  };
+}
+
+function uiUrl({ host, port }) {
+  return `http://${host}:${port}`;
+}
+
+function corepackExecutable() {
+  return process.platform === "win32" ? "corepack.cmd" : "corepack";
+}
+
+function canLaunchOpsConsoleWorkspace() {
+  return fs.existsSync(path.join(OPS_CONSOLE_DIR, "package.json"));
+}
+
+function buildUiLaunchCommand({ host, port }) {
+  const bin = process.env.DELEXEC_OPS_UI_BIN;
+  const customArgs = process.env.DELEXEC_OPS_UI_ARGS ? JSON.parse(process.env.DELEXEC_OPS_UI_ARGS) : null;
+  if (bin) {
+    return {
+      command: bin,
+      args: Array.isArray(customArgs) ? customArgs : [],
+      cwd: CLIENT_ROOT,
+      launch_mode: "configured_command"
+    };
+  }
+  if (!canLaunchOpsConsoleWorkspace()) {
+    throw new Error("ops_console_workspace_required");
+  }
+  return {
+    command: corepackExecutable(),
+    args: [
+      "pnpm",
+      "--dir",
+      CLIENT_ROOT,
+      "--filter",
+      "@delexec/ops-console",
+      "run",
+      "dev",
+      "--",
+      "--host",
+      host,
+      "--port",
+      String(port),
+      "--strictPort"
+    ],
+    cwd: CLIENT_ROOT,
+    launch_mode: "workspace_vite"
+  };
+}
+
+async function waitForUi(url) {
+  return waitFor(async () => {
+    const response = await fetch(url, { method: "GET" });
+    if (!response.ok) {
+      throw new Error("ui_not_ready");
+    }
+    return true;
+  }, { timeoutMs: 15000, intervalMs: 300 });
+}
+
+function openBrowser(url) {
+  const configuredBin = process.env.DELEXEC_OPS_BROWSER_BIN;
+  const configuredArgs = process.env.DELEXEC_OPS_BROWSER_ARGS ? JSON.parse(process.env.DELEXEC_OPS_BROWSER_ARGS) : null;
+  if (configuredBin) {
+    const child = spawn(configuredBin, [...(Array.isArray(configuredArgs) ? configuredArgs : []), url], {
+      detached: true,
+      stdio: "ignore"
+    });
+    child.unref();
+    return { opened: true, command: configuredBin };
+  }
+
+  const browserCommand =
+    process.platform === "darwin"
+      ? { command: "open", args: [url] }
+      : process.platform === "win32"
+        ? { command: "cmd", args: ["/c", "start", "", url] }
+        : { command: "xdg-open", args: [url] };
+
+  const child = spawn(browserCommand.command, browserCommand.args, {
+    detached: true,
+    stdio: "ignore"
+  });
+  child.unref();
+  return { opened: true, command: browserCommand.command };
+}
+
+async function ensureUiAvailable(args = {}, env = process.env) {
+  const ui = resolveUiConfig(args);
+  const consoleUrl = uiUrl(ui);
+  let alreadyRunning = false;
+  try {
+    await waitForUi(consoleUrl);
+    alreadyRunning = true;
+  } catch {}
+
+  let pid = null;
+  let launchMode = "existing";
+  if (!alreadyRunning) {
+    const launch = buildUiLaunchCommand(ui);
+    const child = spawn(launch.command, launch.args, {
+      cwd: launch.cwd,
+      env: {
+        ...env,
+        DELEXEC_OPS_UI_HOST: ui.host,
+        DELEXEC_OPS_UI_PORT: String(ui.port)
+      },
+      detached: true,
+      stdio: "ignore"
+    });
+    child.unref();
+    pid = child.pid || null;
+    launchMode = launch.launch_mode;
+    await waitForUi(consoleUrl);
+  }
+
+  let browser = { opened: false };
+  if (ui.openBrowser) {
+    browser = openBrowser(consoleUrl);
+  }
+
+  return {
+    ok: true,
+    url: consoleUrl,
+    host: ui.host,
+    port: ui.port,
+    started: !alreadyRunning,
+    pid,
+    launch_mode: launchMode,
+    browser
+  };
+}
+
+function buildResponderRegisterHeaders(state) {
+  const apiKey = state.config.caller.api_key || state.env.RESPONDER_PLATFORM_API_KEY || state.env.PLATFORM_API_KEY;
   if (!apiKey) {
-    throw new Error("buyer_platform_api_key_required");
+    throw new Error("caller_platform_api_key_required");
   }
   return { Authorization: `Bearer ${apiKey}` };
 }
 
-function parseSubagentDefinition(args) {
+function parseHotlineDefinition(args) {
   const type = String(args.type || "process");
-  const subagentId = String(args["subagent-id"] || "").trim();
-  if (!subagentId) {
-    throw new Error("subagent_id_required");
+  const hotlineId = String(args["hotline-id"] || "").trim();
+  if (!hotlineId) {
+    throw new Error("hotline_id_required");
   }
   const definition = {
-    subagent_id: subagentId,
-    display_name: String(args["display-name"] || subagentId),
+    hotline_id: hotlineId,
+    display_name: String(args["display-name"] || hotlineId),
     enabled: true,
     task_types: getValues(args["task-type"]),
     capabilities: getValues(args.capability),
@@ -163,6 +337,72 @@ function parseSubagentDefinition(args) {
   return definition;
 }
 
+function buildProjectHotlineDefinition(args) {
+  const rawProjectPath = String(args["project-path"] || "").trim();
+  if (!rawProjectPath) {
+    throw new Error("project_path_required");
+  }
+  const projectPath = path.resolve(rawProjectPath);
+  if (!fs.existsSync(projectPath)) {
+    throw new Error("project_path_not_found");
+  }
+
+  const projectName = String(args["project-name"] || path.basename(projectPath) || "Local Project").trim();
+  const projectDescription = String(args["project-description"] || args.description || "").trim();
+  const adapterType = String(args.type || (args.url ? "http" : "process")).trim();
+  const hotlineId = String(args["hotline-id"] || `local.${sanitizeIdSegment(projectName)}.v1`).trim();
+  const tags = Array.from(new Set(["local", "project", ...getValues(args.tag)]));
+  const taskTypes = getValues(args["task-type"]);
+  const capabilities = getValues(args.capability);
+
+  const definition = {
+    hotline_id: hotlineId,
+    display_name: String(args["display-name"] || projectName).trim(),
+    enabled: true,
+    task_types: taskTypes.length > 0 ? taskTypes : ["project_task"],
+    capabilities: capabilities.length > 0 ? capabilities : [`project.${sanitizeIdSegment(projectName)}`],
+    tags,
+    adapter_type: adapterType,
+    timeouts: {
+      soft_timeout_s: Number(args["soft-timeout-s"] || 60),
+      hard_timeout_s: Number(args["hard-timeout-s"] || 180)
+    },
+    review_status: "local_only",
+    submitted_for_review: false,
+    metadata: {
+      project: {
+        path: projectPath,
+        name: projectName,
+        description: projectDescription || null,
+        mount_kind: "local_project"
+      }
+    }
+  };
+
+  if (adapterType === "http") {
+    const url = String(args.url || "").trim();
+    if (!url) {
+      throw new Error("http_adapter_url_required");
+    }
+    definition.adapter = {
+      url,
+      method: String(args.method || "POST").toUpperCase()
+    };
+    return definition;
+  }
+
+  const cmd = String(args.cmd || "").trim();
+  if (!cmd) {
+    throw new Error("process_adapter_cmd_required");
+  }
+  definition.adapter = {
+    cmd,
+    cwd: args.cwd ? String(args.cwd) : projectPath,
+    env: {}
+  };
+  return definition;
+}
+
 function supervisorUrlFromState(state) {
   return `http://127.0.0.1:${state.config.runtime.ports.supervisor}`;
 }
@@ -192,36 +432,36 @@ async function ensureSupervisorAvailable(baseUrl, env) {
   return { started: true };
 }
 
-async function maybeApproveExample({ platformUrl, adminApiKey, sellerId }) {
+async function maybeApproveExample({ platformUrl, adminApiKey, responderId }) {
   if (!adminApiKey) {
     return { ok: false, reason: "admin_api_key_missing" };
   }
   const headers = { Authorization: `Bearer ${adminApiKey}` };
-  const seller = await requestJson(platformUrl, `/v1/admin/sellers/${encodeURIComponent(sellerId)}/approve`, {
+  const responder = await requestJson(platformUrl, `/v2/admin/responders/${encodeURIComponent(responderId)}/approve`, {
     method: "POST",
     headers,
     body: { reason: "ops bootstrap local demo approval" }
   });
-  const subagent = await requestJson(platformUrl, `/v1/admin/subagents/${encodeURIComponent(LOCAL_EXAMPLE_SUBAGENT_ID)}/approve`, {
+  const hotline = await requestJson(platformUrl, `/v2/admin/hotlines/${encodeURIComponent(LOCAL_EXAMPLE_HOTLINE_ID)}/approve`, {
     method: "POST",
     headers,
     body: { reason: "ops bootstrap local demo approval" }
   });
   return {
-    ok: seller.status === 200 && subagent.status === 200,
-    seller,
-    subagent
+    ok: responder.status === 200 && hotline.status === 200,
+    responder,
+    hotline
   };
 }
 
-async function waitForCatalogVisibility(supervisorUrl, sellerId, options) {
+async function waitForCatalogVisibility(supervisorUrl, responderId, options) {
   return waitFor(async () => {
     const catalog = await requestJson(
       supervisorUrl,
-      `/catalog/subagents?subagent_id=${encodeURIComponent(LOCAL_EXAMPLE_SUBAGENT_ID)}&seller_id=${encodeURIComponent(sellerId)}`
+      `/catalog/hotlines?hotline_id=${encodeURIComponent(LOCAL_EXAMPLE_HOTLINE_ID)}&responder_id=${encodeURIComponent(responderId)}`
     );
     const item = catalog.body?.items?.find(
-      (entry) => entry.subagent_id === LOCAL_EXAMPLE_SUBAGENT_ID && entry.seller_id === sellerId
+      (entry) => entry.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID && entry.responder_id === responderId
     );
     if (!item) {
       throw new Error("catalog_not_ready");
@@ -232,8 +472,8 @@ async function waitForCatalogVisibility(supervisorUrl, sellerId, options) {
 
 async function commandSetup(args = {}) {
   const state = ensureOpsState();
-  ensureSellerIdentity(state, {
-    sellerId: args["seller-id"] ? String(args["seller-id"]) : null,
+  ensureResponderIdentity(state, {
+    responderId: args["responder-id"] ? String(args["responder-id"]) : null,
     displayName: args["display-name"] ? String(args["display-name"]) : null
   });
   state.env = saveOpsState(state);
@@ -248,7 +488,7 @@ async function commandSetup(args = {}) {
 
 async function commandStart() {
   const state = ensureOpsState();
-  ensureSellerIdentity(state);
+  ensureResponderIdentity(state);
   state.env = saveOpsState(state);
   const server = createOpsSupervisorServer();
   await new Promise((resolve) => server.listen(state.config.runtime.ports.supervisor, "127.0.0.1", resolve));
@@ -283,7 +523,7 @@ async function commandAuthRegister(args) {
   if (!email) {
     throw new Error("email_required");
   }
-  const response = await requestJson(supervisorUrlFromState(state), "/auth/register-buyer", {
+  const response = await requestJson(supervisorUrlFromState(state), "/auth/register-caller", {
     method: "POST",
     body: { contact_email: email }
   }).catch(async () => {
@@ -294,8 +534,8 @@ async function commandAuthRegister(args) {
       body: { contact_email: email }
     });
     if (direct.status === 201) {
-      local.config.buyer.api_key = direct.body.api_key;
-      local.config.buyer.contact_email = direct.body.contact_email || email;
+      local.config.caller.api_key = direct.body.api_key;
+      local.config.caller.contact_email = direct.body.contact_email || email;
       local.env = saveOpsState(local);
     }
     return direct;
@@ -306,58 +546,77 @@ async function commandAuthRegister(args) {
   });
 }
 
-async function commandEnableSeller(args) {
+async function commandEnableResponder(args) {
   const state = ensureOpsState();
-  state.config.seller.enabled = true;
-  ensureSellerIdentity(state, {
-    sellerId: args["seller-id"] ? String(args["seller-id"]) : null,
+  state.config.responder.enabled = true;
+  ensureResponderIdentity(state, {
+    responderId: args["responder-id"] ? String(args["responder-id"]) : null,
     displayName: args["display-name"] ? String(args["display-name"]) : null
   });
   state.env = saveOpsState(state);
   try {
-    const response = await requestJson(supervisorUrlFromState(state), "/seller/enable", {
+    const response = await requestJson(supervisorUrlFromState(state), "/responder/enable", {
       method: "POST",
       body: {
-        seller_id: state.config.seller.seller_id,
-        display_name: state.config.seller.display_name
+        responder_id: state.config.responder.responder_id,
+        display_name: state.config.responder.display_name
       }
     });
     emit(response.body);
   } catch {
     emit({
       ok: true,
-      seller: state.config.seller,
+      responder: state.config.responder,
       submitted: 0,
       review: null
     });
   }
 }
 
-async function commandAddSubagent(args) {
+async function commandAddHotline(args) {
   const state = ensureOpsState();
-  const definition = parseSubagentDefinition(args);
-  upsertSubagent(state, definition);
+  const definition = parseHotlineDefinition(args);
+  upsertHotline(state, definition);
   state.env = saveOpsState(state);
   try {
-    await requestJson(supervisorUrlFromState(state), "/seller/subagents", {
+    await requestJson(supervisorUrlFromState(state), "/responder/hotlines", {
       method: "POST",
       body: definition
     });
   } catch {}
   emit({
     ok: true,
-    subagent_id: definition.subagent_id,
+    hotline_id: definition.hotline_id,
     adapter_type: definition.adapter_type
   });
 }
 
-async function commandAddExampleSubagent() {
+async function commandAttachProject(args) {
   const state = ensureOpsState();
-  const definition = buildExampleSubagentDefinition();
-  upsertSubagent(state, definition);
+  const definition = buildProjectHotlineDefinition(args);
+  upsertHotline(state, definition);
   state.env = saveOpsState(state);
   try {
-    const response = await requestJson(supervisorUrlFromState(state), "/seller/subagents/example", {
+    await requestJson(supervisorUrlFromState(state), "/responder/hotlines", {
+      method: "POST",
+      body: definition
+    });
+  } catch {}
+  emit({
+    ok: true,
+    hotline_id: definition.hotline_id,
+    adapter_type: definition.adapter_type,
+    project: definition.metadata.project
+  });
+}
+
+async function commandAddExampleHotline() {
+  const state = ensureOpsState();
+  const definition = buildExampleHotlineDefinition();
+  upsertHotline(state, definition);
+  state.env = saveOpsState(state);
+  try {
+    const response = await requestJson(supervisorUrlFromState(state), "/responder/hotlines/example", {
       method: "POST",
       body: {}
     });
@@ -367,26 +626,26 @@ async function commandAddExampleSubagent() {
   emit({
     ok: true,
     example: true,
-    subagent_id: definition.subagent_id,
+    hotline_id: definition.hotline_id,
     adapter_type: definition.adapter_type
   });
 }
 
-async function commandSetSubagentEnabled(args, enabled) {
+async function commandSetHotlineEnabled(args, enabled) {
   const state = ensureOpsState();
-  const subagentId = String(args["subagent-id"] || "").trim();
-  if (!subagentId) {
-    throw new Error("subagent_id_required");
+  const hotlineId = String(args["hotline-id"] || "").trim();
+  if (!hotlineId) {
+    throw new Error("hotline_id_required");
   }
-  const item = setSubagentEnabled(state, subagentId, enabled);
+  const item = setHotlineEnabled(state, hotlineId, enabled);
   if (!item) {
-    throw new Error("subagent_not_found");
+    throw new Error("hotline_not_found");
   }
   state.env = saveOpsState(state);
   try {
     const response = await requestJson(
       supervisorUrlFromState(state),
-      `/seller/subagents/${encodeURIComponent(subagentId)}/${enabled ? "enable" : "disable"}`,
+      `/responder/hotlines/${encodeURIComponent(hotlineId)}/${enabled ? "enable" : "disable"}`,
       {
         method: "POST",
         body: {}
@@ -397,24 +656,24 @@ async function commandSetSubagentEnabled(args, enabled) {
   } catch {}
   emit({
     ok: true,
-    subagent_id: item.subagent_id,
+    hotline_id: item.hotline_id,
     enabled: item.enabled !== false
   });
 }
 
-async function commandRemoveSubagent(args) {
+async function commandRemoveHotline(args) {
   const state = ensureOpsState();
-  const subagentId = String(args["subagent-id"] || "").trim();
-  if (!subagentId) {
-    throw new Error("subagent_id_required");
+  const hotlineId = String(args["hotline-id"] || "").trim();
+  if (!hotlineId) {
+    throw new Error("hotline_id_required");
   }
-  const item = removeSubagent(state, subagentId);
+  const item = removeHotline(state, hotlineId);
   if (!item) {
-    throw new Error("subagent_not_found");
+    throw new Error("hotline_not_found");
   }
   state.env = saveOpsState(state);
   try {
-    const response = await requestJson(supervisorUrlFromState(state), `/seller/subagents/${encodeURIComponent(subagentId)}`, {
+    const response = await requestJson(supervisorUrlFromState(state), `/responder/hotlines/${encodeURIComponent(hotlineId)}`, {
       method: "DELETE"
     });
     emit(response.body);
@@ -423,41 +682,41 @@ async function commandRemoveSubagent(args) {
   emit({
     ok: true,
     removed: {
-      subagent_id: item.subagent_id
+      hotline_id: item.hotline_id
     }
   });
 }
 
 async function commandSubmitReview(args = {}) {
   const state = ensureOpsState();
-  const sellerIdentity = ensureSellerIdentity(state, {
-    sellerId: args["seller-id"] ? String(args["seller-id"]) : null,
+  const responderIdentity = ensureResponderIdentity(state, {
+    responderId: args["responder-id"] ? String(args["responder-id"]) : null,
     displayName: args["display-name"] ? String(args["display-name"]) : null
   });
   state.env = saveOpsState(state);
   try {
-    const response = await requestJson(supervisorUrlFromState(state), "/seller/submit-review", {
+    const response = await requestJson(supervisorUrlFromState(state), "/responder/submit-review", {
       method: "POST",
       body: {
-        seller_id: state.config.seller.seller_id,
-        display_name: state.config.seller.display_name
+        responder_id: state.config.responder.responder_id,
+        display_name: state.config.responder.display_name
       }
     });
     emit(response.body);
     return;
   } catch {}
 
-  const pending = (state.config.seller.subagents || []).filter((item) => item.submitted_for_review !== true);
+  const pending = (state.config.responder.hotlines || []).filter((item) => item.submitted_for_review !== true);
   const results = [];
   for (const item of pending) {
-    const response = await requestJson(state.config.platform.base_url, "/v1/catalog/subagents", {
+    const response = await requestJson(state.config.platform.base_url, "/v2/hotlines", {
       method: "POST",
-      headers: buildSellerRegisterHeaders(state),
+      headers: buildResponderRegisterHeaders(state),
       body: {
-        seller_id: sellerIdentity.seller_id,
-        subagent_id: item.subagent_id,
-        display_name: item.display_name || item.subagent_id,
-        seller_public_key_pem: sellerIdentity.public_key_pem,
+        responder_id: responderIdentity.responder_id,
+        hotline_id: item.hotline_id,
+        display_name: item.display_name || item.hotline_id,
+        responder_public_key_pem: responderIdentity.public_key_pem,
         task_types: item.task_types || [],
         capabilities: item.capabilities || [],
         tags: item.tags || []
@@ -467,15 +726,15 @@ async function commandSubmitReview(args = {}) {
       emit(response.body);
       return;
     }
-    state.env.SELLER_PLATFORM_API_KEY = response.body.seller_api_key || response.body.api_key;
+    state.env.RESPONDER_PLATFORM_API_KEY = response.body.responder_api_key || response.body.api_key;
     item.submitted_for_review = true;
-    item.review_status = response.body.subagent_review_status || response.body.review_status || "pending";
+    item.review_status = response.body.hotline_review_status || response.body.review_status || "pending";
     results.push(response.body);
   }
   state.env = saveOpsState(state);
   emit({
     ok: true,
-    seller_id: state.config.seller.seller_id,
+    responder_id: state.config.responder.responder_id,
     submitted: results.length,
     results
   });
@@ -483,11 +742,11 @@ async function commandSubmitReview(args = {}) {
 
 async function commandDoctor() {
   const state = ensureOpsState();
-  const adapterChecks = (state.config.seller.subagents || []).map((item) => {
+  const adapterChecks = (state.config.responder.hotlines || []).map((item) => {
     if (item.adapter_type === "http") {
       const valid = typeof item.adapter?.url === "string" && item.adapter.url.startsWith("http");
       return {
-        subagent_id: item.subagent_id,
+        hotline_id: item.hotline_id,
         adapter_type: item.adapter_type,
         ok: valid,
         detail: valid ? item.adapter.url : "invalid_http_url"
@@ -498,7 +757,7 @@ async function commandDoctor() {
     const isAbsolute = firstToken.startsWith("/");
     const valid = Boolean(cmd) && (!isAbsolute || fs.existsSync(firstToken));
     return {
-      subagent_id: item.subagent_id,
+      hotline_id: item.hotline_id,
       adapter_type: item.adapter_type || "process",
       ok: valid,
       detail: valid ? cmd : "process_command_missing_or_not_found"
@@ -545,8 +804,8 @@ async function commandBootstrap(args) {
   const steps = [];
   const initialState = ensureOpsState();
   const setupArgs = ["setup"];
-  if (args["seller-id"]) {
-    setupArgs.push("--seller-id", String(args["seller-id"]));
+  if (args["responder-id"]) {
+    setupArgs.push("--responder-id", String(args["responder-id"]));
   }
   if (args["display-name"]) {
     setupArgs.push("--display-name", String(args["display-name"]));
@@ -561,22 +820,22 @@ async function commandBootstrap(args) {
 
     let state = ensureOpsState();
     const email =
-      String(args.email || state.config.buyer.contact_email || process.env.BOOTSTRAP_BUYER_EMAIL || "").trim() ||
+      String(args.email || state.config.caller.contact_email || process.env.BOOTSTRAP_CALLER_EMAIL || "").trim() ||
       `ops-user-${Date.now()}@local.test`;
-    if (state.config.buyer.api_key && state.config.buyer.contact_email) {
-      logBootstrapStep(steps, "buyer_registered", true, {
-        buyer_email: state.config.buyer.contact_email,
+    if (state.config.caller.api_key && state.config.caller.contact_email) {
+      logBootstrapStep(steps, "caller_registered", true, {
+        caller_email: state.config.caller.contact_email,
         existing: true
       });
     } else {
       const register = await runCliSubcommand(["auth", "register", "--email", email, "--platform", platformUrl], env);
-      logBootstrapStep(steps, "buyer_registered", register.ok === true, {
-        buyer_email: register.contact_email || email
+      logBootstrapStep(steps, "caller_registered", register.ok === true, {
+        caller_email: register.contact_email || email
       });
       if (register.ok !== true) {
         emit({
           ok: false,
-          stage: "buyer_register_failed",
+          stage: "caller_register_failed",
           steps,
           response: register
         });
@@ -585,21 +844,21 @@ async function commandBootstrap(args) {
     }
 
     state = ensureOpsState();
-    const hasExample = (state.config.seller.subagents || []).some((item) => item.subagent_id === LOCAL_EXAMPLE_SUBAGENT_ID);
+    const hasExample = (state.config.responder.hotlines || []).some((item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID);
     if (hasExample) {
-      logBootstrapStep(steps, "example_subagent_added", true, {
-        subagent_id: LOCAL_EXAMPLE_SUBAGENT_ID,
+      logBootstrapStep(steps, "example_hotline_added", true, {
+        hotline_id: LOCAL_EXAMPLE_HOTLINE_ID,
         existing: true
       });
     } else {
-      const added = await runCliSubcommand(["add-example-subagent"], env);
-      logBootstrapStep(steps, "example_subagent_added", added.ok !== false, {
-        subagent_id: added.subagent_id || LOCAL_EXAMPLE_SUBAGENT_ID
+      const added = await runCliSubcommand(["add-example-hotline"], env);
+      logBootstrapStep(steps, "example_hotline_added", added.ok !== false, {
+        hotline_id: added.hotline_id || LOCAL_EXAMPLE_HOTLINE_ID
       });
       if (added.ok === false) {
         emit({
           ok: false,
-          stage: "example_subagent_add_failed",
+          stage: "example_hotline_add_failed",
           steps,
           response: added
         });
@@ -608,7 +867,7 @@ async function commandBootstrap(args) {
     }
 
     state = ensureOpsState();
-    const example = (state.config.seller.subagents || []).find((item) => item.subagent_id === LOCAL_EXAMPLE_SUBAGENT_ID);
+    const example = (state.config.responder.hotlines || []).find((item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID);
     if (example?.submitted_for_review === true) {
       logBootstrapStep(steps, "review_submitted", true, {
         submitted: 0,
@@ -631,13 +890,13 @@ async function commandBootstrap(args) {
       }
     }
 
-    const enabled = await runCliSubcommand(["enable-seller"], env);
-    const sellerId = enabled.seller?.seller_id || enabled.seller_id || ensureOpsState().config.seller.seller_id;
-    logBootstrapStep(steps, "seller_enabled", enabled.ok === true, { seller_id: sellerId });
+    const enabled = await runCliSubcommand(["enable-responder"], env);
+    const responderId = enabled.responder?.responder_id || enabled.responder_id || ensureOpsState().config.responder.responder_id;
+    logBootstrapStep(steps, "responder_enabled", enabled.ok === true, { responder_id: responderId });
     if (enabled.ok !== true) {
       emit({
         ok: false,
-        stage: "enable_seller_failed",
+        stage: "enable_responder_failed",
         steps,
         response: enabled
       });
@@ -650,7 +909,7 @@ async function commandBootstrap(args) {
 
     let catalogVisible = null;
     try {
-      catalogVisible = await waitForCatalogVisibility(supervisorUrl, sellerId, {
+      catalogVisible = await waitForCatalogVisibility(supervisorUrl, responderId, {
         timeoutMs: 750,
         intervalMs: 150
       });
@@ -660,28 +919,28 @@ async function commandBootstrap(args) {
       const approved = await maybeApproveExample({
         platformUrl,
         adminApiKey: process.env.PLATFORM_ADMIN_API_KEY || process.env.ADMIN_API_KEY || null,
-        sellerId
+        responderId
       });
       if (!approved.ok) {
         emit({
           ok: false,
           stage: "awaiting_admin_approval",
           steps,
-          seller_id: sellerId,
-          subagent_id: LOCAL_EXAMPLE_SUBAGENT_ID,
-          next_action: "Approve seller and subagent, then rerun delexec-ops bootstrap or delexec-ops run-example.",
+          responder_id: responderId,
+          hotline_id: LOCAL_EXAMPLE_HOTLINE_ID,
+          next_action: "Approve the responder and hotline runtime, then rerun delexec-ops bootstrap or delexec-ops run-example.",
           reason: approved.reason || "approval_failed"
         });
         return;
       }
-      logBootstrapStep(steps, "seller_approved", true);
-      logBootstrapStep(steps, "subagent_approved", true);
-      catalogVisible = await waitForCatalogVisibility(supervisorUrl, sellerId, {
+      logBootstrapStep(steps, "responder_approved", true);
+      logBootstrapStep(steps, "hotline_approved", true);
+      catalogVisible = await waitForCatalogVisibility(supervisorUrl, responderId, {
         timeoutMs: 15000,
         intervalMs: 250
       });
     }
-    logBootstrapStep(steps, "catalog_visible", true, { subagent_id: LOCAL_EXAMPLE_SUBAGENT_ID });
+    logBootstrapStep(steps, "catalog_visible", true, { hotline_id: LOCAL_EXAMPLE_HOTLINE_ID });
 
     const started = await requestJson(supervisorUrl, "/requests/example", {
       method: "POST",
@@ -716,9 +975,16 @@ async function commandBootstrap(args) {
       ok: final.status === "SUCCEEDED",
       request_id: requestId,
       status: final.status,
-      seller_id: sellerId,
-      subagent_id: LOCAL_EXAMPLE_SUBAGENT_ID,
+      responder_id: responderId,
+      hotline_id: LOCAL_EXAMPLE_HOTLINE_ID,
       supervisor_url: supervisorUrl,
+      ui: args["open-ui"] ? await ensureUiAvailable(args, env) : null,
+      next_steps: {
+        one_click_start: "delexec-ops bootstrap --open-ui",
+        reopen_web_ui: "delexec-ops ui start --open",
+        local_services: "delexec-ops start",
+        health_check: "delexec-ops status"
+      },
       steps
     });
   } catch (error) {
@@ -731,11 +997,32 @@ async function commandBootstrap(args) {
   }
 }
 
+async function commandUiStart(args) {
+  const state = ensureOpsState();
+  const supervisorUrl = supervisorUrlFromState(state);
+  const supervisor = await ensureSupervisorAvailable(supervisorUrl, process.env);
+  const ui = await ensureUiAvailable(args, process.env);
+  emit({
+    ok: true,
+    supervisor_url: supervisorUrl,
+    supervisor_started: supervisor.started,
+    ui,
+    next_steps: {
+      reopen_web_ui: "delexec-ops ui start --open",
+      refresh_status: "delexec-ops status"
+    }
+  });
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help || args.h || args._.length === 0) {
+  if (args.help || args.h) {
     usage();
-    process.exit(args._.length === 0 ? 1 : 0);
+    process.exit(0);
+  }
+  if (args._.length === 0) {
+    usage();
+    process.exit(1);
   }
 
   const [group, command] = args._;
@@ -756,28 +1043,36 @@ async function main() {
     await commandBootstrap(args);
     return;
   }
-  if (group === "enable-seller") {
-    await commandEnableSeller(args);
+  if (group === "ui" && command === "start") {
+    await commandUiStart(args);
     return;
   }
-  if (group === "add-subagent") {
-    await commandAddSubagent(args);
+  if (group === "enable-responder") {
+    await commandEnableResponder(args);
     return;
   }
-  if (group === "add-example-subagent") {
-    await commandAddExampleSubagent();
+  if (group === "add-hotline") {
+    await commandAddHotline(args);
     return;
   }
-  if (group === "enable-subagent") {
-    await commandSetSubagentEnabled(args, true);
+  if (group === "attach-project") {
+    await commandAttachProject(args);
     return;
   }
-  if (group === "remove-subagent") {
-    await commandRemoveSubagent(args);
+  if (group === "add-example-hotline") {
+    await commandAddExampleHotline();
     return;
   }
-  if (group === "disable-subagent") {
-    await commandSetSubagentEnabled(args, false);
+  if (group === "enable-hotline") {
+    await commandSetHotlineEnabled(args, true);
+    return;
+  }
+  if (group === "remove-hotline") {
+    await commandRemoveHotline(args);
+    return;
+  }
+  if (group === "disable-hotline") {
+    await commandSetHotlineEnabled(args, false);
     return;
   }
   if (group === "doctor") {
@@ -801,43 +1096,47 @@ async function main() {
     return;
   }
 
-  if (group === "seller" && command === "init") {
+  if ((group === "responder" || group === "responder") && command === "init") {
     await commandSetup(args);
     return;
   }
-  if (group === "seller" && command === "register") {
+  if ((group === "responder" || group === "responder") && command === "register") {
     await commandSubmitReview(args);
     return;
   }
-  if (group === "seller" && command === "add-subagent") {
-    await commandAddSubagent(args);
+  if ((group === "responder" || group === "responder") && command === "add-hotline") {
+    await commandAddHotline(args);
     return;
   }
-  if (group === "seller" && command === "enable-subagent") {
-    await commandSetSubagentEnabled(args, true);
+  if ((group === "responder" || group === "responder") && command === "attach-project") {
+    await commandAttachProject(args);
     return;
   }
-  if (group === "seller" && command === "remove-subagent") {
-    await commandRemoveSubagent(args);
+  if ((group === "responder" || group === "responder") && command === "enable-hotline") {
+    await commandSetHotlineEnabled(args, true);
     return;
   }
-  if (group === "seller" && command === "disable-subagent") {
-    await commandSetSubagentEnabled(args, false);
+  if ((group === "responder" || group === "responder") && command === "remove-hotline") {
+    await commandRemoveHotline(args);
     return;
   }
-  if (group === "seller" && command === "start") {
+  if ((group === "responder" || group === "responder") && command === "disable-hotline") {
+    await commandSetHotlineEnabled(args, false);
+    return;
+  }
+  if ((group === "responder" || group === "responder") && command === "start") {
     await commandStart();
     return;
   }
-  if (group === "seller" && command === "status") {
+  if ((group === "responder" || group === "responder") && command === "status") {
     await commandStatus();
     return;
   }
-  if (group === "seller" && command === "doctor") {
+  if ((group === "responder" || group === "responder") && command === "doctor") {
     await commandDoctor();
     return;
   }
-  if (group === "seller" && command === "debug-snapshot") {
+  if ((group === "responder" || group === "responder") && command === "debug-snapshot") {
     await commandDebugSnapshot();
     return;
   }

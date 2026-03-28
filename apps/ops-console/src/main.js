@@ -1,6 +1,7 @@
 import "./styles.css";
 import {
-  renderBuyerSummaryCard,
+  renderCallConfirmationMarkup,
+  renderCallerSummaryCard,
   renderCatalogItemsMarkup,
   renderRequestDetailMarkup,
   renderRequestSummaryMarkup,
@@ -8,7 +9,7 @@ import {
   renderRuntimeAlertsMarkup,
   renderRuntimeCardsMarkup,
   renderSetupWizardMarkup,
-  renderSellerSubagentsMarkup,
+  renderResponderHotlinesMarkup,
   renderTransportConfigMarkup
 } from "./view-model.js";
 
@@ -31,7 +32,7 @@ async function requestJson(baseUrl, pathname, { method = "GET", body } = {}) {
 
 const DEFAULT_OPS_URL = "http://127.0.0.1:8079";
 const storageKeys = {
-  buyerEmail: "rsp.ops.buyerEmail"
+  callerEmail: "rsp.ops.callerEmail"
 };
 
 const sessionKeys = {
@@ -45,9 +46,11 @@ const state = {
   requests: [],
   latestRequest: null,
   latestResult: null,
+  preparedCall: null,
+  selectedCandidateKey: null,
   status: null,
-  runtimeService: "buyer",
-  editingSubagentId: null,
+  runtimeService: "caller",
+  editingHotlineId: null,
   transportConfig: null,
   transportTestResult: null,
   session: null,
@@ -63,11 +66,11 @@ app.innerHTML = `
       <div>
         <p class="eyebrow">Unified Ops Client</p>
         <h1>Ops Console</h1>
-        <p class="lede">Buyer, seller, and relay are managed through one local supervisor.</p>
+        <p class="lede">Caller, responder, and relay are managed through one local supervisor.</p>
       </div>
       <div class="hero-note">
-        <span class="pill">Buyer always on</span>
-        <span class="pill warm">Seller opt-in</span>
+        <span class="pill">Caller always on</span>
+        <span class="pill warm">Responder opt-in</span>
       </div>
     </section>
 
@@ -110,14 +113,14 @@ app.innerHTML = `
           <button id="refresh-status" class="ghost">Refresh</button>
         </div>
         <p class="meta">Supervisor: ${DEFAULT_OPS_URL}</p>
-        <label>Buyer Contact Email</label>
-        <input id="buyer-email" value="buyer@local.test" />
+        <label>Caller Contact Email</label>
+        <input id="caller-email" value="caller@local.test" />
         <div class="actions">
           <button id="setup-client">Setup Client</button>
-          <button id="register-buyer">Register Buyer</button>
+          <button id="register-caller">Register Caller</button>
         </div>
         <div id="setup-wizard" class="stack"></div>
-        <div id="buyer-summary" class="stack"></div>
+        <div id="caller-summary" class="stack"></div>
         <div id="request-summary" class="stack"></div>
         <pre id="status-output" class="output compact">Waiting for ops supervisor.</pre>
       </div>
@@ -126,12 +129,12 @@ app.innerHTML = `
         <div class="section-head">
           <div>
             <p class="eyebrow">Runtime</p>
-            <h2>Buyer / Seller / Relay</h2>
+            <h2>Caller / Responder / Relay</h2>
           </div>
           <div class="actions">
             <select id="runtime-service">
-              <option value="buyer">buyer</option>
-              <option value="seller">seller</option>
+              <option value="caller">caller</option>
+              <option value="responder">responder</option>
               <option value="relay">relay</option>
             </select>
             <button id="refresh-runtime" class="ghost">Logs</button>
@@ -218,22 +221,22 @@ app.innerHTML = `
       <div class="card">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Seller</p>
-            <h2>Subagents + Review</h2>
+            <p class="eyebrow">Responder</p>
+            <h2>Hotlines + Review</h2>
           </div>
         </div>
         <div class="grid three">
           <div>
-            <label>Seller ID</label>
-            <input id="seller-id" value="seller_local" />
+            <label>Responder ID</label>
+            <input id="responder-id" value="responder_local" />
           </div>
           <div>
-            <label>Subagent ID</label>
-            <input id="subagent-id" value="local.subagent.v1" />
+            <label>Hotline ID</label>
+            <input id="hotline-id" value="local.hotline.v1" />
           </div>
           <div>
             <label>Display Name</label>
-            <input id="display-name" value="Local Seller Runtime" />
+            <input id="display-name" value="Local Responder Runtime" />
           </div>
         </div>
         <div class="grid three">
@@ -250,6 +253,16 @@ app.innerHTML = `
             <input id="tags" value="local,ops" />
           </div>
         </div>
+        <div class="grid two">
+          <div>
+            <label>Project Path (Optional)</label>
+            <input id="project-path" value="" placeholder="/absolute/path/to/project" />
+          </div>
+          <div>
+            <label>Project Summary (Optional)</label>
+            <input id="project-description" value="" placeholder="What this project does for remote callers" />
+          </div>
+        </div>
         <label>Adapter Type</label>
         <select id="adapter-type">
           <option value="process">process</option>
@@ -257,16 +270,16 @@ app.innerHTML = `
         </select>
         <label>Command / URL</label>
         <input id="adapter-value" value="node worker.js" />
-        <p id="subagent-form-mode" class="meta">Creating a new local subagent.</p>
+        <p id="hotline-form-mode" class="meta">Creating a new local hotline.</p>
         <div class="actions">
-          <button id="add-example-subagent" class="ghost">Add Example Subagent</button>
-          <button id="add-subagent">Add Subagent</button>
-          <button id="reset-subagent-form" class="ghost">Clear Form</button>
+          <button id="add-example-hotline" class="ghost">Add Example Hotline</button>
+          <button id="add-hotline">Add Hotline</button>
+          <button id="reset-hotline-form" class="ghost">Clear Form</button>
           <button id="submit-review" class="ghost">Submit For Review</button>
-          <button id="enable-seller">Enable Seller</button>
+          <button id="enable-responder">Enable Responder</button>
         </div>
-        <pre id="seller-output" class="output compact">Seller is not enabled yet.</pre>
-        <div id="seller-subagents" class="stack"></div>
+        <pre id="responder-output" class="output compact">Responder is not enabled yet.</pre>
+        <div id="responder-hotlines" class="stack"></div>
       </div>
 
       <div class="card">
@@ -278,7 +291,7 @@ app.innerHTML = `
           <button id="refresh-catalog" class="ghost">Refresh Catalog</button>
         </div>
         <label>Catalog / Request Filter</label>
-        <input id="buyer-filter" placeholder="seller, subagent, status..." />
+        <input id="caller-filter" placeholder="responder, hotline, status..." />
         <div id="catalog-list" class="stack"></div>
       </div>
     </section>
@@ -287,19 +300,19 @@ app.innerHTML = `
       <div class="card">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Requests</p>
-            <h2>Dispatch Remote Request</h2>
+            <p class="eyebrow">Confirmation</p>
+            <h2>Call Confirmation</h2>
           </div>
           <button id="refresh-requests" class="ghost">Requests</button>
         </div>
         <div class="grid three">
           <div>
-            <label>Seller ID</label>
-            <input id="request-seller-id" value="seller_foxlab" />
+            <label>Responder ID</label>
+            <input id="request-responder-id" value="responder_foxlab" />
           </div>
           <div>
-            <label>Subagent ID</label>
-            <input id="request-subagent-id" value="foxlab.text.classifier.v1" />
+            <label>Hotline ID</label>
+            <input id="request-hotline-id" value="foxlab.text.classifier.v1" />
           </div>
           <div>
             <label>Task Type</label>
@@ -308,14 +321,21 @@ app.innerHTML = `
         </div>
         <label>Prompt / Input Text</label>
         <textarea id="request-text">Classify this text into a suitable category.</textarea>
+        <label class="checkbox-row">
+          <input id="remember-task-type" type="checkbox" />
+          <span>Remember this hotline for the current task type after confirmation.</span>
+        </label>
         <div class="actions">
           <button id="run-example-request" class="ghost">Run Example</button>
           <button id="load-first-catalog" class="ghost">Use First Catalog Item</button>
-          <button id="dispatch-request">Dispatch Remote Request</button>
+          <button id="prepare-call">Prepare Candidates</button>
+          <button id="confirm-call" class="ghost">Confirm and Call</button>
+          <button id="cancel-prepared-call" class="ghost">Cancel</button>
           <button id="poll-result" class="ghost">Fetch Result</button>
         </div>
+        <div id="call-confirmation" class="stack"></div>
         <div id="requests-list" class="stack"></div>
-        <pre id="request-output" class="output compact">No request dispatched yet.</pre>
+        <pre id="request-output" class="output compact">No call prepared yet.</pre>
       </div>
 
       <div class="card">
@@ -332,13 +352,13 @@ app.innerHTML = `
   </main>
 `;
 
-const buyerEmailInput = document.querySelector("#buyer-email");
+const callerEmailInput = document.querySelector("#caller-email");
 const consoleBody = document.querySelector("#console-body");
 const authState = document.querySelector("#auth-state");
 const authOutput = document.querySelector("#auth-output");
 const sessionPassphraseInput = document.querySelector("#session-passphrase");
 const sessionNextPassphraseInput = document.querySelector("#session-next-passphrase");
-const buyerFilterInput = document.querySelector("#buyer-filter");
+const callerFilterInput = document.querySelector("#caller-filter");
 const runtimeServiceInput = document.querySelector("#runtime-service");
 const statusOutput = document.querySelector("#status-output");
 const runtimeCards = document.querySelector("#runtime-cards");
@@ -348,25 +368,29 @@ const runtimeOutput = document.querySelector("#runtime-output");
 const transportSummary = document.querySelector("#transport-summary");
 const transportOutput = document.querySelector("#transport-output");
 const setupWizard = document.querySelector("#setup-wizard");
-const buyerSummary = document.querySelector("#buyer-summary");
+const callerSummary = document.querySelector("#caller-summary");
 const requestSummary = document.querySelector("#request-summary");
-const sellerOutput = document.querySelector("#seller-output");
-const sellerSubagents = document.querySelector("#seller-subagents");
-const subagentFormMode = document.querySelector("#subagent-form-mode");
+const responderOutput = document.querySelector("#responder-output");
+const responderHotlines = document.querySelector("#responder-hotlines");
+const hotlineFormMode = document.querySelector("#hotline-form-mode");
 const catalogList = document.querySelector("#catalog-list");
+const callConfirmation = document.querySelector("#call-confirmation");
 const requestsList = document.querySelector("#requests-list");
 const requestDetail = document.querySelector("#request-detail");
 const requestOutput = document.querySelector("#request-output");
-const sellerIdInput = document.querySelector("#seller-id");
-const subagentIdInput = document.querySelector("#subagent-id");
+const rememberTaskTypeInput = document.querySelector("#remember-task-type");
+const responderIdInput = document.querySelector("#responder-id");
+const hotlineIdInput = document.querySelector("#hotline-id");
 const displayNameInput = document.querySelector("#display-name");
 const taskTypesInput = document.querySelector("#task-types");
 const capabilitiesInput = document.querySelector("#capabilities");
 const tagsInput = document.querySelector("#tags");
 const adapterTypeInput = document.querySelector("#adapter-type");
 const adapterValueInput = document.querySelector("#adapter-value");
-const addSubagentButton = document.querySelector("#add-subagent");
-const addExampleSubagentButton = document.querySelector("#add-example-subagent");
+const projectPathInput = document.querySelector("#project-path");
+const projectDescriptionInput = document.querySelector("#project-description");
+const addHotlineButton = document.querySelector("#add-hotline");
+const addExampleHotlineButton = document.querySelector("#add-example-hotline");
 const transportTypeInput = document.querySelector("#transport-type");
 const transportRelayFields = document.querySelector("#transport-relay-fields");
 const transportRelayBaseUrlInput = document.querySelector("#transport-relay-base-url");
@@ -402,11 +426,11 @@ function setSessionToken(token) {
 }
 
 function savePrefs() {
-  localStorage.setItem(storageKeys.buyerEmail, buyerEmailInput.value);
+  localStorage.setItem(storageKeys.callerEmail, callerEmailInput.value);
 }
 
 function loadPrefs() {
-  buyerEmailInput.value = localStorage.getItem(storageKeys.buyerEmail) || buyerEmailInput.value;
+  callerEmailInput.value = localStorage.getItem(storageKeys.callerEmail) || callerEmailInput.value;
 }
 
 function splitList(value) {
@@ -416,25 +440,25 @@ function splitList(value) {
     .filter(Boolean);
 }
 
-function applyBuyerFilter(items) {
-  const term = buyerFilterInput.value.trim().toLowerCase();
+function applyCallerFilter(items) {
+  const term = callerFilterInput.value.trim().toLowerCase();
   if (!term) {
     return items;
   }
   return items.filter((item) => JSON.stringify(item).toLowerCase().includes(term));
 }
 
-function renderBuyerSummary() {
+function renderCallerSummary() {
   const status = state.status;
   setupWizard.innerHTML = renderSetupWizardMarkup(status);
-  buyerSummary.innerHTML = renderBuyerSummaryCard({
-    health: status?.runtime?.buyer?.health || { body: { ok: false } },
+  callerSummary.innerHTML = renderCallerSummaryCard({
+    health: status?.runtime?.caller?.health || { body: { ok: false } },
     root: {
       body: {
         service: "ops-supervisor",
         local_defaults: {
-          buyer_contact_email: status?.config?.buyer?.contact_email || null,
-          platform_api_key_configured: Boolean(status?.config?.buyer?.api_key_configured)
+          caller_contact_email: status?.config?.caller?.contact_email || null,
+          platform_api_key_configured: Boolean(status?.config?.caller?.api_key_configured)
         },
         runtime: status?.runtime || null
       }
@@ -584,34 +608,65 @@ function buildTransportPayload() {
   };
 }
 
-function setSubagentForm(definition = null) {
+function setHotlineForm(definition = null) {
   if (!definition) {
-    state.editingSubagentId = null;
-    subagentIdInput.value = "local.summary.v1";
+    state.editingHotlineId = null;
+    hotlineIdInput.value = "local.summary.v1";
     displayNameInput.value = "Local Summary Example";
     taskTypesInput.value = "text_summarize";
     capabilitiesInput.value = "text.summarize";
     tagsInput.value = "local,example,demo";
     adapterTypeInput.value = "process";
     adapterValueInput.value = "node worker.js";
-    subagentFormMode.textContent = "Creating a new local subagent.";
-    addSubagentButton.textContent = "Add Subagent";
+    projectPathInput.value = "";
+    projectDescriptionInput.value = "";
+    hotlineFormMode.textContent = "Creating a new local hotline.";
+    addHotlineButton.textContent = "Add Hotline";
     return;
   }
-  state.editingSubagentId = definition.subagent_id;
-  subagentIdInput.value = definition.subagent_id || "";
-  displayNameInput.value = definition.display_name || definition.subagent_id || "";
+  state.editingHotlineId = definition.hotline_id;
+  hotlineIdInput.value = definition.hotline_id || "";
+  displayNameInput.value = definition.display_name || definition.hotline_id || "";
   taskTypesInput.value = (definition.task_types || []).join(", ");
   capabilitiesInput.value = (definition.capabilities || []).join(", ");
   tagsInput.value = (definition.tags || []).join(", ");
   adapterTypeInput.value = definition.adapter_type || "process";
   adapterValueInput.value = definition.adapter?.url || definition.adapter?.cmd || "";
-  subagentFormMode.textContent = `Editing ${definition.subagent_id}. Save will update the local configuration.`;
-  addSubagentButton.textContent = "Save Subagent";
+  projectPathInput.value = definition.metadata?.project?.path || definition.adapter?.cwd || "";
+  projectDescriptionInput.value = definition.metadata?.project?.description || "";
+  hotlineFormMode.textContent = `Editing ${definition.hotline_id}. Save will update the local configuration.`;
+  addHotlineButton.textContent = "Save Hotline";
 }
 
 function renderCatalogItems(items) {
   catalogList.innerHTML = renderCatalogItemsMarkup(items);
+}
+
+function candidateKey(item) {
+  if (!item) {
+    return null;
+  }
+  return `${item.responder_id || ""}:${item.hotline_id || ""}`;
+}
+
+function getSelectedCandidate() {
+  const candidates = state.preparedCall?.candidate_hotlines || [];
+  return (
+    candidates.find((item) => candidateKey(item) === state.selectedCandidateKey) ||
+    state.preparedCall?.selected_hotline ||
+    null
+  );
+}
+
+function renderPreparedCall() {
+  callConfirmation.innerHTML = renderCallConfirmationMarkup(state.preparedCall, state.selectedCandidateKey);
+}
+
+function clearPreparedCall() {
+  state.preparedCall = null;
+  state.selectedCandidateKey = null;
+  rememberTaskTypeInput.checked = false;
+  renderPreparedCall();
 }
 
 function renderRequests(items) {
@@ -625,19 +680,19 @@ function renderSelectedRequest() {
   });
 }
 
-function renderSellerState() {
-  const seller = state.status?.config?.seller || { subagents: [] };
-  sellerOutput.textContent = JSON.stringify(
+function renderResponderState() {
+  const responder = state.status?.config?.responder || { hotlines: [] };
+  responderOutput.textContent = JSON.stringify(
     {
-      enabled: seller.enabled,
-      seller_id: seller.seller_id,
-      review_summary: state.status?.seller?.review_summary || {},
-      pending_review_count: state.status?.seller?.pending_review_count || 0
+      enabled: responder.enabled,
+      responder_id: responder.responder_id,
+      review_summary: state.status?.responder?.review_summary || {},
+      pending_review_count: state.status?.responder?.pending_review_count || 0
     },
     null,
     2
   );
-  sellerSubagents.innerHTML = renderSellerSubagentsMarkup(seller.subagents || []);
+  responderHotlines.innerHTML = renderResponderHotlinesMarkup(responder.hotlines || []);
 }
 
 async function refreshRuntimeLogs() {
@@ -681,7 +736,7 @@ async function refreshDebugSnapshot() {
     debugOutput.textContent = JSON.stringify(
       {
         generated_at: response.body?.generated_at || null,
-        seller: response.body?.status?.seller || null,
+        responder: response.body?.status?.responder || null,
         requests: response.body?.status?.requests || null,
         recent_events: response.body?.recent_events || [],
         debug: response.body?.status?.debug || null
@@ -808,9 +863,9 @@ async function refreshStatus() {
   try {
     const status = await requestJson(opsUrl(), "/status");
     state.status = status.body;
-    renderBuyerSummary();
+    renderCallerSummary();
     runtimeCards.innerHTML = renderRuntimeCardsMarkup(status.body.runtime);
-    renderSellerState();
+    renderResponderState();
     state.transportConfig = status.body?.config?.runtime?.transport || state.transportConfig;
     if (state.transportConfig) {
       setTransportForm(state.transportConfig);
@@ -896,21 +951,21 @@ async function setupClient() {
   }
 }
 
-async function registerBuyer() {
+async function registerCaller() {
   if (!state.session?.authenticated) {
-    statusOutput.textContent = "Unlock the local client before registering the buyer.";
+    statusOutput.textContent = "Unlock the local client before registering the caller.";
     return;
   }
-  statusOutput.textContent = "Registering buyer...";
+  statusOutput.textContent = "Registering caller...";
   try {
-    const response = await requestJson(opsUrl(), "/auth/register-buyer", {
+    const response = await requestJson(opsUrl(), "/auth/register-caller", {
       method: "POST",
-      body: { contact_email: buyerEmailInput.value.trim() }
+      body: { contact_email: callerEmailInput.value.trim() }
     });
     statusOutput.textContent = JSON.stringify(response, null, 2);
     await refreshStatus();
   } catch (error) {
-    statusOutput.textContent = `Buyer register failed: ${error instanceof Error ? error.message : "unknown_error"}`;
+    statusOutput.textContent = `Caller register failed: ${error instanceof Error ? error.message : "unknown_error"}`;
   }
 }
 
@@ -919,9 +974,9 @@ async function refreshCatalog() {
     catalogList.innerHTML = `<div class="empty">Unlock the local client to load catalog items.</div>`;
     return { body: { items: [] } };
   }
-  const catalog = await requestJson(opsUrl(), "/catalog/subagents");
+  const catalog = await requestJson(opsUrl(), "/catalog/hotlines");
   state.catalogItems = catalog.body?.items || [];
-  renderCatalogItems(applyBuyerFilter(state.catalogItems));
+  renderCatalogItems(applyCallerFilter(state.catalogItems));
   return catalog;
 }
 
@@ -932,148 +987,160 @@ async function refreshRequests() {
   }
   const requests = await requestJson(opsUrl(), "/requests");
   state.requests = requests.body?.items || [];
-  renderRequests(applyBuyerFilter(state.requests));
+  renderRequests(applyCallerFilter(state.requests));
   return requests;
 }
 
-async function addSubagent() {
+async function addHotline() {
   if (!state.session?.authenticated) {
-    sellerOutput.textContent = "Unlock the local client before editing seller subagents.";
+    responderOutput.textContent = "Unlock the local client before editing responder hotlines.";
     return;
   }
-  sellerOutput.textContent = state.editingSubagentId ? "Saving local subagent..." : "Adding local subagent...";
+  responderOutput.textContent = state.editingHotlineId ? "Saving local hotline..." : "Adding local hotline...";
   const adapterType = adapterTypeInput.value;
   const adapterValue = adapterValueInput.value.trim();
+  const projectPath = projectPathInput.value.trim();
+  const projectDescription = projectDescriptionInput.value.trim();
   const adapter =
     adapterType === "http"
       ? { url: adapterValue, method: "POST" }
-      : { cmd: adapterValue };
+      : { cmd: adapterValue, cwd: projectPath || undefined };
   try {
-    const response = await requestJson(opsUrl(), "/seller/subagents", {
+    const response = await requestJson(opsUrl(), "/responder/hotlines", {
       method: "POST",
       body: {
-        subagent_id: subagentIdInput.value.trim(),
+        hotline_id: hotlineIdInput.value.trim(),
         display_name: displayNameInput.value.trim(),
         task_types: splitList(taskTypesInput.value),
         capabilities: splitList(capabilitiesInput.value),
         tags: splitList(tagsInput.value),
         adapter_type: adapterType,
-        adapter
+        adapter,
+        metadata:
+          projectPath || projectDescription
+            ? {
+                project: {
+                  path: projectPath || null,
+                  description: projectDescription || null,
+                  mount_kind: "local_project"
+                }
+              }
+            : null
       }
     });
-    sellerOutput.textContent = JSON.stringify(response, null, 2);
+    responderOutput.textContent = JSON.stringify(response, null, 2);
     await refreshStatus();
-    setSubagentForm();
+    setHotlineForm();
   } catch (error) {
-    sellerOutput.textContent = `Add subagent failed: ${error instanceof Error ? error.message : "unknown_error"}`;
+    responderOutput.textContent = `Add hotline failed: ${error instanceof Error ? error.message : "unknown_error"}`;
   }
 }
 
-async function addExampleSubagent() {
+async function addExampleHotline() {
   if (!state.session?.authenticated) {
-    sellerOutput.textContent = "Unlock the local client before adding the example subagent.";
+    responderOutput.textContent = "Unlock the local client before adding the example hotline.";
     return;
   }
-  sellerOutput.textContent = "Installing official example subagent...";
+  responderOutput.textContent = "Installing official example hotline...";
   try {
-    const response = await requestJson(opsUrl(), "/seller/subagents/example", {
+    const response = await requestJson(opsUrl(), "/responder/hotlines/example", {
       method: "POST",
       body: {}
     });
-    sellerOutput.textContent = JSON.stringify(response, null, 2);
+    responderOutput.textContent = JSON.stringify(response, null, 2);
     await refreshStatus();
-    const example = state.status?.config?.seller?.subagents?.find((item) => item.subagent_id === "local.summary.v1");
+    const example = state.status?.config?.responder?.hotlines?.find((item) => item.hotline_id === "local.summary.v1");
     if (example) {
-      setSubagentForm(example);
+      setHotlineForm(example);
     }
   } catch (error) {
-    sellerOutput.textContent = `Add example subagent failed: ${error instanceof Error ? error.message : "unknown_error"}`;
+    responderOutput.textContent = `Add example hotline failed: ${error instanceof Error ? error.message : "unknown_error"}`;
   }
 }
 
-async function toggleSubagent(subagentId, enabled) {
+async function toggleHotline(hotlineId, enabled) {
   if (!state.session?.authenticated) {
-    sellerOutput.textContent = "Unlock the local client before editing seller subagents.";
+    responderOutput.textContent = "Unlock the local client before editing responder hotlines.";
     return;
   }
-  sellerOutput.textContent = `${enabled ? "Enabling" : "Disabling"} local subagent...`;
+  responderOutput.textContent = `${enabled ? "Enabling" : "Disabling"} local hotline...`;
   try {
     const response = await requestJson(
       opsUrl(),
-      `/seller/subagents/${encodeURIComponent(subagentId)}/${enabled ? "enable" : "disable"}`,
+      `/responder/hotlines/${encodeURIComponent(hotlineId)}/${enabled ? "enable" : "disable"}`,
       {
         method: "POST",
         body: {}
       }
     );
-    sellerOutput.textContent = JSON.stringify(response, null, 2);
+    responderOutput.textContent = JSON.stringify(response, null, 2);
     await refreshStatus();
   } catch (error) {
-    sellerOutput.textContent = `${enabled ? "Enable" : "Disable"} subagent failed: ${
+    responderOutput.textContent = `${enabled ? "Enable" : "Disable"} hotline failed: ${
       error instanceof Error ? error.message : "unknown_error"
     }`;
   }
 }
 
-async function removeSubagent(subagentId) {
+async function removeHotline(hotlineId) {
   if (!state.session?.authenticated) {
-    sellerOutput.textContent = "Unlock the local client before editing seller subagents.";
+    responderOutput.textContent = "Unlock the local client before editing responder hotlines.";
     return;
   }
-  sellerOutput.textContent = "Removing local subagent...";
+  responderOutput.textContent = "Removing local hotline...";
   try {
-    const response = await requestJson(opsUrl(), `/seller/subagents/${encodeURIComponent(subagentId)}`, {
+    const response = await requestJson(opsUrl(), `/responder/hotlines/${encodeURIComponent(hotlineId)}`, {
       method: "DELETE"
     });
-    sellerOutput.textContent = JSON.stringify(response, null, 2);
+    responderOutput.textContent = JSON.stringify(response, null, 2);
     await refreshStatus();
-    if (state.editingSubagentId === subagentId) {
-      setSubagentForm();
+    if (state.editingHotlineId === hotlineId) {
+      setHotlineForm();
     }
   } catch (error) {
-    sellerOutput.textContent = `Remove subagent failed: ${error instanceof Error ? error.message : "unknown_error"}`;
+    responderOutput.textContent = `Remove hotline failed: ${error instanceof Error ? error.message : "unknown_error"}`;
   }
 }
 
 async function submitReview() {
   if (!state.session?.authenticated) {
-    sellerOutput.textContent = "Unlock the local client before submitting review.";
+    responderOutput.textContent = "Unlock the local client before submitting review.";
     return;
   }
-  sellerOutput.textContent = "Submitting local subagents for review...";
+  responderOutput.textContent = "Submitting local hotlines for review...";
   try {
-    const response = await requestJson(opsUrl(), "/seller/submit-review", {
+    const response = await requestJson(opsUrl(), "/responder/submit-review", {
       method: "POST",
       body: {
-        seller_id: document.querySelector("#seller-id").value.trim(),
+        responder_id: document.querySelector("#responder-id").value.trim(),
         display_name: document.querySelector("#display-name").value.trim()
       }
     });
-    sellerOutput.textContent = JSON.stringify(response, null, 2);
+    responderOutput.textContent = JSON.stringify(response, null, 2);
     await refreshStatus();
   } catch (error) {
-    sellerOutput.textContent = `Submit review failed: ${error instanceof Error ? error.message : "unknown_error"}`;
+    responderOutput.textContent = `Submit review failed: ${error instanceof Error ? error.message : "unknown_error"}`;
   }
 }
 
-async function enableSeller() {
+async function enableResponder() {
   if (!state.session?.authenticated) {
-    sellerOutput.textContent = "Unlock the local client before enabling the seller.";
+    responderOutput.textContent = "Unlock the local client before enabling the responder.";
     return;
   }
-  sellerOutput.textContent = "Enabling seller...";
+  responderOutput.textContent = "Enabling responder...";
   try {
-    const response = await requestJson(opsUrl(), "/seller/enable", {
+    const response = await requestJson(opsUrl(), "/responder/enable", {
       method: "POST",
       body: {
-        seller_id: document.querySelector("#seller-id").value.trim(),
+        responder_id: document.querySelector("#responder-id").value.trim(),
         display_name: document.querySelector("#display-name").value.trim()
       }
     });
-    sellerOutput.textContent = JSON.stringify(response, null, 2);
+    responderOutput.textContent = JSON.stringify(response, null, 2);
     await refreshStatus();
   } catch (error) {
-    sellerOutput.textContent = `Enable seller failed: ${error instanceof Error ? error.message : "unknown_error"}`;
+    responderOutput.textContent = `Enable responder failed: ${error instanceof Error ? error.message : "unknown_error"}`;
   }
 }
 
@@ -1083,25 +1150,61 @@ async function loadFirstCatalogItem() {
   if (!item) {
     return;
   }
-  document.querySelector("#request-seller-id").value = item.seller_id || "";
-  document.querySelector("#request-subagent-id").value = item.subagent_id || "";
+  document.querySelector("#request-responder-id").value = item.responder_id || "";
+  document.querySelector("#request-hotline-id").value = item.hotline_id || "";
   document.querySelector("#request-task-type").value = item.task_types?.[0] || "text_classify";
+  clearPreparedCall();
 }
 
-async function dispatchRequest() {
+async function prepareCall() {
   if (!state.session?.authenticated) {
-    requestOutput.textContent = "Unlock the local client before dispatching requests.";
+    requestOutput.textContent = "Unlock the local client before preparing calls.";
     return;
   }
-  requestOutput.textContent = "Dispatching remote request...";
+  requestOutput.textContent = "Preparing hotline candidates...";
   try {
     const payloadText = document.querySelector("#request-text").value.trim();
-    const response = await requestJson(opsUrl(), "/requests", {
+    const response = await requestJson(opsUrl(), "/calls/prepare", {
       method: "POST",
       body: {
-        seller_id: document.querySelector("#request-seller-id").value.trim(),
-        subagent_id: document.querySelector("#request-subagent-id").value.trim(),
+        responder_id: document.querySelector("#request-responder-id").value.trim(),
+        hotline_id: document.querySelector("#request-hotline-id").value.trim(),
         task_type: document.querySelector("#request-task-type").value.trim(),
+        text: payloadText
+      }
+    });
+    requestOutput.textContent = JSON.stringify(response, null, 2);
+    if (response.status === 200 && response.body?.selected_hotline) {
+      state.preparedCall = response.body;
+      state.selectedCandidateKey = candidateKey(response.body.selected_hotline);
+      rememberTaskTypeInput.checked = Boolean(response.body.remembered_preference);
+      renderPreparedCall();
+    }
+  } catch (error) {
+    requestOutput.textContent = `Prepare failed: ${error instanceof Error ? error.message : "unknown_error"}`;
+  }
+}
+
+async function confirmCall() {
+  if (!state.session?.authenticated) {
+    requestOutput.textContent = "Unlock the local client before confirming calls.";
+    return;
+  }
+  const selected = getSelectedCandidate();
+  if (!selected) {
+    requestOutput.textContent = "Prepare a call before confirming it.";
+    return;
+  }
+  requestOutput.textContent = "Confirming selected hotline and dispatching call...";
+  try {
+    const payloadText = document.querySelector("#request-text").value.trim();
+    const response = await requestJson(opsUrl(), "/calls/confirm", {
+      method: "POST",
+      body: {
+        responder_id: selected.responder_id,
+        hotline_id: selected.hotline_id,
+        task_type: document.querySelector("#request-task-type").value.trim(),
+        text: payloadText,
         input: { text: payloadText },
         payload: { text: payloadText },
         output_schema: {
@@ -1109,7 +1212,8 @@ async function dispatchRequest() {
           properties: {
             summary: { type: "string" }
           }
-        }
+        },
+        remember_for_task_type: rememberTaskTypeInput.checked
       }
     });
     requestOutput.textContent = JSON.stringify(response, null, 2);
@@ -1119,10 +1223,11 @@ async function dispatchRequest() {
       state.latestResult = null;
       renderSelectedRequest();
       startResultPolling();
+      clearPreparedCall();
       await refreshRequests();
     }
   } catch (error) {
-    requestOutput.textContent = `Dispatch failed: ${error instanceof Error ? error.message : "unknown_error"}`;
+    requestOutput.textContent = `Confirm failed: ${error instanceof Error ? error.message : "unknown_error"}`;
   }
 }
 
@@ -1131,6 +1236,7 @@ async function runExampleRequest() {
     requestOutput.textContent = "Unlock the local client before running the local example.";
     return;
   }
+  clearPreparedCall();
   requestOutput.textContent = "Dispatching local demo self-call...";
   try {
     const response = await requestJson(opsUrl(), "/requests/example", {
@@ -1201,21 +1307,23 @@ document.querySelector("#login-session").addEventListener("click", loginSession)
 document.querySelector("#logout-session").addEventListener("click", logoutSession);
 document.querySelector("#change-passphrase").addEventListener("click", changePassphrase);
 document.querySelector("#setup-client").addEventListener("click", setupClient);
-document.querySelector("#register-buyer").addEventListener("click", registerBuyer);
+document.querySelector("#register-caller").addEventListener("click", registerCaller);
 document.querySelector("#refresh-runtime").addEventListener("click", refreshRuntimeLogs);
 document.querySelector("#debug-snapshot").addEventListener("click", refreshDebugSnapshot);
 document.querySelector("#save-transport").addEventListener("click", saveTransportConfig);
 document.querySelector("#test-transport").addEventListener("click", testTransportConfig);
 document.querySelector("#refresh-catalog").addEventListener("click", refreshCatalog);
 document.querySelector("#refresh-requests").addEventListener("click", refreshRequests);
-addExampleSubagentButton.addEventListener("click", addExampleSubagent);
-document.querySelector("#add-subagent").addEventListener("click", addSubagent);
-document.querySelector("#reset-subagent-form").addEventListener("click", () => setSubagentForm());
+addExampleHotlineButton.addEventListener("click", addExampleHotline);
+document.querySelector("#add-hotline").addEventListener("click", addHotline);
+document.querySelector("#reset-hotline-form").addEventListener("click", () => setHotlineForm());
 document.querySelector("#submit-review").addEventListener("click", submitReview);
-document.querySelector("#enable-seller").addEventListener("click", enableSeller);
+document.querySelector("#enable-responder").addEventListener("click", enableResponder);
 document.querySelector("#run-example-request").addEventListener("click", runExampleRequest);
 document.querySelector("#load-first-catalog").addEventListener("click", loadFirstCatalogItem);
-document.querySelector("#dispatch-request").addEventListener("click", dispatchRequest);
+document.querySelector("#prepare-call").addEventListener("click", prepareCall);
+document.querySelector("#confirm-call").addEventListener("click", confirmCall);
+document.querySelector("#cancel-prepared-call").addEventListener("click", clearPreparedCall);
 document.querySelector("#poll-result").addEventListener("click", fetchResult);
 setupWizard.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-wizard-action]");
@@ -1227,24 +1335,24 @@ setupWizard.addEventListener("click", async (event) => {
     await setupClient();
     return;
   }
-  if (action === "register-buyer") {
-    await registerBuyer();
+  if (action === "register-caller") {
+    await registerCaller();
     return;
   }
-  if (action === "focus-subagent-form") {
-    subagentIdInput.focus();
+  if (action === "focus-hotline-form") {
+    hotlineIdInput.focus();
     return;
   }
-  if (action === "add-example-subagent") {
-    await addExampleSubagent();
+  if (action === "add-example-hotline") {
+    await addExampleHotline();
     return;
   }
   if (action === "submit-review") {
     await submitReview();
     return;
   }
-  if (action === "enable-seller") {
-    await enableSeller();
+  if (action === "enable-responder") {
+    await enableResponder();
   }
 });
 runtimeServiceInput.addEventListener("change", () => {
@@ -1262,42 +1370,51 @@ requestsList.addEventListener("click", async (event) => {
   state.latestRequestId = card.dataset.requestId;
   await fetchResult();
 });
-sellerSubagents.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-subagent-action]");
+callConfirmation.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-candidate-hotline-id]");
   if (!button) {
     return;
   }
-  const subagentId = button.dataset.subagentId;
-  const action = button.dataset.subagentAction;
-  if (!subagentId || !action) {
+  state.selectedCandidateKey = `${button.dataset.candidateResponderId || ""}:${button.dataset.candidateHotlineId || ""}`;
+  renderPreparedCall();
+});
+responderHotlines.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-hotline-action]");
+  if (!button) {
+    return;
+  }
+  const hotlineId = button.dataset.hotlineId;
+  const action = button.dataset.hotlineAction;
+  if (!hotlineId || !action) {
     return;
   }
   if (action === "edit") {
-    const subagent = state.status?.config?.seller?.subagents?.find((item) => item.subagent_id === subagentId);
-    if (subagent) {
-      setSubagentForm(subagent);
+    const hotline = state.status?.config?.responder?.hotlines?.find((item) => item.hotline_id === hotlineId);
+    if (hotline) {
+      setHotlineForm(hotline);
     }
     return;
   }
   if (action === "remove") {
-    await removeSubagent(subagentId);
+    await removeHotline(hotlineId);
     return;
   }
-  await toggleSubagent(subagentId, action === "enable");
+  await toggleHotline(hotlineId, action === "enable");
 });
-buyerFilterInput.addEventListener("input", () => {
+callerFilterInput.addEventListener("input", () => {
   if (state.requests.length > 0) {
-    renderRequests(applyBuyerFilter(state.requests));
+    renderRequests(applyCallerFilter(state.requests));
   }
   if (state.catalogItems.length > 0) {
-    renderCatalogItems(applyBuyerFilter(state.catalogItems));
+    renderCatalogItems(applyCallerFilter(state.catalogItems));
   }
 });
-buyerEmailInput.addEventListener("change", savePrefs);
+callerEmailInput.addEventListener("change", savePrefs);
 
 loadPrefs();
-setSubagentForm();
+setHotlineForm();
 setTransportForm();
+renderPreparedCall();
 renderSelectedRequest();
 renderAuthState();
 void refreshSessionState();

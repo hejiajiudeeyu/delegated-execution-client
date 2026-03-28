@@ -2,7 +2,7 @@
   "name": "delegated-execution-client",
   "private": true,
   "version": "0.1.0",
-  "description": "Buyer, seller, and ops client runtime for delegated execution.",
+  "description": "Caller, responder, and ops client runtime for delegated execution.",
   "workspaces": [
     "apps/*",
     "packages/*",
@@ -10,8 +10,8 @@
   ],
   "scripts": {
     "test": "npm run test:unit && npm run test:integration",
-    "test:unit": "vitest run --config tests/config/vitest.unit.config.mjs tests/unit/buyer-core-logic.test.js tests/unit/executors.test.js tests/unit/local-transport.test.js tests/unit/ops-config.test.js tests/unit/ops-console.dom.test.js tests/unit/runtime-utils.test.js",
-    "test:integration": "vitest run --config tests/config/vitest.integration.config.mjs tests/integration/buyer-skill-adapter.integration.test.js tests/integration/email-transport.integration.test.js tests/integration/emailengine-transport.integration.test.js tests/integration/gmail-transport.integration.test.js",
+    "test:unit": "vitest run --config tests/config/vitest.unit.config.mjs",
+    "test:integration": "vitest run --config tests/config/vitest.integration.config.mjs",
     "test:packages": "node scripts/check-client-packages.mjs"
   },
   "engines": {

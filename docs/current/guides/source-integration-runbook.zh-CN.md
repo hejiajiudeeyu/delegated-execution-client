@@ -82,17 +82,17 @@ npm --workspace @delexec/ops run start -- bootstrap --email you@example.com --pl
 - 在拆分后的源码布局中，客户端仓库已不再包含 relay 源码包
 - 因此源码集成应使用 `relay_http`，并指向平台仓库启动的 relay 进程
 
-## 4. 审批 Seller 与 Subagent
+## 4. 审批 Responder 与 Hotline
 
 若 bootstrap 报告审批待处理，在平台侧审批两个对象：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/v1/admin/sellers/<seller_id>/approve \
+curl -X POST http://127.0.0.1:8080/v2/admin/responders/<responder_id>/approve \
   -H 'Authorization: Bearer sk_admin_local_dev' \
   -H 'Content-Type: application/json' \
   -d '{"reason":"manual integration approval"}'
 
-curl -X POST http://127.0.0.1:8080/v1/admin/subagents/local.summary.v1/approve \
+curl -X POST http://127.0.0.1:8080/v2/admin/hotlines/local.summary.v1/approve \
   -H 'Authorization: Bearer sk_admin_local_dev' \
   -H 'Content-Type: application/json' \
   -d '{"reason":"manual integration approval"}'
@@ -110,7 +110,7 @@ npm --workspace @delexec/ops run start -- status
 成功标准：
 
 - relay 健康检查返回 `200`
-- buyer 与 seller 进程健康
+- caller 与 responder 进程健康
 - 最新请求状态变为 `SUCCEEDED`
 
 ## 6. 失败时检查项

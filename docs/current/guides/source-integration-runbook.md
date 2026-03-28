@@ -79,17 +79,17 @@ Important note:
 - in the split-repository source layout, the client repository no longer contains the relay source package
 - source integration should therefore use `relay_http` pointed at a relay process started from the platform repository
 
-## 4. Approve Seller And Subagent
+## 4. Approve Responder And Hotline
 
 If bootstrap reports pending approval, approve both objects from the platform side:
 
 ```bash
-curl -X POST http://127.0.0.1:8080/v1/admin/sellers/<seller_id>/approve \
+curl -X POST http://127.0.0.1:8080/v2/admin/responders/<responder_id>/approve \
   -H 'Authorization: Bearer sk_admin_local_dev' \
   -H 'Content-Type: application/json' \
   -d '{"reason":"manual integration approval"}'
 
-curl -X POST http://127.0.0.1:8080/v1/admin/subagents/local.summary.v1/approve \
+curl -X POST http://127.0.0.1:8080/v2/admin/hotlines/local.summary.v1/approve \
   -H 'Authorization: Bearer sk_admin_local_dev' \
   -H 'Content-Type: application/json' \
   -d '{"reason":"manual integration approval"}'
@@ -107,7 +107,7 @@ npm --workspace @delexec/ops run start -- status
 Success criteria:
 
 - relay health is `200`
-- buyer and seller processes are healthy
+- caller and responder processes are healthy
 - the latest request status becomes `SUCCEEDED`
 
 ## 6. What To Check On Failure

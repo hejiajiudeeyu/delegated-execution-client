@@ -21,20 +21,20 @@ node scripts/coding-agent-bootstrap.mjs --email coding-agent@local.test --platfo
 bootstrap 流程会尝试完成：
 
 1. `delexec-ops setup`
-2. buyer 注册
-3. 安装官方示例 subagent
-4. 提交 seller 审核
-5. 启用 seller
+2. caller 注册
+3. 安装官方示例 hotline
+4. 提交 responder 审核
+5. 启用 responder
 6. 启动 supervisor
-7. 当本地运维环境具备 `PLATFORM_ADMIN_API_KEY` 时完成 seller/subagent 审批
-8. 按正常 buyer -> seller 协议路径执行本地示例自调用
+7. 当本地运维环境具备 `PLATFORM_ADMIN_API_KEY` 时完成 responder/hotline 审批
+8. 按正常 caller -> responder 协议路径执行本地示例自调用
 
 推荐环境变量：
 
 ```bash
 export PLATFORM_API_BASE_URL=http://127.0.0.1:8080
 export PLATFORM_ADMIN_API_KEY=sk_admin_xxx
-export BOOTSTRAP_BUYER_EMAIL=coding-agent@local.test
+export BOOTSTRAP_CALLER_EMAIL=coding-agent@local.test
 ```
 
 `PLATFORM_ADMIN_API_KEY` 用于本地 bootstrap 自动化或 `platform-console-gateway`，浏览器客户端不应直接存储或使用该密钥。
@@ -42,7 +42,7 @@ export BOOTSTRAP_BUYER_EMAIL=coding-agent@local.test
 成功判定：
 
 - 输出为 JSON
-- `steps` 包含 `setup_ok`、`buyer_registered`、`example_subagent_added`、`review_submitted`、`seller_enabled`
+- `steps` 包含 `setup_ok`、`caller_registered`、`example_hotline_added`、`review_submitted`、`responder_enabled`
 - 终端成功返回：
 
 ```json
@@ -60,7 +60,7 @@ export BOOTSTRAP_BUYER_EMAIL=coding-agent@local.test
 常用后续命令：
 
 ```bash
-delexec-ops add-example-subagent
+delexec-ops add-example-hotline
 delexec-ops run-example --text "Summarize this request."
 ```
 

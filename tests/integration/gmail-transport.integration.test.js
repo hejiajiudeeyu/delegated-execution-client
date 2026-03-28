@@ -22,7 +22,7 @@ describe("gmail transport integration", () => {
           }
         };
       }
-      if (url === "https://gmail.googleapis.com/gmail/v1/users/buyer%40example.com/messages/send") {
+      if (url === "https://gmail.googleapis.com/gmail/v1/users/caller%40example.com/messages/send") {
         calls.send.push(JSON.parse(init.body));
         return {
           status: 200,
@@ -41,7 +41,7 @@ describe("gmail transport integration", () => {
           }
         };
       }
-      if (url === "https://gmail.googleapis.com/gmail/v1/users/buyer%40example.com/messages/msg_1?format=full") {
+      if (url === "https://gmail.googleapis.com/gmail/v1/users/caller%40example.com/messages/msg_1?format=full") {
         return {
           status: 200,
           async text() {
@@ -51,8 +51,8 @@ describe("gmail transport integration", () => {
               payload: {
                 headers: [
                   { name: "Subject", value: "[RSP] task.result req_1" },
-                  { name: "From", value: "seller@example.com" },
-                  { name: "To", value: "buyer@example.com" },
+                  { name: "From", value: "responder@example.com" },
+                  { name: "To", value: "caller@example.com" },
                   { name: "X-RSP-Request-Id", value: "req_1" },
                   { name: "X-RSP-Type", value: "task.result" }
                 ],
@@ -80,7 +80,7 @@ describe("gmail transport integration", () => {
           }
         };
       }
-      if (url === "https://gmail.googleapis.com/gmail/v1/users/buyer%40example.com/messages/msg_1/attachments/att_1") {
+      if (url === "https://gmail.googleapis.com/gmail/v1/users/caller%40example.com/messages/msg_1/attachments/att_1") {
         return {
           status: 200,
           async text() {
@@ -94,7 +94,7 @@ describe("gmail transport integration", () => {
           }
         };
       }
-      if (url === "https://gmail.googleapis.com/gmail/v1/users/buyer%40example.com/messages/msg_1/modify") {
+      if (url === "https://gmail.googleapis.com/gmail/v1/users/caller%40example.com/messages/msg_1/modify") {
         calls.modify.push(JSON.parse(init.body));
         return {
           status: 200,
@@ -103,11 +103,11 @@ describe("gmail transport integration", () => {
           }
         };
       }
-      if (url === "https://gmail.googleapis.com/gmail/v1/users/buyer%40example.com/profile") {
+      if (url === "https://gmail.googleapis.com/gmail/v1/users/caller%40example.com/profile") {
         return {
           status: 200,
           async text() {
-            return JSON.stringify({ emailAddress: "buyer@example.com" });
+            return JSON.stringify({ emailAddress: "caller@example.com" });
           }
         };
       }
@@ -118,9 +118,9 @@ describe("gmail transport integration", () => {
       clientId: "client-id",
       clientSecret: "client-secret",
       refreshToken: "refresh-token",
-      user: "buyer@example.com",
-      sender: "buyer@example.com",
-      receiver: "seller@example.com"
+      user: "caller@example.com",
+      sender: "caller@example.com",
+      receiver: "responder@example.com"
     });
 
     const sent = await transport.send({

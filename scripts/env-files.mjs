@@ -7,7 +7,7 @@ export {
   getOpsHomeDir,
   getOpsEnvFile,
   getOpsSecretsFile,
-  getSellerConfigFile,
+  getResponderConfigFile,
   getOpsConfigFile,
   ensureOpsDirectories,
   buildOpsEnvSearchPaths,

@@ -28,8 +28,8 @@
 - `npm run test:e2e:ui`（Vitest Web UI）
 - `npm run test:deploy:config`
 - `npm run test:smoke:platform`
-- `npm run test:smoke:buyer`
-- `npm run test:smoke:seller`
+- `npm run test:smoke:caller`
+- `npm run test:smoke:responder`
 - `npm run test:compose-smoke`
 - `npm run test:public-stack-smoke`
 - `npm run test:local-images-smoke`

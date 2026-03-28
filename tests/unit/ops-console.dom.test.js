@@ -47,15 +47,21 @@ describe("ops-console dom flow", () => {
         }
       }
     };
-    let localSubagents = [
+    let localHotlines = [
       {
-        subagent_id: "local.subagent.v2",
+        hotline_id: "local.hotline.v2",
         display_name: "Local One",
         task_types: ["text_classify"],
         capabilities: ["text.classify"],
         tags: ["local"],
         adapter_type: "process",
         adapter: { cmd: "node worker.js" },
+        metadata: {
+          project: {
+            path: "/tmp/local-one",
+            description: "Summarizes a local repository for remote callers"
+          }
+        },
         enabled: true,
         review_status: "pending",
         submitted_for_review: true
@@ -83,28 +89,28 @@ describe("ops-console dom flow", () => {
         if (pathname === "/status") {
           return jsonResponse({
             config: {
-              buyer: { api_key: null, api_key_configured: true, contact_email: "buyer@test.local" },
-              seller: {
+              caller: { api_key: null, api_key_configured: true, contact_email: "caller@test.local" },
+              responder: {
                 enabled: false,
-                seller_id: "seller_local",
-                subagents: localSubagents
+                responder_id: "responder_local",
+                hotlines: localHotlines
               }
             },
-            seller: {
+            responder: {
               enabled: false,
               pending_review_count: 0,
               review_summary: { pending: 1 }
             },
             requests: { total: 1, by_status: { SUCCEEDED: 1 }, latest: [] },
             runtime: {
-              buyer: { health: { status: 200, body: { ok: true } } },
-              seller: { health: null },
+              caller: { health: { status: 200, body: { ok: true } } },
+              responder: { health: null },
               relay: { health: { status: 200, body: { ok: true } } }
             }
           });
         }
         if (pathname === "/runtime/logs" && method === "GET") {
-          return jsonResponse({ service: "buyer", logs: ["buyer ready\n"] });
+          return jsonResponse({ service: "caller", logs: ["caller ready\n"] });
         }
         if (pathname === "/runtime/transport" && method === "GET") {
           return jsonResponse(transportConfig);
@@ -146,13 +152,13 @@ describe("ops-console dom flow", () => {
         }
         if (pathname === "/runtime/alerts" && method === "GET") {
           return jsonResponse({
-            service: "buyer",
+            service: "caller",
             alerts: [
               {
-                service: "buyer",
+                service: "caller",
                 severity: "warning",
                 source: "log",
-                message: "warning: buyer retry scheduled"
+                message: "warning: caller retry scheduled"
               }
             ]
           });
@@ -162,20 +168,92 @@ describe("ops-console dom flow", () => {
             ok: true,
             generated_at: "2026-03-09T00:00:00.000Z",
             status: {
-              seller: { enabled: false, review_summary: { pending: 1 } },
+              responder: { enabled: false, review_summary: { pending: 1 } },
               requests: { total: 1, by_status: { SUCCEEDED: 1 } },
               debug: { logs_dir: "/tmp/ops/logs", event_log: "/tmp/ops/logs/supervisor.events.jsonl" }
             },
-            recent_events: [{ type: "service_started", service: "buyer" }]
+            recent_events: [{ type: "service_started", service: "caller" }]
           });
         }
-        if (pathname === "/catalog/subagents" && method === "GET") {
-          return jsonResponse({ items: [] });
+        if (pathname === "/catalog/hotlines" && method === "GET") {
+          return jsonResponse({
+            items: [
+              {
+                hotline_id: "foxlab.text.classifier.v1",
+                responder_id: "responder_foxlab",
+                display_name: "Foxlab Text Classifier",
+                task_types: ["text_classify"],
+                capabilities: ["text.classify"],
+                availability_status: "healthy"
+              }
+            ]
+          });
         }
-        if (pathname === "/seller/subagents" && method === "POST") {
+        if (pathname === "/calls/prepare" && method === "POST") {
+          return jsonResponse({
+            task_type: "text_classify",
+            always_ask: true,
+            remembered_preference: null,
+            selection_reason: "task_type_match · healthy",
+            selected_hotline: {
+              hotline_id: "foxlab.text.classifier.v1",
+              responder_id: "responder_foxlab",
+              display_name: "Foxlab Text Classifier",
+              responder_display_name: "Foxlab",
+              capabilities: ["text.classify"],
+              availability_status: "healthy",
+              template_summary: {
+                template_ref: "foxlab.text.classifier",
+                output_properties: ["summary"]
+              },
+              match_reasons: ["task_type_match", "healthy"]
+            },
+            candidate_hotlines: [
+              {
+                hotline_id: "foxlab.text.classifier.v1",
+                responder_id: "responder_foxlab",
+                display_name: "Foxlab Text Classifier",
+                responder_display_name: "Foxlab",
+                capabilities: ["text.classify"],
+                availability_status: "healthy",
+                difference_note: "Matches the current task type.",
+                template_summary: {
+                  template_ref: "foxlab.text.classifier",
+                  output_properties: ["summary"]
+                }
+              },
+              {
+                hotline_id: "atelier.text.classifier.v2",
+                responder_id: "responder_atelier",
+                display_name: "Atelier Text Router",
+                responder_display_name: "Atelier",
+                capabilities: ["text.classify", "routing.assist"],
+                availability_status: "healthy",
+                difference_note: "Available as a fallback responder route.",
+                template_summary: {
+                  template_ref: "atelier.text.router",
+                  output_properties: ["summary"]
+                }
+              }
+            ]
+          });
+        }
+        if (pathname === "/calls/confirm" && method === "POST") {
+          return jsonResponse({
+            request_id: "req_confirm_1",
+            request: {
+              request_id: "req_confirm_1",
+              responder_id: "responder_atelier",
+              hotline_id: "atelier.text.classifier.v2",
+              status: "SENT",
+              updated_at: "2026-03-08T00:00:01Z"
+            }
+          }, 201);
+        }
+        if (pathname === "/responder/hotlines" && method === "POST") {
           const body = JSON.parse(init.body || "{}");
-          const nextSubagent = {
-            subagent_id: body.subagent_id,
+          const nextHotline = {
+            hotline_id: body.hotline_id,
             display_name: body.display_name,
             task_types: body.task_types || [],
             capabilities: body.capabilities || [],
@@ -186,67 +264,67 @@ describe("ops-console dom flow", () => {
             review_status: "local_only",
             submitted_for_review: false
           };
-          localSubagents = [
-            ...localSubagents.filter((item) => item.subagent_id !== nextSubagent.subagent_id),
-            nextSubagent
+          localHotlines = [
+            ...localHotlines.filter((item) => item.hotline_id !== nextHotline.hotline_id),
+            nextHotline
           ];
           return jsonResponse({
-            ...nextSubagent
+            ...nextHotline
           }, 201);
         }
-        if (pathname === "/seller/subagents/example" && method === "POST") {
-          const nextSubagent = {
-            subagent_id: "local.summary.v1",
+        if (pathname === "/responder/hotlines/example" && method === "POST") {
+          const nextHotline = {
+            hotline_id: "local.summary.v1",
             display_name: "Local Summary Example",
             task_types: ["text_summarize"],
             capabilities: ["text.summarize"],
             tags: ["local", "example", "demo"],
             adapter_type: "process",
-            adapter: { cmd: `${process.execPath} example-subagent-worker.js` },
+            adapter: { cmd: `${process.execPath} example-hotline-worker.js` },
             enabled: true,
             review_status: "local_only",
             submitted_for_review: false
           };
-          localSubagents = [
-            ...localSubagents.filter((item) => item.subagent_id !== nextSubagent.subagent_id),
-            nextSubagent
+          localHotlines = [
+            ...localHotlines.filter((item) => item.hotline_id !== nextHotline.hotline_id),
+            nextHotline
           ];
           return jsonResponse({
-            ...nextSubagent,
+            ...nextHotline,
             example: true
           }, 201);
         }
-        if (pathname === "/seller/subagents/local.subagent.v2/disable" && method === "POST") {
-          localSubagents = localSubagents.map((item) =>
-            item.subagent_id === "local.subagent.v2" ? { ...item, enabled: false } : item
+        if (pathname === "/responder/hotlines/local.hotline.v2/disable" && method === "POST") {
+          localHotlines = localHotlines.map((item) =>
+            item.hotline_id === "local.hotline.v2" ? { ...item, enabled: false } : item
           );
           return jsonResponse({
             ok: true,
-            subagent_id: "local.subagent.v2",
+            hotline_id: "local.hotline.v2",
             enabled: false,
             review_status: "pending",
             submitted_for_review: true
           });
         }
-        if (pathname === "/seller/subagents/local.subagent.v2" && method === "DELETE") {
-          localSubagents = localSubagents.filter((item) => item.subagent_id !== "local.subagent.v2");
+        if (pathname === "/responder/hotlines/local.hotline.v2" && method === "DELETE") {
+          localHotlines = localHotlines.filter((item) => item.hotline_id !== "local.hotline.v2");
           return jsonResponse({
             ok: true,
             removed: {
-              subagent_id: "local.subagent.v2"
+              hotline_id: "local.hotline.v2"
             }
           });
         }
-        if (pathname === "/seller/submit-review" && method === "POST") {
-          return jsonResponse({ seller_id: "seller_local", submitted: 1, results: [{ review_status: "pending" }] }, 201);
+        if (pathname === "/responder/submit-review" && method === "POST") {
+          return jsonResponse({ responder_id: "responder_local", submitted: 1, results: [{ review_status: "pending" }] }, 201);
         }
         if (pathname === "/requests" && method === "GET") {
           return jsonResponse({
             items: [
               {
                 request_id: "req_ui_1",
-                seller_id: "seller_foxlab",
-                subagent_id: "foxlab.text.classifier.v1",
+                responder_id: "responder_foxlab",
+                hotline_id: "foxlab.text.classifier.v1",
                 status: "SUCCEEDED",
                 updated_at: "2026-03-08T00:00:00Z"
               }
@@ -256,8 +334,8 @@ describe("ops-console dom flow", () => {
         if (pathname === "/requests/req_ui_1") {
           return jsonResponse({
             request_id: "req_ui_1",
-            seller_id: "seller_foxlab",
-            subagent_id: "foxlab.text.classifier.v1",
+            responder_id: "responder_foxlab",
+            hotline_id: "foxlab.text.classifier.v1",
             status: "SUCCEEDED",
             updated_at: "2026-03-08T00:00:00Z"
           });
@@ -271,13 +349,31 @@ describe("ops-console dom flow", () => {
             }
           });
         }
+        if (pathname === "/requests/req_confirm_1") {
+          return jsonResponse({
+            request_id: "req_confirm_1",
+            responder_id: "responder_atelier",
+            hotline_id: "atelier.text.classifier.v2",
+            status: "SUCCEEDED",
+            updated_at: "2026-03-08T00:00:03Z"
+          });
+        }
+        if (pathname === "/requests/req_confirm_1/result") {
+          return jsonResponse({
+            available: true,
+            result_package: {
+              status: "ok",
+              output: { summary: "confirmed call ok" }
+            }
+          });
+        }
         if (pathname === "/requests/example" && method === "POST") {
           return jsonResponse({
             request_id: "req_example_1",
             request: {
               request_id: "req_example_1",
-              seller_id: "seller_local",
-              subagent_id: "local.summary.v1",
+              responder_id: "responder_local",
+              hotline_id: "local.summary.v1",
               status: "SENT",
               updated_at: "2026-03-08T00:00:01Z"
             }
@@ -286,8 +382,8 @@ describe("ops-console dom flow", () => {
         if (pathname === "/requests/req_example_1") {
           return jsonResponse({
             request_id: "req_example_1",
-            seller_id: "seller_local",
-            subagent_id: "local.summary.v1",
+            responder_id: "responder_local",
+            hotline_id: "local.summary.v1",
             status: "SUCCEEDED",
             updated_at: "2026-03-08T00:00:02Z"
           });
@@ -310,26 +406,28 @@ describe("ops-console dom flow", () => {
 
     expect(document.querySelector("#ops-url")).toBeNull();
     expect(document.querySelector("#requests-list")?.textContent).toContain("req_ui_1");
-    expect(document.querySelector("#runtime-output")?.textContent).toContain("buyer ready");
-    expect(document.querySelector("#runtime-alerts")?.textContent).toContain("buyer retry scheduled");
+    expect(document.querySelector("#runtime-output")?.textContent).toContain("caller ready");
+    expect(document.querySelector("#runtime-alerts")?.textContent).toContain("caller retry scheduled");
     expect(document.querySelector("#debug-output")?.textContent).toContain("/tmp/ops/logs");
     expect(document.querySelector("#request-summary")?.textContent).toContain("SUCCEEDED: 1");
     expect(document.querySelector("#transport-summary")?.textContent).toContain("type=local");
-    expect(document.querySelector("#setup-wizard")?.textContent).toContain("Register Buyer");
+    expect(document.querySelector("#setup-wizard")?.textContent).toContain("Register Caller");
     expect(document.querySelector("#setup-wizard")?.textContent).toContain("Add Local Example");
-    expect(document.querySelector("[data-wizard-action='register-buyer']")?.textContent).toContain("Review");
+    expect(document.querySelector("[data-wizard-action='register-caller']")?.textContent).toContain("Review");
     expect(document.querySelector("#setup-wizard")?.textContent).toContain("Submitted: 1");
-    document.querySelector("#add-example-subagent")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    document.querySelector("#add-example-hotline")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flush();
-    expect(document.querySelector("#seller-subagents")?.textContent).toContain("Local Summary Example");
+    expect(document.querySelector("#responder-hotlines")?.textContent).toContain("Local Summary Example");
+    expect(document.querySelector("#responder-hotlines")?.textContent).toContain("/tmp/local-one");
+    expect(document.querySelector("#responder-hotlines")?.textContent).toContain("Summarizes a local repository for remote callers");
     document.querySelector("#transport-type").value = "email";
     document.querySelector("#transport-type")?.dispatchEvent(new Event("change", { bubbles: true }));
     document.querySelector("#transport-email-provider").value = "gmail";
     document.querySelector("#transport-email-provider")?.dispatchEvent(new Event("change", { bubbles: true }));
-    document.querySelector("#transport-email-sender").value = "buyer@example.com";
-    document.querySelector("#transport-email-receiver").value = "seller@example.com";
+    document.querySelector("#transport-email-sender").value = "caller@example.com";
+    document.querySelector("#transport-email-receiver").value = "responder@example.com";
     document.querySelector("#transport-gmail-client-id").value = "gmail-client-id";
-    document.querySelector("#transport-gmail-user").value = "buyer@example.com";
+    document.querySelector("#transport-gmail-user").value = "caller@example.com";
     document.querySelector("#transport-gmail-client-secret").value = "secret";
     document.querySelector("#transport-gmail-refresh-token").value = "refresh";
     document.querySelector("#save-transport")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -340,29 +438,40 @@ describe("ops-console dom flow", () => {
     await flush();
     expect(document.querySelector("#transport-summary")?.textContent).toContain("test_ok");
     document
-      .querySelector("[data-subagent-action='edit'][data-subagent-id='local.subagent.v2']")
+      .querySelector("[data-hotline-action='edit'][data-hotline-id='local.hotline.v2']")
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flush();
-    expect(document.querySelector("#subagent-id")?.value).toBe("local.subagent.v2");
-    expect(document.querySelector("#add-subagent")?.textContent).toContain("Save");
+    expect(document.querySelector("#hotline-id")?.value).toBe("local.hotline.v2");
+    expect(document.querySelector("#add-hotline")?.textContent).toContain("Save");
     document.querySelector("#display-name").value = "Local One Updated";
-    document.querySelector("#add-subagent")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    document.querySelector("#add-hotline")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flush();
-    expect(document.querySelector("#seller-subagents")?.textContent).toContain("Local One Updated");
+    expect(document.querySelector("#responder-hotlines")?.textContent).toContain("Local One Updated");
     document
-      .querySelector("[data-subagent-action='disable'][data-subagent-id='local.subagent.v2']")
+      .querySelector("[data-hotline-action='disable'][data-hotline-id='local.hotline.v2']")
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flush();
-    expect(document.querySelector("#seller-output")?.textContent).toContain("\"enabled\": false");
+    expect(document.querySelector("#responder-output")?.textContent).toContain("\"enabled\": false");
     document
-      .querySelector("[data-subagent-action='remove'][data-subagent-id='local.subagent.v2']")
+      .querySelector("[data-hotline-action='remove'][data-hotline-id='local.hotline.v2']")
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flush();
-    expect(document.querySelector("#seller-subagents")?.textContent).not.toContain("local.subagent.v2");
+    expect(document.querySelector("#responder-hotlines")?.textContent).not.toContain("local.hotline.v2");
     document.querySelector("[data-request-id='req_ui_1']")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flush();
     expect(document.querySelector("#request-detail")?.textContent).toContain("dom flow ok");
     expect(document.querySelector("#request-detail")?.textContent).toContain("Result Summary");
+    document.querySelector("#prepare-call")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+    expect(document.querySelector("#call-confirmation")?.textContent).toContain("Foxlab Text Classifier");
+    expect(document.querySelector("#call-confirmation")?.textContent).toContain("Atelier Text Router");
+    document.querySelector("[data-candidate-hotline-id='atelier.text.classifier.v2']")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    document.querySelector("#remember-task-type").checked = true;
+    document.querySelector("#confirm-call")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+    document.querySelector("#poll-result")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+    expect(document.querySelector("#request-detail")?.textContent).toContain("confirmed call ok");
     document.querySelector("#run-example-request")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flush();
     document.querySelector("#poll-result")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));

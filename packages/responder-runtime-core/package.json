@@ -1,0 +1,26 @@
+{
+  "name": "@delexec/responder-runtime-core",
+  "version": "0.1.0",
+  "description": "Responder runtime core logic for delegated execution",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "delegated-execution",
+    "responder",
+    "runtime"
+  ],
+  "dependencies": {
+    "@delexec/contracts": "^0.1.0"
+  }
+}

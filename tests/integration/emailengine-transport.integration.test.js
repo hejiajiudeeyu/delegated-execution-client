@@ -20,18 +20,18 @@ describe("emailengine transport integration", () => {
       const bodyText = Buffer.concat(chunks).toString("utf8");
       const body = bodyText ? JSON.parse(bodyText) : null;
 
-      if (req.method === "GET" && url.pathname === "/v1/account/buyer%40example.com") {
+      if (req.method === "GET" && url.pathname === "/v1/account/caller%40example.com") {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ account: "buyer@example.com" }));
+        res.end(JSON.stringify({ account: "caller@example.com" }));
         return;
       }
-      if (req.method === "POST" && url.pathname === "/v1/account/buyer%40example.com/submit") {
+      if (req.method === "POST" && url.pathname === "/v1/account/caller%40example.com/submit") {
         calls.submit.push(body);
         res.writeHead(202, { "content-type": "application/json" });
         res.end(JSON.stringify({ queued: true }));
         return;
       }
-      if (req.method === "POST" && url.pathname === "/v1/account/buyer%40example.com/search") {
+      if (req.method === "POST" && url.pathname === "/v1/account/caller%40example.com/search") {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({
           messages: [
@@ -46,14 +46,14 @@ describe("emailengine transport integration", () => {
         }));
         return;
       }
-      if (req.method === "GET" && url.pathname === "/v1/account/buyer%40example.com/message/mail_1") {
+      if (req.method === "GET" && url.pathname === "/v1/account/caller%40example.com/message/mail_1") {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({
           id: "mail_1",
           messageId: "mail_1",
           threadId: "thread_1",
-          from: { address: "seller@example.com" },
-          to: [{ address: "buyer@example.com" }],
+          from: { address: "responder@example.com" },
+          to: [{ address: "caller@example.com" }],
           headers: {
             "X-RSP-Request-Id": "req_1",
             "X-RSP-Type": "task.result"
@@ -71,12 +71,12 @@ describe("emailengine transport integration", () => {
         }));
         return;
       }
-      if (req.method === "GET" && url.pathname === "/v1/account/buyer%40example.com/attachment/att_1") {
+      if (req.method === "GET" && url.pathname === "/v1/account/caller%40example.com/attachment/att_1") {
         res.writeHead(200, { "content-type": "text/plain" });
         res.end("attachment-body");
         return;
       }
-      if (req.method === "PUT" && url.pathname === "/v1/account/buyer%40example.com/message/mail_1") {
+      if (req.method === "PUT" && url.pathname === "/v1/account/caller%40example.com/message/mail_1") {
         calls.ack.push(body);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ updated: true }));
@@ -88,10 +88,10 @@ describe("emailengine transport integration", () => {
     const baseUrl = await listenServer(server);
     const transport = createEmailEngineTransportAdapter({
       baseUrl,
-      account: "buyer@example.com",
+      account: "caller@example.com",
       accessToken: "ee-token",
-      sender: "buyer@example.com",
-      receiver: "seller@example.com"
+      sender: "caller@example.com",
+      receiver: "responder@example.com"
     });
 
     try {

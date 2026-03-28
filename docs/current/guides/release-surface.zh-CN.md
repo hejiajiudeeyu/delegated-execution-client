@@ -21,8 +21,8 @@
 
 - `@delexec/runtime-utils`
 - `@delexec/sqlite-store`
-- `@delexec/buyer-controller-core`
-- `@delexec/seller-runtime-core`
+- `@delexec/caller-controller-core`
+- `@delexec/responder-runtime-core`
 - `@delexec/transport-*`
 
 这些包存在的目的：

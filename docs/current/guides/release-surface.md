@@ -18,8 +18,8 @@ This repository still contains support packages such as:
 
 - `@delexec/runtime-utils`
 - `@delexec/sqlite-store`
-- `@delexec/buyer-controller-core`
-- `@delexec/seller-runtime-core`
+- `@delexec/caller-controller-core`
+- `@delexec/responder-runtime-core`
 - `@delexec/transport-*`
 
 These packages exist to support:

@@ -1,0 +1,6 @@
+@import 'tailwindcss' source(none);
+@source '../**/*.{ts,tsx}';
+
+@import 'tw-animate-css';
+@import './console-tokens.css';
+@import './theme.css';

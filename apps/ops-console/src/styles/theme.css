@@ -1,0 +1,144 @@
+@custom-variant dark (&:is(.dark *));
+
+/* ── Base (light) ─────────────────────────────────────────────────────── */
+:root {
+  --surface: #f9f8f6;
+  --ink: #111111;
+  --card: #ffffff;
+  --card-foreground: #111111;
+  --popover: #ffffff;
+  --popover-foreground: #111111;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #ece6d7;
+  --secondary-foreground: #111111;
+  --muted: #f0ede8;
+  --muted-foreground: #5f5a50;
+  --accent: #e8f0fe;
+  --accent-foreground: #1a56db;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: rgba(17, 17, 17, 0.12);
+  --input: transparent;
+  --input-background: #ffffff;
+  --ring: rgba(59, 130, 246, 0.4);
+  --radius: 0.25rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #111111;
+  --sidebar-primary: #111111;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f0ede8;
+  --sidebar-accent-foreground: #111111;
+  --sidebar-border: rgba(17, 17, 17, 0.1);
+  --sidebar-ring: rgba(59, 130, 246, 0.3);
+}
+
+/* ── Tab-context overrides — General (Client blue) ───────────────────── */
+[data-tab-ctx="general"] {
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --ring: rgba(59, 130, 246, 0.4);
+  --accent: #eff6ff;
+  --accent-foreground: #1e40af;
+}
+
+/* ── Tab-context overrides — Caller (teal) ───────────────────────────── */
+[data-tab-ctx="caller"] {
+  --primary: #14b8a6;
+  --primary-foreground: #ffffff;
+  --ring: rgba(20, 184, 166, 0.4);
+  --accent: #f0fdfa;
+  --accent-foreground: #0f766e;
+}
+
+/* ── Tab-context overrides — Responder (orange) ──────────────────────── */
+[data-tab-ctx="responder"] {
+  --primary: #f97316;
+  --primary-foreground: #ffffff;
+  --ring: rgba(249, 115, 22, 0.4);
+  --accent: #fff7ed;
+  --accent-foreground: #c2410c;
+}
+
+@theme inline {
+  --color-background: var(--surface);
+  --color-foreground: var(--ink);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 4px);
+  --radius-xl: calc(var(--radius) + 8px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    background: var(--surface);
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--font-sans);
+    color: var(--ink);
+    background: var(--surface);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+
+  button, input, textarea, select {
+    font: inherit;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* ── Terminal-style log output ─────────────────────────────────────── */
+  .terminal-block {
+    background: var(--c-terminal-bg);
+    color: var(--c-terminal-fg);
+    font-family: var(--c-font-mono);
+    font-size: 0.75rem;
+    line-height: 1.6;
+    border-radius: var(--c-radius);
+    padding: 1rem;
+    overflow-x: auto;
+  }
+}

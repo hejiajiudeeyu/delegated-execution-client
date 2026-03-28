@@ -30,10 +30,10 @@ delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 This flow attempts to:
 
 1. initialize `~/.delexec`
-2. register the buyer
-3. install the official example subagent
-4. submit seller and subagent review
-5. enable the local seller runtime
+2. register the caller
+3. install the official example hotline
+4. submit responder and hotline review
+5. enable the local responder runtime
 6. start the local supervisor
 7. run the local example self-call
 
@@ -73,14 +73,14 @@ delexec-ops debug-snapshot
 The AI should summarize only these user-relevant outcomes:
 
 - setup completed or not
-- buyer registration completed or not
+- caller registration completed or not
 - review submitted or not
-- seller enabled or not
+- responder enabled or not
 - admin approval still required or not
 - example request succeeded or not
 
 ## Current Limits
 
 - platform must already be reachable
-- seller and subagent still require admin approval
+- responder and hotline still require admin approval
 - email transport is optional and not required for the bootstrap path

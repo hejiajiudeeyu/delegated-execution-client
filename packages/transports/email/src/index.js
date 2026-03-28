@@ -48,11 +48,11 @@ export function normalizeEnvelope(envelope = {}) {
     envelope.to ||
     envelope.address ||
     envelope.receiver ||
-    (envelope.direction === "seller_to_buyer" ? "buyer-controller" : "seller-controller");
+    (envelope.direction === "responder_to_caller" ? "caller-controller" : "responder-controller");
   const from =
     envelope.from ||
     envelope.sender ||
-    (envelope.direction === "seller_to_buyer" ? "seller-controller" : "buyer-controller");
+    (envelope.direction === "responder_to_caller" ? "responder-controller" : "caller-controller");
 
   const payload =
     envelope.payload && typeof envelope.payload === "object" && !Array.isArray(envelope.payload)
@@ -158,7 +158,7 @@ export class InMemoryEmailTransport {
     return this.send(message);
   }
 
-  async pollThreadReplies({ request_id, direction = "seller_to_buyer", limit = 50 } = {}) {
+  async pollThreadReplies({ request_id, direction = "responder_to_caller", limit = 50 } = {}) {
     return this.messages
       .filter((item) => (!request_id || item.request_id === request_id) && item.direction === direction)
       .slice(0, limit)

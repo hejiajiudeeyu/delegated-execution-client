@@ -13,20 +13,20 @@ describe("email transport integration", () => {
     await sendTaskEmail(transport, {
       request_id: "req_mail_1",
       thread_id: "thread_1",
-      direction: "buyer_to_seller",
+      direction: "caller_to_responder",
       payload: { type: "task", body: "hello" }
     });
 
     await sendTaskEmail(transport, {
       request_id: "req_mail_1",
       thread_id: "thread_1",
-      direction: "seller_to_buyer",
+      direction: "responder_to_caller",
       payload: { type: "result", body: "ok" }
     });
 
     const replies = await pollThreadReplies(transport, {
       request_id: "req_mail_1",
-      direction: "seller_to_buyer"
+      direction: "responder_to_caller"
     });
 
     expect(replies.length).toBe(1);
@@ -38,8 +38,8 @@ describe("email transport integration", () => {
     const sent = await transport.send({
       request_id: "req_mail_generic_1",
       thread_id: "thread_generic_1",
-      from: "seller@example.com",
-      to: "buyer@example.com",
+      from: "responder@example.com",
+      to: "caller@example.com",
       type: "task.result",
       body_text: JSON.stringify({ request_id: "req_mail_generic_1", status: "ok" }),
       attachments: [
@@ -51,16 +51,16 @@ describe("email transport integration", () => {
       ]
     });
 
-    const polled = await transport.poll({ receiver: "buyer@example.com" });
+    const polled = await transport.poll({ receiver: "caller@example.com" });
     expect(polled.items).toHaveLength(1);
     expect(polled.items[0].message_id).toBe(sent.message_id);
     expect(polled.items[0].body_text).toContain("\"status\":\"ok\"");
     expect(polled.items[0].attachments[0].name).toBe("report.txt");
 
-    const acked = await transport.ack(sent.message_id, { receiver: "buyer@example.com" });
+    const acked = await transport.ack(sent.message_id, { receiver: "caller@example.com" });
     expect(acked.acked).toBe(true);
 
-    const empty = await transport.poll({ receiver: "buyer@example.com" });
+    const empty = await transport.poll({ receiver: "caller@example.com" });
     expect(empty.items).toHaveLength(0);
   });
 
@@ -69,13 +69,13 @@ describe("email transport integration", () => {
 
     await sendTaskEmail(transport, {
       request_id: "req_mail_dup_1",
-      direction: "seller_to_buyer",
+      direction: "responder_to_caller",
       payload: { type: "result", body: "dup" }
     });
 
     const replies = await pollThreadReplies(transport, {
       request_id: "req_mail_dup_1",
-      direction: "seller_to_buyer"
+      direction: "responder_to_caller"
     });
 
     expect(replies.length).toBeGreaterThanOrEqual(2);

@@ -10,7 +10,7 @@ import { buildStructuredError } from "@delexec/contracts";
 import {
   buildTransportEnvUpdates,
   buildTransportSecretUpdates,
-  ensureSellerIdentity,
+  ensureResponderIdentity,
   ensureOpsState,
   hasEncryptedSecretStore,
   listLegacySecretKeys,
@@ -19,20 +19,20 @@ import {
   readTransportSecretsFromEnv,
   readResolvedOpsSecrets,
   redactTransportConfig,
-  removeSubagent,
+  removeHotline,
   saveOpsState,
   scrubLegacySecrets,
-  setSubagentEnabled,
+  setHotlineEnabled,
   unlockOpsSecrets,
-  upsertSubagent,
+  upsertHotline,
   writeOpsSecrets
 } from "./config.js";
 import {
   buildExampleRequestBody,
-  buildExampleSubagentDefinition,
+  buildExampleHotlineDefinition,
   LOCAL_EXAMPLE_DISPLAY_NAME,
-  LOCAL_EXAMPLE_SUBAGENT_ID
-} from "./example-subagent.js";
+  LOCAL_EXAMPLE_HOTLINE_ID
+} from "./example-hotline.js";
 import {
   appendServiceLog,
   appendSupervisorEvent,
@@ -151,9 +151,9 @@ function buildLegacyTransportSecretEnv(secretUpdates) {
 function mergeEnvWithResolvedSecrets(env, secrets) {
   return {
     ...env,
-    BUYER_PLATFORM_API_KEY: secrets.buyer_api_key || env.BUYER_PLATFORM_API_KEY || env.PLATFORM_API_KEY || "",
-    PLATFORM_API_KEY: secrets.buyer_api_key || env.PLATFORM_API_KEY || env.BUYER_PLATFORM_API_KEY || "",
-    SELLER_PLATFORM_API_KEY: secrets.seller_platform_api_key || env.SELLER_PLATFORM_API_KEY || "",
+    CALLER_PLATFORM_API_KEY: secrets.caller_api_key || env.CALLER_PLATFORM_API_KEY || env.PLATFORM_API_KEY || "",
+    PLATFORM_API_KEY: secrets.caller_api_key || env.PLATFORM_API_KEY || env.CALLER_PLATFORM_API_KEY || "",
+    RESPONDER_PLATFORM_API_KEY: secrets.responder_platform_api_key || env.RESPONDER_PLATFORM_API_KEY || "",
     PLATFORM_ADMIN_API_KEY: secrets.platform_admin_api_key || env.PLATFORM_ADMIN_API_KEY || "",
     ...buildTransportSecretLookup(secrets)
   };
@@ -311,38 +311,172 @@ function getTransportResponse(state, runtime) {
 
 function buildPlatformHeaders(state, runtime) {
   const secrets = getResolvedSecrets(state, runtime);
-  return secrets.buyer_api_key ? { "X-Platform-Api-Key": secrets.buyer_api_key } : {};
+  return secrets.caller_api_key ? { "X-Platform-Api-Key": secrets.caller_api_key } : {};
 }
 
-function findConfiguredExampleSubagent(state) {
-  return (state.config.seller?.subagents || []).find((item) => item.subagent_id === LOCAL_EXAMPLE_SUBAGENT_ID) || null;
+function findConfiguredExampleHotline(state) {
+  return (state.config.responder?.hotlines || []).find((item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID) || null;
 }
 
 function buildExampleVisibilityError(example) {
   if (!example) {
     return {
       status: 404,
-      body: buildStructuredError("EXAMPLE_SUBAGENT_NOT_CONFIGURED", "official example subagent is not configured locally", {
-        stage: "add_example_subagent"
+      body: buildStructuredError("EXAMPLE_HOTLINE_NOT_CONFIGURED", "official example hotline is not configured locally", {
+        stage: "add_example_hotline"
       })
     };
   }
   if (example.submitted_for_review !== true) {
     return {
       status: 409,
-      body: buildStructuredError("EXAMPLE_REVIEW_NOT_SUBMITTED", "official example subagent must be submitted for review first", {
+      body: buildStructuredError("EXAMPLE_REVIEW_NOT_SUBMITTED", "official example hotline must be submitted for review first", {
         stage: "submit_review"
       })
     };
   }
   return {
     status: 409,
-    body: buildStructuredError("EXAMPLE_NOT_VISIBLE_IN_CATALOG", "official example subagent is not yet visible in catalog", {
+    body: buildStructuredError("EXAMPLE_NOT_VISIBLE_IN_CATALOG", "official example hotline is not yet visible in catalog", {
       stage: "approve_and_catalog",
       review_status: example.review_status || "pending"
     })
   };
 }
+
+function ensurePreferenceState(state) {
+  state.config.preferences ||= { task_types: {} };
+  state.config.preferences.task_types ||= {};
+  return state.config.preferences.task_types;
+}
+
+function normalizeTaskTypeKey(taskType) {
+  return normalizedString(taskType)?.toLowerCase() || null;
+}
+
+function getTaskTypePreference(state, taskType) {
+  const key = normalizeTaskTypeKey(taskType);
+  if (!key) {
+    return null;
+  }
+  return ensurePreferenceState(state)[key] || null;
+}
+
+function setTaskTypePreference(state, taskType, preference) {
+  const key = normalizeTaskTypeKey(taskType);
+  if (!key) {
+    return null;
+  }
+  const preferences = ensurePreferenceState(state);
+  if (!preference || !preference.hotline_id) {
+    delete preferences[key];
+    return null;
+  }
+  preferences[key] = {
+    task_type: key,
+    hotline_id: preference.hotline_id,
+    responder_id: preference.responder_id || null,
+    updated_at: nowIso()
+  };
+  return preferences[key];
+}
+
+function summarizeCandidate(item, { selected = false, taskType = null, preferred = false } = {}) {
+  const taskTypeMatched = taskType ? (item.task_types || []).includes(taskType) : false;
+  const reasons = [];
+  if (selected) {
+    reasons.push("agent_selected");
+  }
+  if (preferred) {
+    reasons.push("task_type_preference");
+  }
+  if (taskTypeMatched) {
+    reasons.push("task_type_match");
+  }
+  if (item.availability_status === "healthy") {
+    reasons.push("healthy");
+  }
+  if ((item.capabilities || []).length > 0) {
+    reasons.push("capability_signal");
+  }
+  return {
+    hotline_id: item.hotline_id,
+    responder_id: item.responder_id,
+    display_name: item.display_name || item.hotline_id,
+    responder_display_name: item.responder_display_name || item.responder_id,
+    task_types: item.task_types || [],
+    capabilities: item.capabilities || [],
+    tags: item.tags || [],
+    availability_status: item.availability_status || "unknown",
+    signer_public_key_pem: item.responder_public_key_pem || null,
+    template_summary: item.template_ref
+      ? {
+          template_ref: item.template_ref,
+          input_properties: Object.keys(item.input_schema?.properties || {}),
+          output_properties: Object.keys(item.output_schema?.properties || {})
+        }
+      : null,
+    difference_note: preferred
+      ? "Matches your remembered task-type preference."
+      : taskTypeMatched
+        ? "Matches the current task type."
+        : "Available as a fallback responder route.",
+    match_reasons: reasons
+  };
+}
+
+function scoreCandidate(item, { taskType = null, responderId = null, hotlineId = null, preferred = null } = {}) {
+  let score = 0;
+  if (hotlineId && item.hotline_id === hotlineId) {
+    score += 120;
+  }
+  if (responderId && item.responder_id === responderId) {
+    score += 80;
+  }
+  if (preferred && item.hotline_id === preferred.hotline_id) {
+    score += 60;
+    if (!preferred.responder_id || preferred.responder_id === item.responder_id) {
+      score += 20;
+    }
+  }
+  if (taskType && (item.task_types || []).includes(taskType)) {
+    score += 40;
+  }
+  if (item.availability_status === "healthy") {
+    score += 15;
+  }
+  if (item.review_status === "approved") {
+    score += 10;
+  }
+  score += Math.min((item.capabilities || []).length, 5);
+  return score;
+}
+
+async function fetchCatalogCandidates(state, runtime, filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.hotline_id) {
+    params.set("hotline_id", filters.hotline_id);
+  }
+  if (filters.responder_id) {
+    params.set("responder_id", filters.responder_id);
+  }
+  if (filters.task_type) {
+    params.set("task_type", filters.task_type);
+  }
+  if (filters.capability) {
+    params.set("capability", filters.capability);
+  }
+
+  const response = await requestJson(
+    processBaseUrl(state.config.runtime.ports.caller),
+    `/controller/hotlines${params.toString() ? `?${params.toString()}` : ""}`,
+    {
+      headers: buildPlatformHeaders(state, runtime)
+    }
+  );
+  return response.body?.items || [];
+}
+
 
 async function testRelayTransport(baseUrl) {
   try {
@@ -635,14 +769,14 @@ export function createOpsSupervisorServer() {
       ...process.env,
       DELEXEC_HOME: process.env.DELEXEC_HOME || path.dirname(state.envFile),
       PLATFORM_API_BASE_URL: state.config.platform.base_url,
-      BUYER_PLATFORM_API_KEY: resolvedSecrets.buyer_api_key || "",
-      PLATFORM_API_KEY: resolvedSecrets.buyer_api_key || "",
-      BUYER_CONTACT_EMAIL: state.config.buyer.contact_email || "",
-      SELLER_ID: state.config.seller.seller_id || "",
-      SELLER_SIGNING_PUBLIC_KEY_PEM: state.env.SELLER_SIGNING_PUBLIC_KEY_PEM || "",
-      SELLER_SIGNING_PRIVATE_KEY_PEM: state.env.SELLER_SIGNING_PRIVATE_KEY_PEM || "",
-      SUBAGENT_IDS: (state.config.seller.subagents || []).map((item) => item.subagent_id).join(","),
-      SELLER_PLATFORM_API_KEY: resolvedSecrets.seller_platform_api_key || "",
+      CALLER_PLATFORM_API_KEY: resolvedSecrets.caller_api_key || "",
+      PLATFORM_API_KEY: resolvedSecrets.caller_api_key || "",
+      CALLER_CONTACT_EMAIL: state.config.caller.contact_email || "",
+      RESPONDER_ID: state.config.responder.responder_id || "",
+      RESPONDER_SIGNING_PUBLIC_KEY_PEM: state.env.RESPONDER_SIGNING_PUBLIC_KEY_PEM || "",
+      RESPONDER_SIGNING_PRIVATE_KEY_PEM: state.env.RESPONDER_SIGNING_PRIVATE_KEY_PEM || "",
+      HOTLINE_IDS: (state.config.responder.hotlines || []).map((item) => item.hotline_id).join(","),
+      RESPONDER_PLATFORM_API_KEY: resolvedSecrets.responder_platform_api_key || "",
       TRANSPORT_BASE_URL: relayBaseUrl,
       TRANSPORT_TYPE: runtimeTransport.type,
       TRANSPORT_PROVIDER: transportEnv.TRANSPORT_PROVIDER || "",
@@ -667,27 +801,27 @@ export function createOpsSupervisorServer() {
         SERVICE_NAME: "transport-relay"
       };
     }
-    if (name === "buyer") {
+    if (name === "caller") {
       return {
         ...base,
-        PORT: String(ports.buyer),
-        SERVICE_NAME: "buyer-controller",
-        TRANSPORT_RECEIVER: "buyer-controller"
+        PORT: String(ports.caller),
+        SERVICE_NAME: "caller-controller",
+        TRANSPORT_RECEIVER: "caller-controller"
       };
     }
     return {
       ...base,
-      PORT: String(ports.seller),
-      SERVICE_NAME: "seller-controller",
-      TRANSPORT_RECEIVER: state.config.seller.seller_id || "seller-controller"
+      PORT: String(ports.responder),
+      SERVICE_NAME: "responder-controller",
+      TRANSPORT_RECEIVER: state.config.responder.responder_id || "responder-controller"
     };
   }
 
   function serviceEntry(name) {
-    if (name === "buyer") {
-      return require.resolve("@delexec/buyer-controller");
+    if (name === "caller") {
+      return require.resolve("@delexec/caller-controller");
     }
-    return require.resolve("@delexec/seller-controller");
+    return require.resolve("@delexec/responder-controller");
   }
 
   function serviceLaunchSpec(name) {
@@ -701,12 +835,17 @@ export function createOpsSupervisorServer() {
     };
   }
 
-  function captureLog(processInfo, line) {
-    processInfo.logs.push(line);
-    if (processInfo.logs.length > 200) {
-      processInfo.logs.shift();
+  function captureLog(processInfo, chunk) {
+    const ts = new Date().toTimeString().slice(0, 8); // HH:mm:ss
+    const lines = chunk.toString("utf8").split(/\r?\n/);
+    for (const raw of lines) {
+      const line = raw.trimEnd();
+      if (!line) continue;
+      const stamped = `${ts} ${line}`;
+      processInfo.logs.push(stamped);
+      if (processInfo.logs.length > 200) processInfo.logs.shift();
+      appendServiceLog(processInfo.name, `${stamped}\n`);
     }
-    appendServiceLog(processInfo.name, line);
   }
 
   async function ensureService(name) {
@@ -714,6 +853,8 @@ export function createOpsSupervisorServer() {
     if (current && !current.exited) {
       return current;
     }
+    const ports = state.config.runtime.ports;
+    const portMap = {caller: ports.caller, responder: ports.responder, relay: ports.relay};
     const launch = serviceLaunchSpec(name);
     const child = spawn(launch.command, launch.args, {
       env: serviceEnv(name),
@@ -759,25 +900,163 @@ export function createOpsSupervisorServer() {
     return processInfo;
   }
 
-  async function ensureBaseServices() {
-    if (usesManagedRelay()) {
-      await ensureService("relay");
-    }
-    await ensureService("buyer");
-    if (state.config.seller.enabled) {
-      await ensureService("seller");
+  async function waitForRelay(maxWaitMs = 8000) {
+    const relayUrl = `http://127.0.0.1:${state.config.runtime.ports?.relay || 8090}`;
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        const res = await fetch(`${relayUrl}/healthz`);
+        if (res.ok) return;
+      } catch {
+        // not ready yet
+      }
+      await new Promise((r) => setTimeout(r, 100));
     }
   }
 
-  async function reloadSellerIfRunning() {
-    if (!state.config.seller.enabled) {
+  async function ensureBaseServices() {
+    if (usesManagedRelay()) {
+      await ensureService("relay");
+      await waitForRelay();
+    }
+    await ensureService("caller");
+    if (state.config.responder.enabled) {
+      await ensureService("responder");
+    }
+  }
+
+  async function prepareCallConfirmation(body = {}) {
+    await ensureBaseServices();
+    const taskType = normalizedString(body.task_type);
+    const hotlineId = normalizedString(body.hotline_id);
+    const responderId = normalizedString(body.responder_id);
+    const capability = normalizedString(body.capability);
+    const preference = getTaskTypePreference(state, taskType);
+
+    const items = await fetchCatalogCandidates(state, runtime, {
+      task_type: taskType,
+      hotline_id: hotlineId,
+      responder_id: responderId,
+      capability
+    });
+
+    const candidates = items
+      .map((item) => ({
+        raw: item,
+        score: scoreCandidate(item, {
+          taskType,
+          hotlineId,
+          responderId,
+          preferred: preference
+        })
+      }))
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 5);
+
+    if (candidates.length === 0) {
+      return {
+        status: 404,
+        body: buildStructuredError("HOTLINE_CANDIDATES_NOT_FOUND", "no visible hotline candidates matched the current request", {
+          task_type: taskType,
+          responder_id: responderId,
+          hotline_id: hotlineId
+        })
+      };
+    }
+
+    const selected = candidates[0].raw;
+    const selectedSummary = summarizeCandidate(selected, {
+      selected: true,
+      taskType,
+      preferred: Boolean(preference && selected.hotline_id === preference.hotline_id)
+    });
+
+    return {
+      status: 200,
+      body: {
+        task_type: taskType,
+        always_ask: true,
+        remembered_preference: preference,
+        selection_reason: selectedSummary.match_reasons.join(" · "),
+        selected_hotline: selectedSummary,
+        candidate_hotlines: candidates.map(({ raw }) =>
+          summarizeCandidate(raw, {
+            selected: raw.hotline_id === selected.hotline_id && raw.responder_id === selected.responder_id,
+            taskType,
+            preferred: Boolean(preference && raw.hotline_id === preference.hotline_id)
+          })
+        )
+      }
+    };
+  }
+
+  async function confirmPreparedCall(body = {}) {
+    await ensureBaseServices();
+    const chosenHotlineId = normalizedString(body.hotline_id);
+    const chosenResponderId = normalizedString(body.responder_id);
+    const taskType = normalizedString(body.task_type);
+    if (!chosenHotlineId || !chosenResponderId || !taskType) {
+      return {
+        status: 400,
+        body: buildStructuredError(
+          "CONTRACT_INVALID_CONFIRM_BODY",
+          "hotline_id, responder_id, and task_type are required for call confirmation"
+        )
+      };
+    }
+
+    const candidates = await fetchCatalogCandidates(state, runtime, {
+      hotline_id: chosenHotlineId,
+      responder_id: chosenResponderId,
+      task_type: taskType
+    });
+    const selected = candidates.find((item) => item.hotline_id === chosenHotlineId && item.responder_id === chosenResponderId);
+    if (!selected) {
+      return {
+        status: 409,
+        body: buildStructuredError("HOTLINE_NO_LONGER_VISIBLE", "chosen hotline is no longer visible for this caller", {
+          hotline_id: chosenHotlineId,
+          responder_id: chosenResponderId
+        })
+      };
+    }
+
+    if (body.remember_for_task_type === true) {
+      setTaskTypePreference(state, taskType, {
+        hotline_id: chosenHotlineId,
+        responder_id: chosenResponderId
+      });
+      state.env = saveOpsState(state);
+    }
+
+    return requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/remote-requests", {
+      method: "POST",
+      headers: buildPlatformHeaders(state, runtime),
+      body: {
+        responder_id: chosenResponderId,
+        hotline_id: chosenHotlineId,
+        task_type: taskType,
+        input: body.input || { text: normalizedString(body.text) || "" },
+        payload: body.payload || { text: normalizedString(body.text) || "" },
+        output_schema: body.output_schema || {
+          type: "object",
+          properties: {
+            summary: { type: "string" }
+          }
+        }
+      }
+    });
+  }
+
+  async function reloadResponderIfRunning() {
+    if (!state.config.responder.enabled) {
       return;
     }
-    const processInfo = runtime.processes.get("seller");
+    const processInfo = runtime.processes.get("responder");
     if (processInfo && !processInfo.exited) {
       processInfo.child.kill();
     }
-    await ensureService("seller");
+    await ensureService("responder");
   }
 
   async function fetchHealth(name) {
@@ -802,7 +1081,7 @@ export function createOpsSupervisorServer() {
 
   async function fetchRecentRequestsSummary() {
     try {
-      const response = await requestJson(processBaseUrl(state.config.runtime.ports.buyer), "/controller/requests");
+      const response = await requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/requests");
       const items = response.body?.items || [];
       const byStatus = items.reduce((summary, item) => {
         const key = item.status || "UNKNOWN";
@@ -828,16 +1107,16 @@ export function createOpsSupervisorServer() {
   }
 
   async function buildStatus() {
-    const subagents = state.config.seller.subagents || [];
+    const hotlines = state.config.responder.hotlines || [];
     const secrets = getResolvedSecrets(state, runtime);
     const runtimeTransport = getRuntimeTransport(state);
-    const pendingReviewCount = subagents.filter((item) => item.submitted_for_review !== true).length;
-    const reviewStatusCounts = subagents.reduce((counts, item) => {
+    const pendingReviewCount = hotlines.filter((item) => item.submitted_for_review !== true).length;
+    const reviewStatusCounts = hotlines.reduce((counts, item) => {
       const key = item.review_status || "local_only";
       counts[key] = (counts[key] || 0) + 1;
       return counts;
     }, {});
-    state.config.buyer.api_key_configured = Boolean(secrets.buyer_api_key);
+    state.config.caller.api_key_configured = Boolean(secrets.caller_api_key);
     state.config.platform_console ||= {};
     state.config.platform_console.admin_api_key_configured = Boolean(secrets.platform_admin_api_key);
     return {
@@ -849,15 +1128,15 @@ export function createOpsSupervisorServer() {
         event_log: getSupervisorEventsFile(),
         service_logs: {
           relay: getServiceLogFile("relay"),
-          buyer: getServiceLogFile("buyer"),
-          seller: getServiceLogFile("seller")
+          caller: getServiceLogFile("caller"),
+          responder: getServiceLogFile("responder")
         }
       },
-      seller: {
-        enabled: state.config.seller.enabled,
-        seller_id: state.config.seller.seller_id,
-        display_name: state.config.seller.display_name,
-        subagent_count: subagents.length,
+      responder: {
+        enabled: state.config.responder.enabled,
+        responder_id: state.config.responder.responder_id,
+        display_name: state.config.responder.display_name,
+        hotline_count: hotlines.length,
         pending_review_count: pendingReviewCount,
         review_summary: reviewStatusCounts
       },
@@ -873,13 +1152,13 @@ export function createOpsSupervisorServer() {
           base_url: runtimeTransport.type === "relay_http" ? runtimeTransport.relay_http.base_url : processBaseUrl(state.config.runtime.ports.relay),
           health: await fetchHealth("relay")
         },
-        buyer: {
-          ...getRuntimeStatus("buyer"),
-          health: await fetchHealth("buyer")
+        caller: {
+          ...getRuntimeStatus("caller"),
+          health: await fetchHealth("caller")
         },
-        seller: {
-          ...getRuntimeStatus("seller"),
-          health: state.config.seller.enabled ? await fetchHealth("seller") : null
+        responder: {
+          ...getRuntimeStatus("responder"),
+          health: state.config.responder.enabled ? await fetchHealth("responder") : null
         }
       }
     };
@@ -939,7 +1218,7 @@ export function createOpsSupervisorServer() {
     return [...events, ...logAlerts].slice(-maxItems).reverse();
   }
 
-  async function registerBuyer(contactEmail) {
+  async function registerCaller(contactEmail) {
     const response = await requestJson(state.config.platform.base_url, "/v1/users/register", {
       method: "POST",
       body: {
@@ -949,11 +1228,11 @@ export function createOpsSupervisorServer() {
     if (response.status !== 201) {
       return response;
     }
-    state.config.buyer.contact_email = response.body.contact_email || contactEmail;
-    state.config.buyer.api_key_configured = true;
+    state.config.caller.contact_email = response.body.contact_email || contactEmail;
+    state.config.caller.api_key_configured = true;
     if (hasEncryptedSecretStore()) {
       writeOpsSecrets(runtime.auth.passphrase, {
-        [OPS_SECRET_KEYS.buyer_api_key]: response.body.api_key
+        [OPS_SECRET_KEYS.caller_api_key]: response.body.api_key
       });
       runtime.auth.unlockedSecrets = unlockOpsSecrets(runtime.auth.passphrase);
       scrubLegacySecrets(state);
@@ -962,7 +1241,7 @@ export function createOpsSupervisorServer() {
         ...state,
         env: {
           ...state.env,
-          BUYER_PLATFORM_API_KEY: response.body.api_key,
+          CALLER_PLATFORM_API_KEY: response.body.api_key,
           PLATFORM_API_KEY: response.body.api_key
         }
       });
@@ -971,28 +1250,28 @@ export function createOpsSupervisorServer() {
     return response;
   }
 
-  function buildSellerRegisterHeaders() {
+  function buildResponderRegisterHeaders() {
     const secrets = getResolvedSecrets(state, runtime);
-    const apiKey = secrets.buyer_api_key || secrets.seller_platform_api_key;
+    const apiKey = secrets.caller_api_key || secrets.responder_platform_api_key;
     if (!apiKey) {
-      throw new Error("buyer_platform_api_key_required");
+      throw new Error("caller_platform_api_key_required");
     }
     return { Authorization: `Bearer ${apiKey}` };
   }
 
-  async function submitPendingSellerReviews() {
-    const sellerIdentity = ensureSellerIdentity(state);
-    const pending = (state.config.seller.subagents || []).filter((item) => item.submitted_for_review !== true);
+  async function submitPendingResponderReviews() {
+    const responderIdentity = ensureResponderIdentity(state);
+    const pending = (state.config.responder.hotlines || []).filter((item) => item.submitted_for_review !== true);
     const results = [];
     for (const item of pending) {
-      const response = await requestJson(state.config.platform.base_url, "/v1/catalog/subagents", {
+      const response = await requestJson(state.config.platform.base_url, "/v2/hotlines", {
         method: "POST",
-        headers: buildSellerRegisterHeaders(),
+        headers: buildResponderRegisterHeaders(),
         body: {
-          seller_id: sellerIdentity.seller_id,
-          subagent_id: item.subagent_id,
-          display_name: item.display_name || item.subagent_id,
-          seller_public_key_pem: sellerIdentity.public_key_pem,
+          responder_id: responderIdentity.responder_id,
+          hotline_id: item.hotline_id,
+          display_name: item.display_name || item.hotline_id,
+          responder_public_key_pem: responderIdentity.public_key_pem,
           task_types: item.task_types || [],
           capabilities: item.capabilities || [],
           tags: item.tags || []
@@ -1003,7 +1282,7 @@ export function createOpsSupervisorServer() {
       }
       if (hasEncryptedSecretStore()) {
         writeOpsSecrets(runtime.auth.passphrase, {
-          [OPS_SECRET_KEYS.seller_platform_api_key]: response.body.seller_api_key || response.body.api_key
+          [OPS_SECRET_KEYS.responder_platform_api_key]: response.body.responder_api_key || response.body.api_key
         });
         runtime.auth.unlockedSecrets = unlockOpsSecrets(runtime.auth.passphrase);
         scrubLegacySecrets(state);
@@ -1012,26 +1291,26 @@ export function createOpsSupervisorServer() {
           ...state,
           env: {
             ...state.env,
-            SELLER_PLATFORM_API_KEY: response.body.seller_api_key || response.body.api_key
+            RESPONDER_PLATFORM_API_KEY: response.body.responder_api_key || response.body.api_key
           }
         });
       }
       item.submitted_for_review = true;
-      item.review_status = response.body.subagent_review_status || response.body.review_status || "pending";
+      item.review_status = response.body.hotline_review_status || response.body.review_status || "pending";
       results.push(response.body);
     }
     saveOpsState(state);
-    return { status: 201, body: { seller_id: sellerIdentity.seller_id, submitted: results.length, results } };
+    return { status: 201, body: { responder_id: responderIdentity.responder_id, submitted: results.length, results } };
   }
 
-  async function addOfficialExampleSubagent() {
-    const definition = buildExampleSubagentDefinition();
-    upsertSubagent(state, definition);
+  async function addOfficialExampleHotline() {
+    const definition = buildExampleHotlineDefinition();
+    upsertHotline(state, definition);
     state.env = saveOpsState(state);
-    await reloadSellerIfRunning();
+    await reloadResponderIfRunning();
     appendSupervisorEvent({
-      type: "subagent_upserted",
-      subagent_id: definition.subagent_id,
+      type: "hotline_upserted",
+      hotline_id: definition.hotline_id,
       adapter_type: definition.adapter_type,
       example: true
     });
@@ -1040,24 +1319,24 @@ export function createOpsSupervisorServer() {
 
   async function dispatchExampleRequest(body = {}) {
     await ensureBaseServices();
-    if (!getResolvedSecrets(state, runtime).buyer_api_key) {
+    if (!getResolvedSecrets(state, runtime).caller_api_key) {
       return {
         status: 409,
-        body: buildStructuredError("BUYER_NOT_REGISTERED", "buyer must be registered before running the local example", {
-          stage: "register_buyer"
+        body: buildStructuredError("CALLER_NOT_REGISTERED", "caller must be registered before running the local example", {
+          stage: "register_caller"
         })
       };
     }
-    if (state.config.seller.enabled !== true) {
+    if (state.config.responder.enabled !== true) {
       return {
         status: 409,
-        body: buildStructuredError("SELLER_NOT_ENABLED", "seller must be enabled before running the local example", {
-          stage: "enable_seller"
+        body: buildStructuredError("RESPONDER_NOT_ENABLED", "responder must be enabled before running the local example", {
+          stage: "enable_responder"
         })
       };
     }
 
-    const example = findConfiguredExampleSubagent(state);
+    const example = findConfiguredExampleHotline(state);
     if (!example) {
       return buildExampleVisibilityError(example);
     }
@@ -1066,9 +1345,9 @@ export function createOpsSupervisorServer() {
     }
 
     const catalog = await requestJson(
-      processBaseUrl(state.config.runtime.ports.buyer),
-      `/controller/catalog/subagents?subagent_id=${encodeURIComponent(LOCAL_EXAMPLE_SUBAGENT_ID)}&seller_id=${encodeURIComponent(
-        state.config.seller.seller_id || ""
+      processBaseUrl(state.config.runtime.ports.caller),
+      `/controller/hotlines?hotline_id=${encodeURIComponent(LOCAL_EXAMPLE_HOTLINE_ID)}&responder_id=${encodeURIComponent(
+        state.config.responder.responder_id || ""
       )}`,
       {
         headers: buildPlatformHeaders(state, runtime)
@@ -1076,20 +1355,20 @@ export function createOpsSupervisorServer() {
     );
 
     const selected = catalog.body?.items?.find(
-      (item) => item.subagent_id === LOCAL_EXAMPLE_SUBAGENT_ID && item.seller_id === state.config.seller.seller_id
+      (item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID && item.responder_id === state.config.responder.responder_id
     );
     if (!selected) {
       return buildExampleVisibilityError(example);
     }
 
-    return requestJson(processBaseUrl(state.config.runtime.ports.buyer), "/controller/remote-requests", {
+    return requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/remote-requests", {
       method: "POST",
       headers: buildPlatformHeaders(state, runtime),
       body: buildExampleRequestBody({
         text: body.text,
-        sellerId: selected.seller_id,
-        subagentId: selected.subagent_id,
-        signerPublicKeyPem: selected.seller_public_key_pem
+        responderId: selected.responder_id,
+        hotlineId: selected.hotline_id,
+        signerPublicKeyPem: selected.responder_public_key_pem
       })
     });
   }
@@ -1152,7 +1431,7 @@ export function createOpsSupervisorServer() {
         runtime.auth.unlockedSecrets = unlockOpsSecrets(passphrase);
         runtime.auth.passphrase = passphrase;
         runtime.auth.unlockedAt = nowIso();
-        state.config.buyer.api_key_configured = Boolean(runtime.auth.unlockedSecrets[OPS_SECRET_KEYS.buyer_api_key]);
+        state.config.caller.api_key_configured = Boolean(runtime.auth.unlockedSecrets[OPS_SECRET_KEYS.caller_api_key]);
         scrubLegacySecrets(state);
         state.env = saveOpsState(state);
         const session = createAuthenticatedSession(runtime, passphrase, runtime.auth.unlockedSecrets);
@@ -1269,6 +1548,8 @@ export function createOpsSupervisorServer() {
             ...buildLegacyTransportSecretEnv(secretUpdates)
           };
         }
+        // Clear after scrubLegacySecrets (which re-reads disk) so saveOpsState picks up config.type
+        if (state.env) state.env = { ...state.env, TRANSPORT_TYPE: null };
         state.env = saveOpsState(state);
         appendSupervisorEvent({
           type: "transport_updated",
@@ -1289,53 +1570,83 @@ export function createOpsSupervisorServer() {
         return;
       }
       if (method === "POST" && pathname === "/setup") {
-        ensureSellerIdentity(state);
+        ensureResponderIdentity(state);
         state.env = saveOpsState(state);
         appendSupervisorEvent({ type: "setup_completed" });
         sendJson(res, 200, { ok: true, config: state.config });
         return;
       }
-      if (method === "POST" && pathname === "/auth/register-buyer") {
+      if (method === "POST" && pathname === "/auth/register-caller") {
         const body = await parseJsonBody(req);
-        const registered = await registerBuyer(body.contact_email);
+        const registered = await registerCaller(body.contact_email);
         appendSupervisorEvent({
-          type: "buyer_registered",
+          type: "caller_registered",
           ok: registered.status === 201,
           contact_email: body.contact_email || null
         });
         sendJson(res, registered.status, registered.body);
         return;
       }
-      if (method === "GET" && pathname === "/catalog/subagents") {
+      if (method === "GET" && pathname === "/catalog/hotlines") {
         const response = await requestJson(
-          processBaseUrl(state.config.runtime.ports.buyer),
-          `/controller/catalog/subagents${url.search}`
+          processBaseUrl(state.config.runtime.ports.caller),
+          `/controller/hotlines${url.search}`
         , {
           headers: buildPlatformHeaders(state, runtime)
         });
         sendJson(res, response.status, response.body);
         return;
       }
+      if (method === "POST" && pathname === "/calls/prepare") {
+        const body = await parseJsonBody(req);
+        const response = await prepareCallConfirmation(body);
+        sendJson(res, response.status, response.body);
+        return;
+      }
+      if (method === "POST" && pathname === "/calls/confirm") {
+        const body = await parseJsonBody(req);
+        const response = await confirmPreparedCall(body);
+        sendJson(res, response.status, response.body);
+        return;
+      }
+      const preferenceMatch = pathname.match(/^\/preferences\/task-types\/([^/]+)\/hotline$/);
+      if (preferenceMatch && method === "PUT") {
+        const body = await parseJsonBody(req);
+        const preference = setTaskTypePreference(state, decodeURIComponent(preferenceMatch[1]), {
+          hotline_id: normalizedString(body.hotline_id),
+          responder_id: normalizedString(body.responder_id)
+        });
+        state.env = saveOpsState(state);
+        sendJson(res, 200, {
+          ok: true,
+          preference
+        });
+        return;
+      }
+      if (method === "GET" && pathname === "/preferences/task-types") {
+        sendJson(res, 200, { items: Object.values(ensurePreferenceState(state)) });
+        return;
+      }
       if (method === "GET" && pathname === "/requests") {
-        const response = await requestJson(processBaseUrl(state.config.runtime.ports.buyer), "/controller/requests");
+        const response = await requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/requests");
         sendJson(res, response.status, response.body);
         return;
       }
       const requestMatch = pathname.match(/^\/requests\/([^/]+)$/);
       if (method === "GET" && requestMatch) {
-        const response = await requestJson(processBaseUrl(state.config.runtime.ports.buyer), `/controller/requests/${requestMatch[1]}`);
+        const response = await requestJson(processBaseUrl(state.config.runtime.ports.caller), `/controller/requests/${requestMatch[1]}`);
         sendJson(res, response.status, response.body);
         return;
       }
       const requestResultMatch = pathname.match(/^\/requests\/([^/]+)\/result$/);
       if (method === "GET" && requestResultMatch) {
-        const response = await requestJson(processBaseUrl(state.config.runtime.ports.buyer), `/controller/requests/${requestResultMatch[1]}/result`);
+        const response = await requestJson(processBaseUrl(state.config.runtime.ports.caller), `/controller/requests/${requestResultMatch[1]}/result`);
         sendJson(res, response.status, response.body);
         return;
       }
       if (method === "POST" && pathname === "/requests") {
         const body = await parseJsonBody(req);
-        const response = await requestJson(processBaseUrl(state.config.runtime.ports.buyer), "/controller/remote-requests", {
+        const response = await requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/remote-requests", {
           method: "POST",
           headers: buildPlatformHeaders(state, runtime),
           body
@@ -1349,22 +1660,22 @@ export function createOpsSupervisorServer() {
         sendJson(res, response.status, response.body);
         return;
       }
-      if (method === "GET" && pathname === "/seller") {
+      if (method === "GET" && pathname === "/responder") {
         sendJson(res, 200, {
-          enabled: state.config.seller.enabled,
-          seller_id: state.config.seller.seller_id,
-          display_name: state.config.seller.display_name,
-          subagent_count: (state.config.seller.subagents || []).length,
-          subagents: state.config.seller.subagents || []
+          enabled: state.config.responder.enabled,
+          responder_id: state.config.responder.responder_id,
+          display_name: state.config.responder.display_name,
+          hotline_count: (state.config.responder.hotlines || []).length,
+          hotlines: state.config.responder.hotlines || []
         });
         return;
       }
-      if (method === "GET" && pathname === "/seller/subagents") {
-        sendJson(res, 200, { items: state.config.seller.subagents || [] });
+      if (method === "GET" && pathname === "/responder/hotlines") {
+        sendJson(res, 200, { items: state.config.responder.hotlines || [] });
         return;
       }
-      if (method === "POST" && pathname === "/seller/subagents/example") {
-        const definition = await addOfficialExampleSubagent();
+      if (method === "POST" && pathname === "/responder/hotlines/example") {
+        const definition = await addOfficialExampleHotline();
         sendJson(res, 201, {
           ...definition,
           example: true,
@@ -1372,91 +1683,92 @@ export function createOpsSupervisorServer() {
         });
         return;
       }
-      if (method === "POST" && pathname === "/seller/subagents") {
+      if (method === "POST" && pathname === "/responder/hotlines") {
         const body = await parseJsonBody(req);
         const definition = {
-          subagent_id: body.subagent_id,
-          display_name: body.display_name || body.subagent_id,
+          hotline_id: body.hotline_id,
+          display_name: body.display_name || body.hotline_id,
           enabled: body.enabled !== false,
           task_types: body.task_types || [],
           capabilities: body.capabilities || [],
           tags: body.tags || [],
           adapter_type: body.adapter_type || "process",
           adapter: body.adapter || {},
+          metadata: body.metadata || null,
           timeouts: body.timeouts || { soft_timeout_s: 60, hard_timeout_s: 180 },
           review_status: "local_only",
           submitted_for_review: false
         };
-        upsertSubagent(state, definition);
+        upsertHotline(state, definition);
         state.env = saveOpsState(state);
-        await reloadSellerIfRunning();
+        await reloadResponderIfRunning();
         appendSupervisorEvent({
-          type: "subagent_upserted",
-          subagent_id: definition.subagent_id,
+          type: "hotline_upserted",
+          hotline_id: definition.hotline_id,
           adapter_type: definition.adapter_type
         });
         sendJson(res, 201, definition);
         return;
       }
-      const subagentToggleMatch = pathname.match(/^\/seller\/subagents\/([^/]+)\/(enable|disable)$/);
-      if (method === "POST" && subagentToggleMatch) {
-        const subagentId = decodeURIComponent(subagentToggleMatch[1]);
-        const enabled = subagentToggleMatch[2] === "enable";
-        const item = setSubagentEnabled(state, subagentId, enabled);
+      const hotlineToggleMatch = pathname.match(/^\/responder\/hotlines\/([^/]+)\/(enable|disable)$/);
+      if (method === "POST" && hotlineToggleMatch) {
+        const hotlineId = decodeURIComponent(hotlineToggleMatch[1]);
+        const enabled = hotlineToggleMatch[2] === "enable";
+        const item = setHotlineEnabled(state, hotlineId, enabled);
         if (!item) {
-          sendError(res, 404, "subagent_not_found", "no subagent found with this id", { subagent_id: subagentId });
+          sendError(res, 404, "hotline_not_found", "no hotline found with this id", { hotline_id: hotlineId });
           return;
         }
         state.env = saveOpsState(state);
-        await reloadSellerIfRunning();
+        await reloadResponderIfRunning();
         appendSupervisorEvent({
-          type: "subagent_toggled",
-          subagent_id: item.subagent_id,
+          type: "hotline_toggled",
+          hotline_id: item.hotline_id,
           enabled: item.enabled !== false
         });
         sendJson(res, 200, {
           ok: true,
-          subagent_id: item.subagent_id,
+          hotline_id: item.hotline_id,
           enabled: item.enabled !== false,
           review_status: item.review_status || "local_only",
           submitted_for_review: item.submitted_for_review === true
         });
         return;
       }
-      const subagentDeleteMatch = pathname.match(/^\/seller\/subagents\/([^/]+)$/);
-      if (method === "DELETE" && subagentDeleteMatch) {
-        const subagentId = decodeURIComponent(subagentDeleteMatch[1]);
-        const removed = removeSubagent(state, subagentId);
+      const hotlineDeleteMatch = pathname.match(/^\/responder\/hotlines\/([^/]+)$/);
+      if (method === "DELETE" && hotlineDeleteMatch) {
+        const hotlineId = decodeURIComponent(hotlineDeleteMatch[1]);
+        const removed = removeHotline(state, hotlineId);
         if (!removed) {
-          sendError(res, 404, "subagent_not_found", "no subagent found with this id", { subagent_id: subagentId });
+          sendError(res, 404, "hotline_not_found", "no hotline found with this id", { hotline_id: hotlineId });
           return;
         }
         state.env = saveOpsState(state);
-        await reloadSellerIfRunning();
+        await reloadResponderIfRunning();
         appendSupervisorEvent({
-          type: "subagent_removed",
-          subagent_id: removed.subagent_id
+          type: "hotline_removed",
+          hotline_id: removed.hotline_id
         });
         sendJson(res, 200, {
           ok: true,
           removed: {
-            subagent_id: removed.subagent_id,
+            hotline_id: removed.hotline_id,
             review_status: removed.review_status || "local_only"
           }
         });
         return;
       }
-      if (method === "POST" && pathname === "/seller/enable") {
+      if (method === "POST" && pathname === "/responder/enable") {
         const body = await parseJsonBody(req);
-        ensureSellerIdentity(state, {
-          sellerId: body.seller_id || state.config.seller.seller_id || null,
-          displayName: body.display_name || state.config.seller.display_name || null
+        ensureResponderIdentity(state, {
+          responderId: body.responder_id || state.config.responder.responder_id || null,
+          displayName: body.display_name || state.config.responder.display_name || null
         });
-        state.config.seller.enabled = true;
-        if (body.subagent_id) {
-          upsertSubagent(state, {
-            subagent_id: body.subagent_id,
-            display_name: body.display_name || body.subagent_id,
+        state.config.responder.enabled = true;
+        if (body.hotline_id) {
+          upsertHotline(state, {
+            hotline_id: body.hotline_id,
+            display_name: body.display_name || body.hotline_id,
             enabled: true,
             task_types: body.task_types || [],
             capabilities: body.capabilities || [],
@@ -1469,31 +1781,31 @@ export function createOpsSupervisorServer() {
           });
         }
         state.env = saveOpsState(state);
-        await ensureService("seller");
+        await ensureService("responder");
         appendSupervisorEvent({
-          type: "seller_enabled",
-          seller_id: state.config.seller.seller_id
+          type: "responder_enabled",
+          responder_id: state.config.responder.responder_id
         });
         sendJson(res, 200, {
           ok: true,
-          seller: state.config.seller,
+          responder: state.config.responder,
           submitted: 0,
           review: null
         });
         return;
       }
-      if (method === "POST" && pathname === "/seller/submit-review") {
+      if (method === "POST" && pathname === "/responder/submit-review") {
         const body = await parseJsonBody(req);
-        ensureSellerIdentity(state, {
-          sellerId: body.seller_id || state.config.seller.seller_id || null,
-          displayName: body.display_name || state.config.seller.display_name || null
+        ensureResponderIdentity(state, {
+          responderId: body.responder_id || state.config.responder.responder_id || null,
+          displayName: body.display_name || state.config.responder.display_name || null
         });
         state.env = saveOpsState(state);
-        const submitted = await submitPendingSellerReviews();
-        await reloadSellerIfRunning();
+        const submitted = await submitPendingResponderReviews();
+        await reloadResponderIfRunning();
         appendSupervisorEvent({
-          type: "seller_review_submitted",
-          seller_id: state.config.seller.seller_id,
+          type: "responder_review_submitted",
+          responder_id: state.config.responder.responder_id,
           submitted: submitted.body?.submitted || 0,
           ok: submitted.status === 201
         });
@@ -1527,6 +1839,12 @@ export function createOpsSupervisorServer() {
         });
         return;
       }
+      if (method === "DELETE" && pathname === "/runtime/alerts") {
+        const eventsFile = getSupervisorEventsFile();
+        if (fs.existsSync(eventsFile)) fs.writeFileSync(eventsFile, "", "utf8");
+        sendJson(res, 200, { ok: true });
+        return;
+      }
       if (method === "GET" && pathname === "/debug/snapshot") {
         const status = await buildStatus();
         sendJson(res, 200, {
@@ -1536,8 +1854,8 @@ export function createOpsSupervisorServer() {
           recent_events: readSupervisorEventTail({ maxLines: 50 }),
           log_tail: {
             relay: readServiceLogTail("relay", { maxLines: 50 }),
-            buyer: readServiceLogTail("buyer", { maxLines: 50 }),
-            seller: readServiceLogTail("seller", { maxLines: 50 })
+            caller: readServiceLogTail("caller", { maxLines: 50 }),
+            responder: readServiceLogTail("responder", { maxLines: 50 })
           }
         });
         return;
@@ -1554,7 +1872,7 @@ export function createOpsSupervisorServer() {
   });
 
   server.startManagedServices = async () => {
-    ensureSellerIdentity(state);
+    ensureResponderIdentity(state);
     state.env = saveOpsState(state);
     await ensureBaseServices();
     appendSupervisorEvent({ type: "managed_services_started" });

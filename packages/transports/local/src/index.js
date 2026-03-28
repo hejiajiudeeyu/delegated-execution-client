@@ -51,7 +51,7 @@ export function createLocalTransportAdapter({ hub, receiver }) {
 
   return {
     async send(envelope) {
-      const target = resolveReceiver(envelope.to || envelope.seller_id || receiver);
+      const target = resolveReceiver(envelope.to || envelope.responder_id || receiver);
       const queue = getQueue(hub, target);
       const message = {
         ...envelope,
