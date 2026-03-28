@@ -16,14 +16,24 @@ jobs:
         with:
           repository: hejiajiudeeyu/delegated-execution-protocol
           path: protocol
+      - name: Checkout platform (integration test dependency)
+        uses: actions/checkout@v5
+        with:
+          repository: hejiajiudeeyu/delegated-execution-platform-selfhost
+          path: platform
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: delegated-execution-client/package-lock.json
+      - name: Install platform deps (provides @delexec/platform-api for integration tests)
+        run: npm install --ignore-scripts
+        working-directory: platform
       - run: npm ci
         working-directory: delegated-execution-client
-      - run: npm test
+      - run: npm run test:unit
+        working-directory: delegated-execution-client
+      - run: npm run test:integration
         working-directory: delegated-execution-client
       - run: npm run test:packages
         working-directory: delegated-execution-client
