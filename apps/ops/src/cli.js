@@ -244,8 +244,8 @@ async function ensureUiAvailable(args = {}, env = process.env) {
   const consoleUrl = uiUrl(ui);
   let alreadyRunning = false;
   try {
-    await waitForUi(consoleUrl);
-    alreadyRunning = true;
+    const probe = await fetch(consoleUrl, { method: "GET", signal: AbortSignal.timeout(2000) });
+    alreadyRunning = probe.ok;
   } catch {}
 
   let pid = null;

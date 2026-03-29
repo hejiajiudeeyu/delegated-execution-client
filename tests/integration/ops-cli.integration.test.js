@@ -427,12 +427,20 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
       env: process.env
     });
 
-    const doctor = await execFileAsync(path.join(installDir, "node_modules/.bin/delexec-ops"), ["doctor"], {
+    const cleanRoomEnv = {
+      ...process.env,
+      DELEXEC_HOME: path.join(installDir, ".ops-home")
+    };
+    const cliPath = path.join(installDir, "node_modules/.bin/delexec-ops");
+
+    await execFileAsync(cliPath, ["responder", "init", "--responder-id", "responder_cli_test"], {
       cwd: installDir,
-      env: {
-        ...process.env,
-        DELEXEC_HOME: path.join(installDir, ".ops-home")
-      }
+      env: cleanRoomEnv
+    });
+
+    const doctor = await execFileAsync(cliPath, ["doctor"], {
+      cwd: installDir,
+      env: cleanRoomEnv
     });
     const output = JSON.parse(doctor.stdout);
     expect(output.config.platform.base_url).toBe("http://127.0.0.1:8080");
