@@ -28,8 +28,8 @@ const STEPS = [
   },
   {
     icon: FileCheck,
-    title: "提交审核",
-    description: "向平台提交 Hotline 审核申请，等待审批后即可启用",
+    title: "按需发布到平台",
+    description: "只有开启平台发布功能后，才需要提交审核并等待审批",
   },
 ]
 
@@ -44,6 +44,8 @@ export function ResponderLockedPage() {
   const callerRegistered =
     (status?.config as { caller?: { api_key_configured?: boolean } } | undefined)?.caller
       ?.api_key_configured ?? false
+  const platformEnabled =
+    (status?.config as { platform?: { enabled?: boolean } } | undefined)?.platform?.enabled === true
 
   const handleEnable = async () => {
     if (!responderId || !displayName) return
@@ -71,7 +73,7 @@ export function ResponderLockedPage() {
         </div>
         <div>
           <h1 className="text-base font-bold">启用 Responder</h1>
-          <p className="text-xs text-muted-foreground">完成以下步骤后即可发布 Hotline</p>
+          <p className="text-xs text-muted-foreground">先启用本地 Responder Runtime，再按需发布 Hotline</p>
         </div>
       </div>
 
@@ -106,7 +108,13 @@ export function ResponderLockedPage() {
 
       {!callerRegistered && (
         <Alert>
-          <p className="text-sm">请先前往 Caller Tab 完成注册</p>
+          <p className="text-sm">请先前往 Caller Tab 完成注册。当前产品仍要求先有 Caller 身份，才能启用本地 Responder。</p>
+        </Alert>
+      )}
+
+      {callerRegistered && !platformEnabled && (
+        <Alert>
+          <p className="text-sm">当前为本地模式。启用 Responder 后，你可以先添加 Hotline 并查看草稿，不需要平台审批。</p>
         </Alert>
       )}
 

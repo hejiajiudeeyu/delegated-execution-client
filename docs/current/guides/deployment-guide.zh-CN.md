@@ -5,6 +5,17 @@
 
 本指南覆盖 `platform`、`caller`、`responder` 的受支持部署形态。
 
+## 当前 Client 定位
+
+当前阶段下，`client` 仓库首先是一个**本地管理**产品：
+
+- 本地 caller 初始化
+- 本地 responder runtime
+- 本地 hotline draft 管理
+- 本地 hotline 发现与自调用
+
+platform 发布和社区能力虽然在代码中仍有部分路径，但当前应视为后续流程，而不是主要安装入口。
+
 当前协议/运行时基线：
 
 - platform 返回请求级 `delivery-meta`，包含 `task_delivery` 与 `result_delivery`
@@ -39,25 +50,27 @@ Profile 意图：
 推荐用户路径：
 
 1. `npm install`
-2. `npm run ops -- bootstrap --email you@example.com --platform http://127.0.0.1:8080`
-3. 若尚未审批，先审批 responder 和 hotline，再重跑 `npm run ops -- bootstrap`
-4. `npm run ops -- doctor` / `npm run ops -- debug-snapshot`
+2. `npm run ops -- setup`
+3. `npm run ops -- auth register --email you@example.com`
+4. `npm run ops -- enable-responder`
+5. `npm run ops -- add-example-hotline`
+6. `npm run ops -- run-example --text "Summarize this request."`
+7. `npm run ops -- doctor` / `npm run ops -- debug-snapshot`
 
 手动兜底路径：
 
 1. `npm install`
 2. `npm run ops -- setup`
-3. `npm run ops -- auth register --email you@example.com --platform http://127.0.0.1:8080`
-4. `npm run ops -- add-example-hotline`
-5. `npm run ops -- submit-review`
-6. `npm run ops -- enable-responder`
-7. `npm run ops -- start`
-8. `npm run ops -- run-example --text "Summarize this request."`
+3. `npm run ops -- auth register --email you@example.com`
+4. `npm run ops -- enable-responder`
+5. `npm run ops -- add-example-hotline`
+6. `npm run ops -- start`
+7. `npm run ops -- run-example --text "Summarize this request."`
 
 该路径会把本地 ops 状态写入 `~/.delexec`，启动本地 supervisor，并在当前安装形态可用时内部管理 relay。  
 在拆分仓库源码集成形态中，优先使用指向 `delegated-execution-platform-selfhost` 中 relay 进程的 `relay_http`。参见 `docs/current/guides/source-integration-runbook.md`。  
 本地运行时日志位于 `~/.delexec/logs`，`ops-console` 会读取日志与 debug snapshot。  
-`ops-console` 提供 setup wizard，覆盖 caller 注册、官方示例安装、review 提交、responder 启用和本地自调用。  
+`ops-console` 提供 setup wizard，覆盖 caller 注册、官方示例安装、responder 启用、draft 查看和本地自调用。  
 `ops-console` 还支持本地口令解锁流，敏感凭据保存在 `~/.delexec/secrets.enc.json`，而非浏览器存储。  
 `enable-responder` 仅启用本地 responder 运行时；平台 review 控制目录可见性与远程可用性，不阻止本地运行时启动。
 

@@ -9,6 +9,8 @@ export function ResponderOverviewPage() {
   const { status } = useAuth()
   const navigate = useNavigate()
   const responder = status?.responder
+  const platformEnabled =
+    (status?.config as { platform?: { enabled?: boolean } } | undefined)?.platform?.enabled === true
 
   if (!responder) {
     return (
@@ -27,20 +29,20 @@ export function ResponderOverviewPage() {
           </div>
           <div>
             <h1 className="text-base font-bold">Responder 未启用</h1>
-            <p className="text-xs text-muted-foreground">当前账号仅持有 Caller 身份</p>
+            <p className="text-xs text-muted-foreground">先启用本地 Responder Runtime，再决定是否发布到平台</p>
           </div>
         </div>
 
         <Card className="border-orange-500/20 bg-orange-500/5">
           <CardContent className="p-4 space-y-3">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              启用 Responder 后，你可以发布 Hotline、接收任务调用，成为可被 Caller 发现的执行方。
+              启用 Responder 后，你可以先在本机管理和测试 Hotline 草稿。平台发布是后续可选步骤，不是本地模式的前置要求。
             </p>
             <Button
               onClick={() => navigate("/responder/activate")}
               className="w-full bg-orange-500 hover:bg-orange-600 text-white"
             >
-              申请 Responder 身份
+              启用本地 Responder
               <ArrowRight className="h-4 w-4 ml-1.5" />
             </Button>
           </CardContent>
@@ -56,15 +58,32 @@ export function ResponderOverviewPage() {
         <p className="text-xs text-muted-foreground mt-0.5">Responder 身份与运行摘要</p>
       </div>
 
-      {responder.pending_review_count > 0 && (
+      {!platformEnabled && (
+        <Card className="border-blue-500/30 bg-blue-500/5">
+          <CardContent className="p-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-blue-700">当前为本地模式</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Hotline 先在本地创建、查看草稿并直接调试，不需要平台审批。准备对外发布时，再开启平台发布功能。
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => navigate("/general")}>
+              前往开启平台发布
+              <ArrowRight className="h-3.5 w-3.5 ml-1" />
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {platformEnabled && responder.pending_review_count > 0 && (
         <Card className="border-orange-500/30 bg-orange-500/5">
           <CardContent className="p-4 flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-semibold text-orange-700">
-                {responder.pending_review_count} 个 Hotline 未提交审核
+                {responder.pending_review_count} 个 Hotline 尚未发布到平台
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                向平台提交审核后，Caller 才能发现并调用你的 Hotline
+                本地草稿已经可用；提交到平台审核后，其他 Caller 才能从平台 Catalog 发现并调用它们。
               </p>
             </div>
             <Button
@@ -102,10 +121,10 @@ export function ResponderOverviewPage() {
         >
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
-              <FileCheck className="h-3 w-3" /> 待审核
+              <FileCheck className="h-3 w-3" /> {platformEnabled ? "待发布" : "平台发布"}
             </p>
-            <p className={`text-xl font-bold ${responder.pending_review_count > 0 ? "text-orange-600" : ""}`}>
-              {responder.pending_review_count}
+            <p className={`text-xl font-bold ${platformEnabled && responder.pending_review_count > 0 ? "text-orange-600" : ""}`}>
+              {platformEnabled ? responder.pending_review_count : "关"}
             </p>
           </CardContent>
         </Card>

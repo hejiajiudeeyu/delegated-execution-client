@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useEffect, useState } from "react"
 import { NavLink, useLocation } from "react-router-dom"
 import {
   Activity,
@@ -11,9 +11,11 @@ import {
   Server,
   LockKeyhole,
   FileCheck,
+  ShieldCheck,
 } from "lucide-react"
 import { cn } from "@/components/ui/utils"
 import { useAuth } from "@/hooks/useAuth"
+import { requestJson } from "@/lib/api"
 
 type TabCtx = "general" | "caller" | "responder"
 
@@ -22,19 +24,13 @@ interface NavItem {
   path: string
   icon: React.ElementType
   locked?: boolean
+  badge?: number
 }
 
 const GENERAL_NAV: NavItem[] = [
   { label: "Dashboard", path: "/general", icon: Activity },
   { label: "Transport", path: "/general/transport", icon: Wifi },
   { label: "Runtime", path: "/general/runtime", icon: Terminal },
-]
-
-const CALLER_NAV: NavItem[] = [
-  { label: "概览", path: "/caller", icon: LayoutDashboard },
-  { label: "Catalog", path: "/caller/catalog", icon: BookOpen },
-  { label: "Call 请求", path: "/caller/calls", icon: Zap },
-  { label: "偏好设置", path: "/caller/preferences", icon: Settings },
 ]
 
 const RESPONDER_NAV_LOCKED: NavItem[] = [
@@ -44,7 +40,7 @@ const RESPONDER_NAV_LOCKED: NavItem[] = [
 const RESPONDER_NAV: NavItem[] = [
   { label: "概览", path: "/responder", icon: Server },
   { label: "Hotline 管理", path: "/responder/hotlines", icon: BookOpen },
-  { label: "提交审核", path: "/responder/review", icon: FileCheck },
+  { label: "平台发布", path: "/responder/review", icon: FileCheck },
 ]
 
 function NavGroup({
@@ -92,6 +88,11 @@ function NavGroup({
             />
             {item.label}
             {item.locked && <LockKeyhole className="h-3 w-3 ml-auto text-muted-foreground" />}
+            {item.badge != null && item.badge > 0 && (
+              <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                {item.badge}
+              </span>
+            )}
           </NavLink>
         )
       })}
@@ -105,6 +106,30 @@ export function ConsoleSidebar({ currentTab }: { currentTab: TabCtx }) {
   const callerRegistered = status?.config
     ? (status.config as { caller?: { api_key_configured?: boolean } }).caller?.api_key_configured === true
     : false
+
+  const [pendingApprovals, setPendingApprovals] = useState(0)
+
+  useEffect(() => {
+    if (!callerRegistered) return
+    let active = true
+    async function fetchPending() {
+      const res = await requestJson<{ pendingCount: number }>("/caller/approvals?status=pending").catch(() => null)
+      if (active && res?.body?.pendingCount != null) {
+        setPendingApprovals(res.body.pendingCount)
+      }
+    }
+    fetchPending()
+    const timer = setInterval(fetchPending, 10000)
+    return () => { active = false; clearInterval(timer) }
+  }, [callerRegistered])
+
+  const callerNav: NavItem[] = [
+    { label: "概览", path: "/caller", icon: LayoutDashboard },
+    { label: "Catalog", path: "/caller/catalog", icon: BookOpen },
+    { label: "Call 请求", path: "/caller/calls", icon: Zap },
+    { label: "待审批", path: "/caller/calls?filter=pending-approval", icon: ShieldCheck, badge: pendingApprovals },
+    { label: "偏好设置", path: "/caller/preferences", icon: Settings },
+  ]
 
   const labels: Record<TabCtx, string> = {
     general: "通用",
@@ -121,7 +146,7 @@ export function ConsoleSidebar({ currentTab }: { currentTab: TabCtx }) {
     currentTab === "general"
       ? GENERAL_NAV
       : currentTab === "caller"
-      ? CALLER_NAV
+      ? callerNav
       : responderEnabled
       ? RESPONDER_NAV
       : RESPONDER_NAV_LOCKED

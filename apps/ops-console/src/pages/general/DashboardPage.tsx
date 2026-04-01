@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { useStatus } from "@/hooks/useStatus"
 import { requestJson } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Server, Wifi, Zap, Globe, RotateCcw } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Server, Wifi, Zap, Globe, RotateCcw, ArrowRight, UserPlus, CheckCircle2 } from "lucide-react"
 import { toast } from "sonner"
 
 function HealthDot({ ok }: { ok: boolean | undefined | null }) {
@@ -61,6 +63,7 @@ function ServiceRow({
 
 export function DashboardPage() {
   const { data: status, refresh } = useStatus(8000)
+  const navigate = useNavigate()
   const [platformOk, setPlatformOk] = useState<boolean | null>(null)
   const [restarting, setRestarting] = useState<Record<string, boolean>>({})
 
@@ -71,10 +74,49 @@ export function DashboardPage() {
     (status?.config as { caller?: { api_key_configured?: boolean } } | undefined)?.caller
       ?.api_key_configured ?? false
   const responderEnabled = status?.responder?.enabled ?? false
+  const platformEnabled =
+    (status?.config as { platform?: { enabled?: boolean } } | undefined)?.platform?.enabled === true
 
   const platformUrl =
     (status?.config as { platform?: { base_url?: string } } | undefined)?.platform?.base_url ??
     "http://127.0.0.1:8080"
+  const [togglingPlatform, setTogglingPlatform] = useState(false)
+  const firstHotlineReady = responderEnabled && (status?.responder?.hotline_count ?? 0) > 0
+
+  const onboardingSteps = [
+    {
+      key: "caller",
+      title: "注册 Caller",
+      description: "先获取 Caller 身份，解锁搜索和调用 Hotline 的能力。",
+      done: callerRegistered,
+      action: "前往注册",
+      onClick: () => navigate("/caller/register"),
+    },
+    {
+      key: "responder",
+      title: "启用本地 Responder",
+      description: "本地模式下先启用 Responder Runtime，再添加自己的 Hotline。",
+      done: responderEnabled,
+      action: "启用 Responder",
+      onClick: () => navigate("/responder/activate"),
+    },
+    {
+      key: "hotline",
+      title: "添加第一个 Hotline",
+      description: "创建本地 Hotline，并生成可检查的配置草稿。",
+      done: firstHotlineReady,
+      action: "管理 Hotline",
+      onClick: () => navigate("/responder/hotlines"),
+    },
+    {
+      key: "draft",
+      title: "查看本地草稿",
+      description: "确认输入填写说明、输出结构和本地运行配置，再决定是否发布到平台。",
+      done: firstHotlineReady,
+      action: "查看草稿",
+      onClick: () => navigate("/responder/hotlines"),
+    },
+  ]
 
   async function handleRestart(service: string) {
     setRestarting((prev) => ({ ...prev, [service]: true }))
@@ -96,6 +138,28 @@ export function DashboardPage() {
     }
   }
 
+  async function handlePlatformToggle(nextEnabled: boolean) {
+    setTogglingPlatform(true)
+    try {
+      const res = await requestJson("/platform/settings", {
+        method: "PUT",
+        body: { enabled: nextEnabled },
+      })
+      if (res.status === 200) {
+        toast.success(nextEnabled ? "已开启平台发布功能" : "已切换为本地模式", {
+          description: nextEnabled ? "Responder 与 Hotline 现在可以提交到平台审核。" : "本地 Hotline 仍可继续使用，但不再要求平台审核。",
+        })
+        await refresh()
+      } else {
+        toast.error("更新平台设置失败", { description: `服务器返回 ${res.status}` })
+      }
+    } catch {
+      toast.error("更新平台设置失败", { description: "请检查 ops supervisor 是否运行" })
+    } finally {
+      setTogglingPlatform(false)
+    }
+  }
+
   useEffect(() => {
     if (!status) return
     setPlatformOk(null)
@@ -110,6 +174,65 @@ export function DashboardPage() {
         <h1 className="text-base font-bold">Dashboard</h1>
         <p className="text-xs text-muted-foreground mt-0.5">系统运行状态概览</p>
       </div>
+
+      {/* Caller registration guide — shown until api_key is configured */}
+      {!callerRegistered && (
+        <Card className="border-teal-500/40 bg-teal-500/5">
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-teal-500/10 border-2 border-teal-500/30">
+                  <UserPlus className="h-4 w-4 text-teal-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-teal-800 dark:text-teal-300">注册 Caller，解锁 Hotline 调用能力</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                    你还没有注册 Caller 身份。注册后 Agent 可以搜索并调用平台上的 Remote Hotline。只需填写一个联系邮箱即可完成注册。
+                  </p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                className="shrink-0 bg-teal-600 hover:bg-teal-700 text-white"
+                onClick={() => navigate("/caller/register")}
+              >
+                立即注册
+                <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className={platformEnabled ? "border-violet-500/30 bg-violet-500/5" : "border-dashed bg-muted/30"}>
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold">
+                {platformEnabled ? "平台发布已开启" : "当前为本地模式"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                {platformEnabled
+                  ? "当前会同步显示平台审批与 catalog 发布状态。Hotline 仍先在本地创建和查看草稿，再按需提交到平台。"
+                  : "默认先完成本地 Caller / Responder / Hotline 配置和草稿确认。本地模式下不需要平台审批，平台发布是后续可选能力。"}
+              </p>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Platform URL: <code className="rounded bg-muted px-1 font-mono">{platformUrl}</code>
+              </p>
+            </div>
+            <div className="shrink-0">
+              <Button
+                size="sm"
+                variant={platformEnabled ? "outline" : "default"}
+                disabled={togglingPlatform}
+                onClick={() => handlePlatformToggle(!platformEnabled)}
+              >
+                {togglingPlatform ? "切换中…" : platformEnabled ? "关闭平台发布" : "开启平台发布"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card>
@@ -177,17 +300,52 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      {platformOk === false && (
+      {platformEnabled && platformOk === false && (
         <Card className="border-yellow-500/30 bg-yellow-500/5">
           <CardContent className="pt-3 pb-3">
             <p className="text-xs text-yellow-700 leading-relaxed">
               <span className="font-semibold">Platform API 不可达</span>（<code className="font-mono bg-yellow-100/50 px-1 rounded">{platformUrl}</code>）—
-              Caller Controller 会持续产生 <code className="font-mono bg-yellow-100/50 px-1 rounded">inbox poll failed</code> 日志。
-              请启动平台服务，或在 Transport 配置中确认正确的 Platform URL。
+              当前已开启平台发布，因此 catalog 查询与审核同步会受影响。请启动平台服务，或确认 Platform URL 配置正确。
             </p>
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>首次上手流程</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {onboardingSteps.map((step, index) => (
+            <div key={step.key} className="flex items-start justify-between gap-3 rounded-md border bg-muted/20 p-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold ${
+                  step.done ? "border-green-500/40 bg-green-500/10 text-green-600" : "border-border bg-background text-muted-foreground"
+                }`}>
+                  {step.done ? <CheckCircle2 className="h-3.5 w-3.5" /> : index + 1}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">{step.title}</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{step.description}</p>
+                </div>
+              </div>
+              <div className="shrink-0">
+                <Button size="sm" variant={step.done ? "outline" : "default"} onClick={step.onClick}>
+                  {step.done ? "继续查看" : step.action}
+                </Button>
+              </div>
+            </div>
+          ))}
+          <div className={`rounded-md border p-3 text-xs leading-relaxed ${
+            platformEnabled ? "border-violet-500/20 bg-violet-500/5 text-muted-foreground" : "border-dashed bg-muted/20 text-muted-foreground"
+          }`}>
+            <span className="font-semibold text-foreground">{platformEnabled ? "可选后续：发布到平台" : "可选后续：开启平台发布"}</span>
+            {platformEnabled
+              ? " 现在可以把已经验证过的本地 Hotline 提交到平台 catalog，进入发布与审核流程。"
+              : " 当你准备让其他 Caller 从平台 Catalog 发现这些 Hotline 时，再开启平台发布功能即可。"}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -254,7 +412,7 @@ export function DashboardPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">待审核</span>
-                <span className="font-semibold">{status.responder.pending_review_count}</span>
+                <span className="font-semibold">{platformEnabled ? status.responder.pending_review_count : "本地模式"}</span>
               </div>
             </div>
           </CardContent>

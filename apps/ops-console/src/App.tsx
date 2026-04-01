@@ -11,7 +11,7 @@ import { RuntimePage } from "@/pages/general/RuntimePage"
 import { CallerOverviewPage } from "@/pages/caller/CallerOverviewPage"
 import { CallerRegisterPage } from "@/pages/caller/CallerRegisterPage"
 import { CatalogPage } from "@/pages/caller/CatalogPage"
-import { CallsPage } from "@/pages/caller/CallsPage"
+import { CallerApprovalsPage, CallsPage } from "@/pages/caller/CallsPage"
 import { PreferencesPage } from "@/pages/caller/PreferencesPage"
 import { ResponderLockedPage } from "@/pages/responder/ResponderLockedPage"
 import { ResponderOverviewPage } from "@/pages/responder/ResponderOverviewPage"
@@ -71,6 +71,7 @@ function AppRoutes() {
           <Route path="catalog" element={<CatalogPage />} />
           <Route path="calls" element={<CallsPage />} />
           <Route path="calls/new" element={<CallsPage />} />
+          <Route path="approvals" element={<CallerApprovalsPage />} />
           <Route path="preferences" element={<PreferencesPage />} />
         </Route>
 

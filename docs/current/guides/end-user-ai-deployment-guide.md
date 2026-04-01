@@ -1,6 +1,24 @@
 # End-User AI Deployment Guide
 
-This guide describes the current supported path for letting an AI help an end user install and bootstrap the local client.
+This guide describes the **current supported** path for letting an AI help an end user install and bootstrap the local client.
+
+## Current Product Boundary
+
+The current `client` repository is ready for:
+
+- local caller setup
+- local responder enablement
+- local hotline draft management
+- local hotline discovery
+- local example self-call
+
+The following are **not** the current primary product path and should be treated as later work:
+
+- platform publishing
+- community catalog exposure
+- operator review as a first-use requirement
+
+For the current local-first path, start with [Local Mode Onboarding](./local-mode-onboarding.md).
 
 ## Current Supported Install Strategy
 
@@ -8,7 +26,6 @@ The supported user-facing install path is the published CLI package:
 
 ```bash
 npm install -g @delexec/ops
-delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 ```
 
 ## What The AI Should Do
@@ -16,49 +33,34 @@ delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 The recommended AI flow is:
 
 1. install `@delexec/ops`
-2. run the single bootstrap command
-4. inspect the JSON output
-5. if approval is pending, tell the user or operator exactly that
-6. after approval, rerun bootstrap or `run-example`
-
-## Single-Command Bootstrap
-
-```bash
-delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
-```
-
-This flow attempts to:
-
-1. initialize `~/.delexec`
-2. register the caller
-3. install the official example hotline
-4. submit responder and hotline review
-5. enable the local responder runtime
-6. start the local supervisor
+2. initialize local setup and unlock
+3. register the caller
+4. enable the local responder runtime
+5. install the official example hotline
+6. inspect the generated local draft
 7. run the local example self-call
 
-## Expected Output
+## Recommended Local-First Commands
 
-The command returns JSON. The AI should read the output instead of parsing shell text heuristically.
-
-Success shape:
-
-```json
-{
-  "ok": true,
-  "request_id": "req_xxx",
-  "status": "SUCCEEDED"
-}
+```bash
+delexec-ops setup
+delexec-ops auth login
+delexec-ops auth register --email you@example.com
+delexec-ops enable-responder
+delexec-ops add-example-hotline
+delexec-ops run-example --text "Summarize this request."
 ```
 
-Pending-approval shape:
+## Expected Outcomes
 
-```json
-{
-  "ok": false,
-  "stage": "awaiting_admin_approval"
-}
-```
+The AI should verify these local-mode outcomes:
+
+- local setup completed or not
+- caller registration completed or not
+- local responder enabled or not
+- example hotline added or not
+- hotline draft generated or not
+- example request succeeded or not
 
 ## Useful Follow-Up Commands
 
@@ -68,19 +70,8 @@ delexec-ops doctor
 delexec-ops debug-snapshot
 ```
 
-## What The AI Should Report Back
-
-The AI should summarize only these user-relevant outcomes:
-
-- setup completed or not
-- caller registration completed or not
-- review submitted or not
-- responder enabled or not
-- admin approval still required or not
-- example request succeeded or not
-
 ## Current Limits
 
-- platform must already be reachable
-- responder and hotline still require admin approval
-- email transport is optional and not required for the bootstrap path
+- this guide covers local management only
+- platform/community publishing remains a later workflow
+- email transport is optional and not required for the local-first path

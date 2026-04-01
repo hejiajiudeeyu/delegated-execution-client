@@ -17,6 +17,29 @@ export interface ApiResponse<T = unknown> {
   body: T | null
 }
 
+interface SessionRecoveryResponse {
+  recoverable_session?: {
+    token?: string | null
+    expires_at?: string | null
+  } | null
+}
+
+async function parseJsonBody<T>(response: Response): Promise<T | null> {
+  const text = await response.text()
+  return text ? (JSON.parse(text) as T) : null
+}
+
+export async function restoreSessionToken(): Promise<string | null> {
+  const response = await fetch("/auth/session")
+  const body = await parseJsonBody<SessionRecoveryResponse>(response)
+  const token = body?.recoverable_session?.token ?? null
+  if (response.status === 200 && token) {
+    setSessionToken(token)
+    return token
+  }
+  return null
+}
+
 export async function requestJson<T = unknown>(
   pathname: string,
   options: {
@@ -26,30 +49,38 @@ export async function requestJson<T = unknown>(
   } = {}
 ): Promise<ApiResponse<T>> {
   const { method = "GET", body, signal } = options
-  const token = getSessionToken()
-  const headers: Record<string, string> = {}
-
-  if (token) {
-    headers["X-Ops-Session"] = token
+  const execute = async (token: string | null): Promise<ApiResponse<T>> => {
+    const headers: Record<string, string> = {}
+    if (token) {
+      headers["X-Ops-Session"] = token
+    }
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json; charset=utf-8"
+    }
+    const response = await fetch(pathname, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
+    })
+    return {
+      status: response.status,
+      body: await parseJsonBody<T>(response),
+    }
   }
-  if (body !== undefined) {
-    headers["Content-Type"] = "application/json; charset=utf-8"
+
+  let token = getSessionToken()
+  let result = await execute(token)
+  if (result.status === 401 && pathname !== "/auth/session") {
+    const recoveredToken = await restoreSessionToken()
+    if (recoveredToken) {
+      token = recoveredToken
+      result = await execute(token)
+    }
   }
-
-  const response = await fetch(pathname, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal,
-  })
-
-  const text = await response.text()
-  if (response.status === 401) {
+  if (result.status === 401) {
     clearSessionToken()
     window.dispatchEvent(new Event("ops:unauthorized"))
   }
-  return {
-    status: response.status,
-    body: text ? (JSON.parse(text) as T) : null,
-  }
+  return result
 }

@@ -87,10 +87,10 @@ npx @delexec/ops debug-snapshot
 ```bash
 npx @delexec/ops add-hotline \
   --type process \
-  --hotline-id local.summary.v1 \
-  --display-name "Local Summary Agent" \
+  --hotline-id local.delegated-execution.workspace-summary.v1 \
+  --display-name "Delegated Execution Workspace Summary" \
   --cmd "python3 /Users/me/agents/summary_agent.py" \
-  --task-type summarize \
+  --task-type text_summarize \
   --capability text.summarize
 ```
 

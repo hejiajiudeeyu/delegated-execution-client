@@ -2,6 +2,17 @@
 
 This guide covers the supported deployment shapes for `platform`, `caller`, and `responder`.
 
+## Current Client Position
+
+At the current stage, the `client` repository is primarily a **local management** product:
+
+- local caller setup
+- local responder runtime
+- local hotline draft management
+- local hotline discovery and self-call
+
+Platform publishing and community-facing flows still exist in parts of the codebase, but they should be treated as later workflows rather than the primary install path.
+
 Current protocol/runtime baseline:
 
 - platform returns request-scoped `delivery-meta` with `task_delivery` and `result_delivery`
@@ -36,25 +47,27 @@ Profile intent:
 Recommended user path:
 
 1. `npm install`
-2. `npm run ops -- bootstrap --email you@example.com --platform http://127.0.0.1:8080`
-3. If admin approval is not yet available, approve the responder and hotline, then rerun `npm run ops -- bootstrap`
-4. `npm run ops -- doctor` / `npm run ops -- debug-snapshot`
+2. `npm run ops -- setup`
+3. `npm run ops -- auth register --email you@example.com`
+4. `npm run ops -- enable-responder`
+5. `npm run ops -- add-example-hotline`
+6. `npm run ops -- run-example --text "Summarize this request."`
+7. `npm run ops -- doctor` / `npm run ops -- debug-snapshot`
 
 Manual fallback path:
 
 1. `npm install`
 2. `npm run ops -- setup`
-3. `npm run ops -- auth register --email you@example.com --platform http://127.0.0.1:8080`
-4. `npm run ops -- add-example-hotline`
-5. `npm run ops -- submit-review`
-6. `npm run ops -- enable-responder`
-7. `npm run ops -- start`
-8. `npm run ops -- run-example --text "Summarize this request."`
+3. `npm run ops -- auth register --email you@example.com`
+4. `npm run ops -- enable-responder`
+5. `npm run ops -- add-example-hotline`
+6. `npm run ops -- start`
+7. `npm run ops -- run-example --text "Summarize this request."`
 
 This path stores local ops state under `~/.delexec`, starts a local supervisor, and manages relay internally when the relay package is available in the current install shape.
 In the split-repository source integration shape, prefer `relay_http` pointed at a relay process started from `delegated-execution-platform-selfhost`. See `docs/current/guides/source-integration-runbook.md`.
 Local runtime logs are written under `~/.delexec/logs`, and `ops-console` reads logs and debug snapshot data from the supervisor.
-`ops-console` also provides a setup wizard that guides the user through caller registration, official example installation, review submission, responder enablement, and local example self-call.
+`ops-console` also provides a setup wizard that guides the user through caller registration, official example installation, responder enablement, draft inspection, and local example self-call.
 `ops-console` now also supports a local passphrase-backed unlock flow. Sensitive local credentials are stored in `~/.delexec/secrets.enc.json` rather than browser storage.
 `enable-responder` only enables the local responder runtime. Platform review controls catalog visibility and remote availability; it does not prevent the local runtime from starting.
 

@@ -3,68 +3,60 @@
 > 英文版：coding-agent-onboarding.md
 > 说明：中文文档为准。
 
-本仓库现在提供了稳定的本地演示路径，供 coding agent 使用。
+本仓库当前提供的是稳定的**本地优先**路径，供 coding agent 使用。
 
-最短 bootstrap 路径：
+## 当前范围
+
+当前 coding-agent onboarding 只覆盖：
+
+- 本地初始化与解锁
+- 本地 caller 注册
+- 本地 responder 启用
+- 本地 hotline draft 生成
+- 本地 hotline 发现与自调用
+
+platform 发布和社区能力仍属于后续工作，不是这里的主要上手目标。
+
+## 推荐路径
+
+请先使用本地模式指南：
+
+- [本地模式上手指南](./local-mode-onboarding.zh-CN.md)
+- [Agent 本地安装剧本](./agent-local-install-playbook.zh-CN.md)
+
+推荐命令：
 
 ```bash
 npm install -g @delexec/ops
-delexec-ops bootstrap --email coding-agent@local.test --platform http://127.0.0.1:8080
-```
-
-包装脚本仍可用，并委托到同一套 CLI 流程：
-
-```bash
-node scripts/coding-agent-bootstrap.mjs --email coding-agent@local.test --platform http://127.0.0.1:8080
-```
-
-bootstrap 流程会尝试完成：
-
-1. `delexec-ops setup`
-2. caller 注册
-3. 安装官方示例 hotline
-4. 提交 responder 审核
-5. 启用 responder
-6. 启动 supervisor
-7. 当本地运维环境具备 `PLATFORM_ADMIN_API_KEY` 时完成 responder/hotline 审批
-8. 按正常 caller -> responder 协议路径执行本地示例自调用
-
-推荐环境变量：
-
-```bash
-export PLATFORM_API_BASE_URL=http://127.0.0.1:8080
-export PLATFORM_ADMIN_API_KEY=sk_admin_xxx
-export BOOTSTRAP_CALLER_EMAIL=coding-agent@local.test
-```
-
-`PLATFORM_ADMIN_API_KEY` 用于本地 bootstrap 自动化或 `platform-console-gateway`，浏览器客户端不应直接存储或使用该密钥。
-
-成功判定：
-
-- 输出为 JSON
-- `steps` 包含 `setup_ok`、`caller_registered`、`example_hotline_added`、`review_submitted`、`responder_enabled`
-- 终端成功返回：
-
-```json
-{
-  "ok": true,
-  "request_id": "req_xxx",
-  "status": "SUCCEEDED"
-}
-```
-
-若缺少管理员审批，命令将以以下阶段退出：
-
-- `stage: "awaiting_admin_approval"`
-
-常用后续命令：
-
-```bash
+delexec-ops setup
+delexec-ops auth login
+delexec-ops auth register --email coding-agent@local.test
+delexec-ops enable-responder
 delexec-ops add-example-hotline
 delexec-ops run-example --text "Summarize this request."
 ```
 
-常用日志与快照：
+## 成功判定
+
+满足以下条件即表示本地路径完成：
+
+- 本地 setup 成功
+- caller 注册成功
+- responder 已启用
+- 示例 hotline 已安装
+- 本地 draft 已生成
+- 示例自调用到达 `SUCCEEDED`
+
+## 常用后续命令
+
+```bash
+delexec-ops add-example-hotline
+delexec-ops run-example --text "Summarize this request."
+delexec-ops doctor
+delexec-ops debug-snapshot
+```
+
+## 常用日志与快照
 
 - 本地 ops 主目录：`~/.delexec`
 - 运行时日志：`~/.delexec/logs`

@@ -92,7 +92,7 @@ curl -X POST http://127.0.0.1:8080/v2/admin/responders/<responder_id>/approve \
   -H 'Content-Type: application/json' \
   -d '{"reason":"manual integration approval"}'
 
-curl -X POST http://127.0.0.1:8080/v2/admin/hotlines/local.summary.v1/approve \
+curl -X POST http://127.0.0.1:8080/v2/admin/hotlines/local.delegated-execution.workspace-summary.v1/approve \
   -H 'Authorization: Bearer sk_admin_local_dev' \
   -H 'Content-Type: application/json' \
   -d '{"reason":"manual integration approval"}'

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react"
-import { clearSessionToken, requestJson, setSessionToken } from "@/lib/api"
+import { clearSessionToken, requestJson, restoreSessionToken, setSessionToken } from "@/lib/api"
 
 export interface AuthState {
   configured: boolean
@@ -43,6 +43,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
+      if (!sessionStorage.getItem("rsp.ops.session")) {
+        await restoreSessionToken()
+      }
       const res = await requestJson<StatusData>("/status")
       if (res.body) setStatus(res.body)
     } catch {

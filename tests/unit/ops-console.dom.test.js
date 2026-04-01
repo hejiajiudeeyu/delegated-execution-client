@@ -274,8 +274,8 @@ describe("ops-console dom flow", () => {
         }
         if (pathname === "/responder/hotlines/example" && method === "POST") {
           const nextHotline = {
-            hotline_id: "local.summary.v1",
-            display_name: "Local Summary Example",
+            hotline_id: "local.delegated-execution.workspace-summary.v1",
+            display_name: "Delegated Execution Workspace Summary",
             task_types: ["text_summarize"],
             capabilities: ["text.summarize"],
             tags: ["local", "example", "demo"],
@@ -373,7 +373,7 @@ describe("ops-console dom flow", () => {
             request: {
               request_id: "req_example_1",
               responder_id: "responder_local",
-              hotline_id: "local.summary.v1",
+              hotline_id: "local.delegated-execution.workspace-summary.v1",
               status: "SENT",
               updated_at: "2026-03-08T00:00:01Z"
             }
@@ -383,7 +383,7 @@ describe("ops-console dom flow", () => {
           return jsonResponse({
             request_id: "req_example_1",
             responder_id: "responder_local",
-            hotline_id: "local.summary.v1",
+            hotline_id: "local.delegated-execution.workspace-summary.v1",
             status: "SUCCEEDED",
             updated_at: "2026-03-08T00:00:02Z"
           });
@@ -417,7 +417,7 @@ describe("ops-console dom flow", () => {
     expect(document.querySelector("#setup-wizard")?.textContent).toContain("Submitted: 1");
     document.querySelector("#add-example-hotline")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flush();
-    expect(document.querySelector("#responder-hotlines")?.textContent).toContain("Local Summary Example");
+    expect(document.querySelector("#responder-hotlines")?.textContent).toContain("Delegated Execution Workspace Summary");
     expect(document.querySelector("#responder-hotlines")?.textContent).toContain("/tmp/local-one");
     expect(document.querySelector("#responder-hotlines")?.textContent).toContain("Summarizes a local repository for remote callers");
     document.querySelector("#transport-type").value = "email";

@@ -3,7 +3,25 @@
 > 英文版：end-user-ai-deployment-guide.md
 > 说明：中文文档为准。
 
-本指南描述当前受支持的路径：让 AI 协助终端用户安装并 bootstrap 本地客户端。
+本指南描述当前**受支持**的路径：让 AI 协助终端用户安装并启动本地客户端。
+
+## 当前产品边界
+
+当前 `client` 仓库已经支持：
+
+- 本地 caller 初始化
+- 本地 responder 启用
+- 本地 hotline draft 管理
+- 本地 hotline 发现
+- 本地示例自调用
+
+以下能力**还不是当前主路径**，应视为后续能力：
+
+- 发布到 platform
+- 发布到社区 catalog
+- 把运维审批当作首次使用前提
+
+当前本地优先路径请先看：[本地模式上手指南](./local-mode-onboarding.zh-CN.md)
 
 ## 当前受支持的安装策略
 
@@ -11,7 +29,6 @@
 
 ```bash
 npm install -g @delexec/ops
-delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 ```
 
 ## AI 应该做什么
@@ -19,49 +36,34 @@ delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
 推荐的 AI 流程：
 
 1. 安装 `@delexec/ops`
-2. 运行单条 bootstrap 命令
-3. 检查 JSON 输出
-4. 若审批待处理，明确告知用户或运维
-5. 审批完成后，重新执行 bootstrap 或 `run-example`
-
-## 单命令 Bootstrap
-
-```bash
-delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
-```
-
-该流程会尝试：
-
-1. 初始化 `~/.delexec`
-2. 注册 caller
-3. 安装官方示例 hotline
-4. 提交 responder 与 hotline 审核
-5. 启用本地 responder 运行时
-6. 启动本地 supervisor
+2. 完成本地初始化与解锁
+3. 注册 caller
+4. 启用本地 responder runtime
+5. 安装官方示例 hotline
+6. 检查生成的本地 draft
 7. 执行本地示例自调用
 
-## 预期输出
+## 推荐的本地优先命令
 
-命令返回 JSON。AI 应读取 JSON，而不是以启发式方式解析 shell 文本。
-
-成功形态：
-
-```json
-{
-  "ok": true,
-  "request_id": "req_xxx",
-  "status": "SUCCEEDED"
-}
+```bash
+delexec-ops setup
+delexec-ops auth login
+delexec-ops auth register --email you@example.com
+delexec-ops enable-responder
+delexec-ops add-example-hotline
+delexec-ops run-example --text "Summarize this request."
 ```
 
-待审批形态：
+## 预期结果
 
-```json
-{
-  "ok": false,
-  "stage": "awaiting_admin_approval"
-}
-```
+AI 应确认以下本地模式结果：
+
+- 本地 setup 是否完成
+- caller 注册是否完成
+- 本地 responder 是否已启用
+- 示例 hotline 是否已添加
+- hotline draft 是否已生成
+- 示例请求是否成功
 
 ## 常用后续命令
 
@@ -71,19 +73,8 @@ delexec-ops doctor
 delexec-ops debug-snapshot
 ```
 
-## AI 应回报给用户的信息
-
-AI 应仅总结以下用户相关结果：
-
-- setup 是否完成
-- caller 注册是否完成
-- review 是否已提交
-- responder 是否已启用
-- 是否仍需管理员审批
-- 示例请求是否成功
-
 ## 当前限制
 
-- platform 必须已可访问
-- responder 与 hotline 仍需管理员审批
-- 邮件 transport 为可选项，不是 bootstrap 必需项
+- 本指南只覆盖本地管理闭环
+- platform / 社区发布仍是后续能力
+- email transport 为可选项，不是本地优先路径的前提

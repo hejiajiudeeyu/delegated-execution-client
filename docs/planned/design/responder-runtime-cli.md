@@ -144,12 +144,12 @@ Recommended files:
     "display_name": "Local Responder",
     "hotlines": [
       {
-        "hotline_id": "local.summary.v1",
-        "display_name": "Local Summary Agent",
+        "hotline_id": "local.delegated-execution.workspace-summary.v1",
+        "display_name": "Delegated Execution Workspace Summary",
         "enabled": true,
-        "task_types": ["summarize"],
+        "task_types": ["text_summarize"],
         "capabilities": ["text.summarize"],
-        "tags": ["local", "agent"],
+        "tags": ["local", "workspace", "summary"],
         "adapter_type": "process",
         "adapter": {
           "cmd": "python3 /Users/me/agents/summary_agent.py",
@@ -193,10 +193,10 @@ Suggested CLI example:
 ```bash
 npx @delexec/ops add-hotline \
   --type process \
-  --hotline-id local.summary.v1 \
-  --display-name "Local Summary Agent" \
+  --hotline-id local.delegated-execution.workspace-summary.v1 \
+  --display-name "Delegated Execution Workspace Summary" \
   --cmd "python3 /Users/me/agents/summary_agent.py" \
-  --task-type summarize \
+  --task-type text_summarize \
   --capability text.summarize
 ```
 
@@ -212,8 +212,8 @@ Suggested stdin payload:
 ```json
 {
   "request_id": "req_123",
-  "task_type": "summarize",
-  "hotline_id": "local.summary.v1",
+  "task_type": "text_summarize",
+  "hotline_id": "local.delegated-execution.workspace-summary.v1",
   "input": {
     "text": "..."
   },
