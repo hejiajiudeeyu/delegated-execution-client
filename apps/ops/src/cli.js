@@ -291,7 +291,7 @@ async function waitForUi(url) {
       throw new Error("ui_not_ready");
     }
     return true;
-  }, { timeoutMs: 15000, intervalMs: 300 });
+  }, { timeoutMs: 30000, intervalMs: 500 });
 }
 
 function openBrowser(url) {

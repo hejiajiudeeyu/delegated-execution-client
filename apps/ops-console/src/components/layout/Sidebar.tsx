@@ -16,6 +16,7 @@ import {
 import { cn } from "@/components/ui/utils"
 import { useAuth } from "@/hooks/useAuth"
 import { requestJson } from "@/lib/api"
+import { isCallerRegistered } from "@/lib/status"
 
 type TabCtx = "general" | "caller" | "responder"
 
@@ -103,9 +104,7 @@ function NavGroup({
 export function ConsoleSidebar({ currentTab }: { currentTab: TabCtx }) {
   const { status } = useAuth()
   const responderEnabled = status?.responder?.enabled ?? false
-  const callerRegistered = status?.config
-    ? (status.config as { caller?: { api_key_configured?: boolean } }).caller?.api_key_configured === true
-    : false
+  const callerRegistered = isCallerRegistered(status)
 
   const [pendingApprovals, setPendingApprovals] = useState(0)
 

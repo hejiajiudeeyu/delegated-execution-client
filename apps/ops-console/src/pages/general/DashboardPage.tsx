@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Server, Wifi, Zap, Globe, RotateCcw, ArrowRight, UserPlus, CheckCircle2 } from "lucide-react"
 import { toast } from "sonner"
+import { isCallerRegistered } from "@/lib/status"
 
 function HealthDot({ ok }: { ok: boolean | undefined | null }) {
   if (ok === undefined || ok === null)
@@ -70,9 +71,7 @@ export function DashboardPage() {
   const callerHealth = status?.runtime?.caller?.health?.body?.ok
   const responderHealth = status?.runtime?.responder?.health?.body?.ok
   const relayHealth = status?.runtime?.relay?.health?.body?.ok
-  const callerRegistered =
-    (status?.config as { caller?: { api_key_configured?: boolean } } | undefined)?.caller
-      ?.api_key_configured ?? false
+  const callerRegistered = isCallerRegistered(status)
   const responderEnabled = status?.responder?.enabled ?? false
   const platformEnabled =
     (status?.config as { platform?: { enabled?: boolean } } | undefined)?.platform?.enabled === true

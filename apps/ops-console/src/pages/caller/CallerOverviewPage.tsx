@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, UserPlus, BookOpen, Zap, AlertCircle } from "lucide-react"
+import { callerRegistrationMode, isCallerRegistered } from "@/lib/status"
 
 type CallerConfig = {
   api_key_configured?: boolean
@@ -15,8 +16,9 @@ export function CallerOverviewPage() {
   const { status } = useAuth()
   const navigate = useNavigate()
 
-  const callerConfig = (status?.config as { caller?: CallerConfig } | undefined)?.caller
-  const registered = callerConfig?.api_key_configured ?? false
+  const callerConfig = ((status?.config as { caller?: CallerConfig } | undefined)?.caller ?? status?.caller) as CallerConfig | undefined
+  const registered = isCallerRegistered(status)
+  const registrationMode = callerRegistrationMode(status)
   const email = callerConfig?.contact_email
   const callerId = callerConfig?.caller_id
 
@@ -36,7 +38,7 @@ export function CallerOverviewPage() {
                 <div>
                   <p className="text-sm font-semibold">尚未注册 Caller</p>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                    注册后可浏览 Hotline Catalog、发起 Call 请求并设置路由偏好。注册只需提供联系邮箱，平台将颁发 API Key。
+                    注册后可浏览 Hotline Catalog、发起 Call 请求并设置路由偏好。本地模式下只需提供联系邮箱，不要求平台 API Key。
                   </p>
                 </div>
                 <Button
@@ -73,7 +75,7 @@ export function CallerOverviewPage() {
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">注册状态</span>
             <Badge variant="outline" className="text-cyan-600 border-cyan-500/40 bg-cyan-500/10 font-mono text-xs">
-              已注册
+              {registrationMode === "local_only" ? "本地已注册" : "已注册"}
             </Badge>
           </div>
           {callerId && (
@@ -89,10 +91,16 @@ export function CallerOverviewPage() {
             </div>
           )}
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">API Key</span>
-            <Badge variant="outline" className="text-green-600 border-green-500/40 bg-green-500/10 text-xs">
-              已配置
-            </Badge>
+            <span className="text-muted-foreground">{registrationMode === "local_only" ? "模式" : "API Key"}</span>
+            {registrationMode === "local_only" ? (
+              <Badge variant="outline" className="text-blue-600 border-blue-500/40 bg-blue-500/10 text-xs">
+                local_only
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-green-600 border-green-500/40 bg-green-500/10 text-xs">
+                已配置
+              </Badge>
+            )}
           </div>
         </CardContent>
       </Card>

@@ -12,6 +12,13 @@ export interface AuthState {
 export interface StatusData {
   ok: boolean
   auth: AuthState
+  caller?: {
+    registered?: boolean
+    registration_mode?: string | null
+    api_key_configured?: boolean
+    caller_id?: string | null
+    contact_email?: string | null
+  }
   config?: Record<string, unknown>
   responder?: {
     enabled: boolean

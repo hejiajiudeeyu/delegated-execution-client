@@ -147,7 +147,7 @@ export function SetupPage() {
     setRegisterError("")
     const res = await requestJson("/auth/register-caller", {
       method: "POST",
-      body: { contact_email: email },
+      body: { contact_email: email, mode: "local_only" },
     })
     setRegisterLoading(false)
     if (res.status === 201) {
@@ -156,7 +156,7 @@ export function SetupPage() {
       setTimeout(() => setStep("done"), 800)
     } else {
       const err = res.body as { error?: { message?: string } } | null
-      setRegisterError(err?.error?.message ?? "注册失败，请检查平台连接")
+      setRegisterError(err?.error?.message ?? "注册失败，请检查本地运行状态")
     }
   }
 

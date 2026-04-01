@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Alert } from "@/components/ui/alert"
 import { LockKeyhole, CheckCircle2, UserCheck, BookOpen, FileCheck, KeyRound } from "lucide-react"
 import { cn } from "@/components/ui/utils"
+import { isCallerRegistered } from "@/lib/status"
 
 const STEPS = [
   {
@@ -41,9 +42,7 @@ export function ResponderLockedPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
-  const callerRegistered =
-    (status?.config as { caller?: { api_key_configured?: boolean } } | undefined)?.caller
-      ?.api_key_configured ?? false
+  const callerRegistered = isCallerRegistered(status)
   const platformEnabled =
     (status?.config as { platform?: { enabled?: boolean } } | undefined)?.platform?.enabled === true
 
@@ -108,7 +107,7 @@ export function ResponderLockedPage() {
 
       {!callerRegistered && (
         <Alert>
-          <p className="text-sm">请先前往 Caller Tab 完成注册。当前产品仍要求先有 Caller 身份，才能启用本地 Responder。</p>
+          <p className="text-sm">请先前往 Caller 页面完成注册。只要完成本地 Caller 注册即可，不要求平台 API Key。</p>
         </Alert>
       )}
 

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert } from "@/components/ui/alert"
 import { CheckCircle2, UserPlus } from "lucide-react"
+import { callerRegistrationMode, isCallerRegistered } from "@/lib/status"
 
 export function CallerRegisterPage() {
   const { refresh, status } = useAuth()
@@ -17,9 +18,8 @@ export function CallerRegisterPage() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState(false)
 
-  const callerRegistered =
-    (status?.config as { caller?: { api_key_configured?: boolean } } | undefined)?.caller
-      ?.api_key_configured ?? false
+  const callerRegistered = isCallerRegistered(status)
+  const registrationMode = callerRegistrationMode(status)
 
   if (callerRegistered) {
     return (
@@ -34,7 +34,7 @@ export function CallerRegisterPage() {
               <div>
                 <p className="text-sm font-semibold">已完成注册</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Caller API Key 已配置，可以发起 Call 了
+                  {registrationMode === "local_only" ? "已完成本地 Caller 注册，可以直接在本机发起 Call。" : "Caller API Key 已配置，可以发起 Call 了"}
                 </p>
               </div>
             </div>
@@ -54,7 +54,7 @@ export function CallerRegisterPage() {
     setError("")
     const res = await requestJson("/auth/register-caller", {
       method: "POST",
-      body: { contact_email: email },
+      body: { contact_email: email, mode: "local_only" },
     })
     setLoading(false)
     if (res.status === 201) {
@@ -72,7 +72,7 @@ export function CallerRegisterPage() {
       <div>
         <h1 className="text-base font-bold">注册 Caller</h1>
         <p className="text-xs text-muted-foreground mt-0.5">
-          向平台注册以获取 API Key，解锁 Catalog 和 Call 功能
+          本地模式下只需要填写联系邮箱，即可注册本地 Caller 身份并解锁 Catalog 和 Call 功能
         </p>
       </div>
 
