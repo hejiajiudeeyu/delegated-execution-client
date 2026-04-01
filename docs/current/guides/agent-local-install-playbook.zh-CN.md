@@ -44,7 +44,7 @@ cd delegated-execution-client
 agent 应假设：
 
 - 本机有 Node.js 和 `corepack`
-- 通过 `corepack` 使用 `pnpm`
+- 可使用 npm workspaces
 - 这条流程不需要 platform
 - 当前产品主路径是本地优先
 
@@ -66,7 +66,7 @@ export OPS_PORT_SKILL_ADAPTER=8191
 ```bash
 git clone git@github.com:hejiajiudeeyu/delegated-execution-client.git
 cd delegated-execution-client
-corepack pnpm install
+npm install
 
 DELEXEC_HOME="$DELEXEC_HOME" \
 OPS_PORT_SUPERVISOR="$OPS_PORT_SUPERVISOR" \
@@ -74,10 +74,12 @@ OPS_PORT_CALLER="$OPS_PORT_CALLER" \
 OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
 OPS_PORT_RELAY="$OPS_PORT_RELAY" \
 OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
-corepack pnpm --filter @delexec/ops exec node src/cli.js start
+npm run ops -- start
 ```
 
 这条路径下，`delexec-ops start` 应自动拉起 embedded local relay。agent 不应注入 `OPS_RELAY_BIN`、自写 mock relay，也不应手工改 `ops.config.json`。
+
+对于 clean-room 安装验证，优先使用仓库根目录的 `npm run ops -- ...` 入口，不要先走 `pnpm --filter @delexec/ops exec ...`。
 
 机器本地的 hotline 状态应集中放在 `DELEXEC_HOME` 下：
 

@@ -45,7 +45,7 @@
 
 ```bash
 cd /Users/hejiajiudeeyu/Documents/Projects/delegated-execution-dev/repos/client
-corepack pnpm install
+npm install
 ```
 
 建议使用独立本地目录，避免和现有环境混用：
@@ -68,10 +68,10 @@ OPS_PORT_CALLER="$OPS_PORT_CALLER" \
 OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
 OPS_PORT_RELAY="$OPS_PORT_RELAY" \
 OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
-corepack pnpm --filter @delexec/ops exec node src/cli.js start
+npm run ops -- start
 ```
 
-当 `TRANSPORT_TYPE=local` 时，`delexec-ops start` 会自动启用内置的 embedded local relay，不需要 `OPS_RELAY_BIN` 或额外 relay 安装。
+当 `TRANSPORT_TYPE=local` 时，`delexec-ops start` 会自动启用内置的 embedded local relay，不需要 `OPS_RELAY_BIN`、mock relay 或额外 relay 安装。
 
 检查状态：
 

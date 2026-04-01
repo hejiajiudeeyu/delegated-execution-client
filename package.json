@@ -9,6 +9,8 @@
     "packages/transports/*"
   ],
   "scripts": {
+    "ops": "node apps/ops/src/cli.js",
+    "ops:start": "node apps/ops/src/cli.js start",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run --config tests/config/vitest.unit.config.mjs",
     "test:integration": "vitest run --config tests/config/vitest.integration.config.mjs",

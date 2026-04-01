@@ -27,6 +27,15 @@
 - 示例 hotline draft 查看
 - 本地自调用到 `SUCCEEDED`
 
+如果你是从源码安装，请优先使用仓库根目录的 npm 入口：
+
+```bash
+npm install
+npm run ops -- start
+```
+
+在全新 clean-room 环境验证本地模式时，优先使用这条路径，不要先用 `pnpm --filter @delexec/ops exec ...`。
+
 机器本地的 hotline 接入配置和 hook 文件应统一放在 `DELEXEC_HOME` 下，不要放进 git 工作区。当前本地运行时使用：
 
 - `ops.config.json`：运行时状态

@@ -44,7 +44,7 @@ cd delegated-execution-client
 The agent should assume:
 
 - Node.js and `corepack` are available
-- `pnpm` is used through `corepack`
+- npm workspaces are available
 - platform is **not** required for this flow
 - the current product path is local-first
 
@@ -66,7 +66,7 @@ export OPS_PORT_SKILL_ADAPTER=8191
 ```bash
 git clone git@github.com:hejiajiudeeyu/delegated-execution-client.git
 cd delegated-execution-client
-corepack pnpm install
+npm install
 
 DELEXEC_HOME="$DELEXEC_HOME" \
 OPS_PORT_SUPERVISOR="$OPS_PORT_SUPERVISOR" \
@@ -74,10 +74,12 @@ OPS_PORT_CALLER="$OPS_PORT_CALLER" \
 OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
 OPS_PORT_RELAY="$OPS_PORT_RELAY" \
 OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
-corepack pnpm --filter @delexec/ops exec node src/cli.js start
+npm run ops -- start
 ```
 
 `delexec-ops start` should bring up the embedded local relay automatically. The agent must not inject `OPS_RELAY_BIN`, create a mock relay, or patch `ops.config.json` for this path.
+
+For clean-room verification, prefer the root `npm run ops -- ...` entry over `pnpm --filter @delexec/ops exec ...`.
 
 Local machine-specific hotline state should stay under `DELEXEC_HOME`:
 

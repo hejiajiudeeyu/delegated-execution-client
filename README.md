@@ -25,6 +25,15 @@ The official local-only path now includes:
 - example hotline draft inspection
 - a local self-call to `SUCCEEDED`
 
+For source installs, use the repository root with `npm install` and the root CLI entry:
+
+```bash
+npm install
+npm run ops -- start
+```
+
+Prefer this path over `pnpm --filter @delexec/ops exec ...` for clean-room local-mode verification.
+
 Keep machine-local hotline integration config and hook files under `DELEXEC_HOME`, not in the git worktree. The local runtime uses:
 
 - `ops.config.json` for runtime state

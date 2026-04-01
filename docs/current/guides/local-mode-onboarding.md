@@ -45,7 +45,7 @@ Work in the `client` repository:
 
 ```bash
 cd /Users/hejiajiudeeyu/Documents/Projects/delegated-execution-dev/repos/client
-corepack pnpm install
+npm install
 ```
 
 Use an isolated home directory so you do not mix this test with an existing local environment:
@@ -68,10 +68,10 @@ OPS_PORT_CALLER="$OPS_PORT_CALLER" \
 OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
 OPS_PORT_RELAY="$OPS_PORT_RELAY" \
 OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
-corepack pnpm --filter @delexec/ops exec node src/cli.js start
+npm run ops -- start
 ```
 
-`delexec-ops start` automatically uses the embedded local relay when `TRANSPORT_TYPE=local`. You do not need `OPS_RELAY_BIN` or any extra relay install for this path.
+`delexec-ops start` automatically uses the embedded local relay when `TRANSPORT_TYPE=local`. You do not need `OPS_RELAY_BIN`, a mock relay, or any extra relay install for this path.
 
 Check status:
 
