@@ -9,6 +9,7 @@ This playbook is intentionally strict:
 - no platform catalog publishing
 - no `submit-review`
 - no Docker
+- no external relay package
 
 ## What the agent should accomplish
 
@@ -76,6 +77,8 @@ OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
 corepack pnpm --filter @delexec/ops exec node src/cli.js start
 ```
 
+`delexec-ops start` should bring up the embedded local relay automatically. The agent must not inject `OPS_RELAY_BIN`, create a mock relay, or patch `ops.config.json` for this path.
+
 Local machine-specific hotline state should stay under `DELEXEC_HOME`:
 
 - `ops.config.json`
@@ -110,6 +113,12 @@ curl -X POST http://127.0.0.1:8179/auth/register-caller \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{"contact_email":"agent-local@example.com"}'
+```
+
+CLI equivalent:
+
+```bash
+delexec-ops auth register --local --email agent-local@example.com
 ```
 
 ## Enable Local Responder
@@ -150,6 +159,7 @@ The agent should verify:
 - every input field has caller-facing fill guidance in `input_schema.properties.<field>.description`
 - a machine-local integration file exists under `hotline-integrations/`
 - a machine-local hook stub exists under `hotline-hooks/`
+- local mode is reported explicitly (`caller.registration_mode = "local_only"`)
 
 ## Run The First Local Call
 
@@ -167,6 +177,11 @@ curl http://127.0.0.1:8179/requests/<request_id>/result \
   -H "X-Ops-Session: $OPS_SESSION"
 ```
 
+The initial request response should already include:
+
+- `hotline_id = "local.delegated-execution.workspace-summary.v1"`
+- `draft_file` pointing to `DELEXEC_HOME/hotline-registration-drafts/...`
+
 ## Success Criteria
 
 The agent should report success only when:
@@ -178,6 +193,7 @@ The agent should report success only when:
 - the draft is readable
 - the example self-call reaches `SUCCEEDED`
 - the result package is available and signed
+- no fake platform credentials or manual config patching were required
 
 ## Prompt Template For Another Agent
 

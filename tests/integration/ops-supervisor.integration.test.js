@@ -19,7 +19,7 @@ describe("ops supervisor integration", () => {
     }
   });
 
-  it("starts relay and caller, then proxies caller registration and request listing", async () => {
+  it("starts embedded local relay and supports local-only caller registration", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-home-"));
     cleanupDirs.push(opsHome);
     process.env.OPS_PORT_SUPERVISOR = String(18000 + Math.floor(Math.random() * 1000));
@@ -27,11 +27,7 @@ describe("ops supervisor integration", () => {
     process.env.OPS_PORT_CALLER = String(20000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(21000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
-    const platformServer = createPlatformServer({ serviceName: "platform-ops-supervisor-test", state: platformState });
-    const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;
-    process.env.PLATFORM_API_BASE_URL = platformUrl;
 
     const supervisor = createOpsSupervisorServer();
     supervisor.listen(0, "127.0.0.1");
@@ -54,9 +50,15 @@ describe("ops supervisor integration", () => {
 
       const registered = await jsonRequest(supervisorUrl, "/auth/register-caller", {
         method: "POST",
-        body: { contact_email: "ops-supervisor@test.local" }
+        body: { contact_email: "ops-supervisor@test.local", mode: "local_only" }
       });
       expect(registered.status).toBe(201);
+      expect(registered.body.mode).toBe("local_only");
+
+      const currentStatus = await jsonRequest(supervisorUrl, "/status");
+      expect(currentStatus.body.runtime.relay.launch_mode).toBe("embedded_local");
+      expect(currentStatus.body.caller.registered).toBe(true);
+      expect(currentStatus.body.caller.registration_mode).toBe("local_only");
 
       const requests = await waitFor(async () => {
         const current = await jsonRequest(supervisorUrl, "/requests");
@@ -69,9 +71,7 @@ describe("ops supervisor integration", () => {
     } finally {
       await supervisor.stopManagedServices();
       await closeServer(supervisor);
-      await closeServer(platformServer);
       delete process.env.DELEXEC_HOME;
-      delete process.env.PLATFORM_API_BASE_URL;
       delete process.env.OPS_PORT_SUPERVISOR;
       delete process.env.OPS_PORT_RELAY;
       delete process.env.OPS_PORT_CALLER;
@@ -166,7 +166,7 @@ server.listen(port, "127.0.0.1");
     try {
       const registered = await jsonRequest(supervisorUrl, "/auth/register-caller", {
         method: "POST",
-        body: { contact_email: "ops-review@test.local" }
+        body: { contact_email: "ops-review@test.local", mode: "platform" }
       });
       expect(registered.status).toBe(201);
 
@@ -249,7 +249,7 @@ server.listen(port, "127.0.0.1");
     try {
       const registered = await jsonRequest(supervisorUrl, "/auth/register-caller", {
         method: "POST",
-        body: { contact_email: "ops-draft@test.local" }
+        body: { contact_email: "ops-draft@test.local", mode: "platform" }
       });
       expect(registered.status).toBe(201);
 
@@ -339,7 +339,7 @@ server.listen(port, "127.0.0.1");
     try {
       const registered = await jsonRequest(supervisorUrl, "/auth/register-caller", {
         method: "POST",
-        body: { contact_email: "ops-invalid-guidance@test.local" }
+        body: { contact_email: "ops-invalid-guidance@test.local", mode: "platform" }
       });
       expect(registered.status).toBe(201);
 
@@ -818,7 +818,7 @@ server.listen(port, "127.0.0.1");
     }
   });
 
-  it("installs the official example hotline and reports missing review stage for self-call", async () => {
+  it("installs the official example hotline and completes a local-only self-call", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-example-"));
     cleanupDirs.push(opsHome);
     process.env.OPS_PORT_SUPERVISOR = String(52000 + Math.floor(Math.random() * 1000));
@@ -826,11 +826,7 @@ server.listen(port, "127.0.0.1");
     process.env.OPS_PORT_CALLER = String(54000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(55000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
-    const platformServer = createPlatformServer({ serviceName: "platform-ops-example-test", state: platformState });
-    const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;
-    process.env.PLATFORM_API_BASE_URL = platformUrl;
 
     const supervisor = createOpsSupervisorServer();
     supervisor.listen(0, "127.0.0.1");
@@ -842,7 +838,7 @@ server.listen(port, "127.0.0.1");
     try {
       await jsonRequest(supervisorUrl, "/auth/register-caller", {
         method: "POST",
-        body: { contact_email: "ops-example@test.local" }
+        body: { contact_email: "ops-example@test.local", mode: "local_only" }
       });
 
       const added = await jsonRequest(supervisorUrl, "/responder/hotlines/example", {
@@ -862,15 +858,24 @@ server.listen(port, "127.0.0.1");
         method: "POST",
         body: { text: "Summarize this local example request." }
       });
-      expect(started.status).toBe(409);
-      expect(started.body.error.code).toBe("EXAMPLE_REVIEW_NOT_SUBMITTED");
-      expect(started.body.stage).toBe("submit_review");
+      expect(started.status).toBe(201);
+      expect(started.body.hotline_id).toBe("local.delegated-execution.workspace-summary.v1");
+      expect(started.body.draft_ready).toBe(true);
+      expect(started.body.draft_file).toContain("local.delegated-execution.workspace-summary.v1.registration.json");
+
+      const result = await waitFor(async () => {
+        const current = await jsonRequest(supervisorUrl, `/requests/${started.body.request_id}/result`);
+        if (current.body?.available !== true) {
+          throw new Error("result_not_ready");
+        }
+        return current;
+      });
+      expect(result.body.status).toBe("SUCCEEDED");
+      expect(result.body.result_package?.status).toBe("ok");
     } finally {
       await supervisor.stopManagedServices();
       await closeServer(supervisor);
-      await closeServer(platformServer);
       delete process.env.DELEXEC_HOME;
-      delete process.env.PLATFORM_API_BASE_URL;
       delete process.env.OPS_PORT_SUPERVISOR;
       delete process.env.OPS_PORT_RELAY;
       delete process.env.OPS_PORT_CALLER;

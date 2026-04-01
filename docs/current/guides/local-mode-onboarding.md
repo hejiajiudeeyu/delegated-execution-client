@@ -15,6 +15,14 @@ This flow validates:
 5. local hotline discovery
 6. local example self-call
 
+This path is now officially supported without:
+
+- platform
+- Docker
+- external relay packages
+- fake platform API keys
+- manual `ops.config.json` edits
+
 ## Scope
 
 Local mode means:
@@ -63,6 +71,8 @@ OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
 corepack pnpm --filter @delexec/ops exec node src/cli.js start
 ```
 
+`delexec-ops start` automatically uses the embedded local relay when `TRANSPORT_TYPE=local`. You do not need `OPS_RELAY_BIN` or any extra relay install for this path.
+
 Check status:
 
 ```bash
@@ -72,7 +82,7 @@ curl http://127.0.0.1:8179/status
 Expected:
 
 - `platform.enabled` is `false`
-- `setup_required` is `true`
+- `runtime.relay.launch_mode = "embedded_local"`
 - responder is disabled
 - no hotlines are configured yet
 
@@ -111,9 +121,16 @@ curl -X POST http://127.0.0.1:8179/auth/register-caller \
 
 Expected:
 
-- `user_id` is returned
-- a local caller API key is created
-- roles include `caller`
+- `mode = "local_only"`
+- `registered = true`
+- `caller.registration_mode = "local_only"` in `/status`
+- no platform API key is required for local mode
+
+CLI equivalent:
+
+```bash
+delexec-ops auth register --local --email localtest@example.com
+```
 
 ## Enable the local responder runtime
 
@@ -202,6 +219,11 @@ Save the returned request ID:
 ```bash
 export REQUEST_ID="<returned request_id>"
 ```
+
+The response should also include:
+
+- `hotline_id = "local.delegated-execution.workspace-summary.v1"`
+- `draft_file` pointing to the local hotline draft under `DELEXEC_HOME/hotline-registration-drafts/`
 
 Poll the result:
 

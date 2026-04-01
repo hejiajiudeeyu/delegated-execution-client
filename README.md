@@ -17,6 +17,14 @@ Use local mode when you want to validate the client-only flow on one machine wit
 See [Local Mode Onboarding](docs/current/guides/local-mode-onboarding.md).
 If you want another agent to perform the installation for you, start with [Agent Local Install Playbook](docs/current/guides/agent-local-install-playbook.md).
 
+The official local-only path now includes:
+
+- embedded local relay started by `delexec-ops start`
+- `delexec-ops auth register --local --email <email>`
+- local responder enablement
+- example hotline draft inspection
+- a local self-call to `SUCCEEDED`
+
 Keep machine-local hotline integration config and hook files under `DELEXEC_HOME`, not in the git worktree. The local runtime uses:
 
 - `ops.config.json` for runtime state

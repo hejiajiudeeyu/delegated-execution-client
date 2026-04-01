@@ -697,14 +697,18 @@ async function reportCallerMetric(platformClient, request, eventType, detail = {
   }
 
   request.metric_flags[metricKey] = true;
-  await platformClient.postMetricEvent({
-    source: "caller-controller",
-    event_type: eventType,
-    request_id: request.request_id,
-    responder_id: request.responder_id,
-    hotline_id: request.hotline_id,
-    ...detail
-  });
+  try {
+    await platformClient.postMetricEvent({
+      source: "caller-controller",
+      event_type: eventType,
+      request_id: request.request_id,
+      responder_id: request.responder_id,
+      hotline_id: request.hotline_id,
+      ...detail
+    });
+  } catch (error) {
+    request.last_metric_error = error instanceof Error ? error.message : "metric_event_failed";
+  }
 }
 
 async function evaluateTimeoutsWithMetrics(request, config, platformClient) {

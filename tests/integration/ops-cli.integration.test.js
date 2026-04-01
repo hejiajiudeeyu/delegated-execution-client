@@ -200,8 +200,12 @@ describe("ops cli integration", () => {
       expect(platformState.catalog.get("cli.register.v1").description).toBe("CLI registration draft description");
       expect(platformState.catalog.get("cli.register.v1").summary).toBe("CLI registration draft summary");
       expect(platformState.catalog.get("cli.register.v1").template_ref).toBe("docs/templates/hotlines/cli.register.v1/");
-      expect(platformState.catalog.get("cli.register.v1").input_summary).toBe("Provide text to summarize.");
-      expect(platformState.catalog.get("cli.register.v1").output_summary).toBe("Returns a concise summary.");
+      expect(platformState.catalog.get("cli.register.v1").input_summary).toBe(
+        "Paste the source text you want summarized. Add extra guidance only if the summary should focus on specific points."
+      );
+      expect(platformState.catalog.get("cli.register.v1").output_summary).toBe(
+        "You will receive a concise summary that can be reused in status updates or quick reviews."
+      );
     } finally {
       await closeServer(platformServer);
     }
@@ -221,7 +225,7 @@ describe("ops cli integration", () => {
         PLATFORM_API_BASE_URL: platformUrl
       };
       await execFileAsync(process.execPath, [CLI_PATH, "responder", "init", "--responder-id", "responder_cli_draft"], { env });
-      await execFileAsync(process.execPath, [CLI_PATH, "auth", "register", "--email", "ops-cli-draft@test.local"], { env });
+      await execFileAsync(process.execPath, [CLI_PATH, "auth", "register", "--email", "ops-cli-draft@test.local", "--platform", platformUrl], { env });
 
       await execFileAsync(
         process.execPath,
@@ -273,7 +277,11 @@ describe("ops cli integration", () => {
         PLATFORM_API_BASE_URL: platformUrl
       };
       await execFileAsync(process.execPath, [CLI_PATH, "responder", "init", "--responder-id", "responder_cli_invalid_guidance"], { env });
-      await execFileAsync(process.execPath, [CLI_PATH, "auth", "register", "--email", "ops-cli-invalid-guidance@test.local"], { env });
+      await execFileAsync(
+        process.execPath,
+        [CLI_PATH, "auth", "register", "--email", "ops-cli-invalid-guidance@test.local", "--platform", platformUrl],
+        { env }
+      );
       await execFileAsync(
         process.execPath,
         [CLI_PATH, "responder", "add-hotline", "--type", "process", "--hotline-id", "cli.invalid.guidance.v1", "--cmd", "node worker.js"],
@@ -308,7 +316,11 @@ describe("ops cli integration", () => {
         PLATFORM_API_BASE_URL: platformUrl
       };
       await execFileAsync(process.execPath, [CLI_PATH, "responder", "init", "--responder-id", "responder_cli_invalid_single"], { env });
-      await execFileAsync(process.execPath, [CLI_PATH, "auth", "register", "--email", "ops-cli-invalid-single@test.local"], { env });
+      await execFileAsync(
+        process.execPath,
+        [CLI_PATH, "auth", "register", "--email", "ops-cli-invalid-single@test.local", "--platform", platformUrl],
+        { env }
+      );
       await execFileAsync(
         process.execPath,
         [CLI_PATH, "responder", "add-hotline", "--type", "process", "--hotline-id", "cli.invalid.single.v1", "--cmd", "node worker.js"],
@@ -366,7 +378,13 @@ describe("ops cli integration", () => {
       };
 
       const auth = JSON.parse(
-        (await execFileAsync(process.execPath, [CLI_PATH, "auth", "register", "--email", "ops-cli-session@test.local"], { env })).stdout
+        (
+          await execFileAsync(
+            process.execPath,
+            [CLI_PATH, "auth", "register", "--email", "ops-cli-session@test.local", "--platform", platformUrl],
+            { env }
+          )
+        ).stdout
       );
       expect(auth.ok).toBe(true);
 
@@ -478,6 +496,31 @@ describe("ops cli integration", () => {
     expect(example.tags).toEqual(["local", "example", "demo"]);
     expect(example.adapter_type).toBe("process");
     expect(example.adapter.cmd).toContain("example-hotline-worker.js");
+  });
+
+  it("registers a local-only caller through the cli without platform credentials", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-local-register-"));
+    cleanupDirs.push(opsHome);
+
+    const env = {
+      ...process.env,
+      DELEXEC_HOME: opsHome
+    };
+
+    const output = JSON.parse(
+      (await execFileAsync(process.execPath, [CLI_PATH, "auth", "register", "--local", "--email", "local-only@test.local"], { env }))
+        .stdout
+    );
+    const config = JSON.parse(fs.readFileSync(path.join(opsHome, "ops.config.json"), "utf8"));
+    const envText = fs.readFileSync(path.join(opsHome, ".env.local"), "utf8");
+
+    expect(output.ok).toBe(true);
+    expect(output.mode).toBe("local_only");
+    expect(config.caller.contact_email).toBe("local-only@test.local");
+    expect(config.caller.registration_mode).toBe("local_only");
+    expect(config.caller.api_key_configured).toBe(false);
+    expect(envText).toContain("CALLER_CONTACT_EMAIL=local-only@test.local");
+    expect(envText).not.toContain("CALLER_PLATFORM_API_KEY=");
   });
 
   it("bootstraps the local client and stops at admin approval when operator credentials are unavailable", async () => {

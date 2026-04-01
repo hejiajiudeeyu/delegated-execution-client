@@ -328,7 +328,8 @@ export function createDefaultOpsConfig(env = {}) {
       enabled: true,
       api_key: null,
       api_key_configured: Boolean(resolvedEnv.CALLER_PLATFORM_API_KEY || resolvedEnv.PLATFORM_API_KEY),
-      contact_email: resolvedEnv.CALLER_CONTACT_EMAIL || null
+      contact_email: resolvedEnv.CALLER_CONTACT_EMAIL || null,
+      registration_mode: resolvedEnv.CALLER_CONTACT_EMAIL ? "local_only" : null
     },
     responder: {
       enabled: false,
@@ -394,7 +395,8 @@ export function ensureOpsState() {
     enabled: true,
     api_key: null,
     api_key_configured: false,
-    contact_email: env.CALLER_CONTACT_EMAIL || process.env.CALLER_CONTACT_EMAIL || null
+    contact_email: env.CALLER_CONTACT_EMAIL || process.env.CALLER_CONTACT_EMAIL || null,
+    registration_mode: null
   };
   const callerApiKey =
     config.caller.api_key ||
@@ -404,6 +406,7 @@ export function ensureOpsState() {
     process.env.PLATFORM_API_KEY ||
     null;
   config.caller.api_key = normalizedString(config.caller.api_key);
+  config.caller.registration_mode = normalizedString(config.caller.registration_mode) || (callerApiKey ? "platform" : null);
   config.caller.api_key_configured = Boolean(callerApiKey);
   config.responder ||= {
     enabled: false,

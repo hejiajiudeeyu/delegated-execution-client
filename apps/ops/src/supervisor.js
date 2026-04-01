@@ -55,7 +55,9 @@ import {
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const OPS_SESSION_STATE_FILE = path.join(getOpsHomeDir(), "run", "session.json");
+function getOpsSessionStateFile() {
+  return path.join(getOpsHomeDir(), "run", "session.json");
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -63,13 +65,14 @@ function nowIso() {
 
 function persistActiveSession(session) {
   ensureOpsDirectories();
+  const sessionStateFile = getOpsSessionStateFile();
   if (!session?.token) {
-    if (fs.existsSync(OPS_SESSION_STATE_FILE)) {
-      fs.rmSync(OPS_SESSION_STATE_FILE, { force: true });
+    if (fs.existsSync(sessionStateFile)) {
+      fs.rmSync(sessionStateFile, { force: true });
     }
     return;
   }
-  writeJsonFile(OPS_SESSION_STATE_FILE, {
+  writeJsonFile(sessionStateFile, {
     token: session.token,
     expires_at: session.expires_at
   });
@@ -818,6 +821,7 @@ export function createOpsSupervisorServer() {
   });
   const runtime = {
     processes: new Map(),
+    relayQueues: new Map(),
     auth: {
       sessions: new Map(),
       unlockedSecrets: null,
@@ -844,7 +848,7 @@ export function createOpsSupervisorServer() {
       name,
       running: !processInfo.exited,
       launch_mode: processInfo.launchMode || null,
-      pid: processInfo.child.pid,
+      pid: processInfo.child?.pid || processInfo.pid || null,
       started_at: processInfo.startedAt,
       exited_at: processInfo.exitedAt,
       exit_code: processInfo.exitCode,
@@ -920,6 +924,187 @@ export function createOpsSupervisorServer() {
     }
 
     throw new Error("relay_launch_command_not_found");
+  }
+
+  function shouldUseEmbeddedRelay() {
+    if (!usesManagedRelay()) {
+      return false;
+    }
+    if (normalizedString(process.env.OPS_RELAY_BIN)) {
+      return false;
+    }
+    return !resolveRelayPackageEntry();
+  }
+
+  function relayQueueFor(receiver) {
+    const key = String(receiver || "").trim();
+    if (!runtime.relayQueues.has(key)) {
+      runtime.relayQueues.set(key, []);
+    }
+    return runtime.relayQueues.get(key);
+  }
+
+  async function startEmbeddedRelay() {
+    const current = runtime.processes.get("relay");
+    if (current && !current.exited) {
+      return current;
+    }
+    runtime.relayQueues.clear();
+
+    const server = http.createServer(async (req, res) => {
+      const method = req.method || "GET";
+      const url = new URL(req.url || "/", "http://127.0.0.1");
+      const pathname = url.pathname;
+
+      if (method === "GET" && pathname === "/healthz") {
+        sendJson(res, 200, { ok: true, service: "embedded-local-relay" });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/messages/send") {
+        const body = await parseJsonBody(req);
+        if (!body?.receiver || !body?.envelope) {
+          sendError(res, 400, "receiver_and_envelope_required", "receiver and envelope are required");
+          return;
+        }
+        relayQueueFor(body.receiver).push(body.envelope);
+        sendJson(res, 201, {
+          ok: true,
+          queued: true,
+          receiver: body.receiver,
+          message_id: body.envelope.message_id || null
+        });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/messages/poll") {
+        const body = await parseJsonBody(req);
+        if (!body?.receiver) {
+          sendError(res, 400, "receiver_required", "receiver is required");
+          return;
+        }
+        sendJson(res, 200, {
+          items: relayQueueFor(body.receiver).slice(0, Number(body.limit || 10))
+        });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/messages/ack") {
+        const body = await parseJsonBody(req);
+        if (!body?.receiver || !body?.message_id) {
+          sendError(res, 400, "receiver_and_message_id_required", "receiver and message_id are required");
+          return;
+        }
+        const queue = relayQueueFor(body.receiver);
+        const index = queue.findIndex((item) => item?.message_id === body.message_id);
+        if (index >= 0) {
+          queue.splice(index, 1);
+        }
+        sendJson(res, 200, { acked: index >= 0 });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/messages/peek") {
+        const receiver = normalizedString(url.searchParams.get("receiver"));
+        if (!receiver) {
+          sendError(res, 400, "receiver_required", "receiver is required");
+          return;
+        }
+        const threadId = normalizedString(url.searchParams.get("thread_id"));
+        const items = relayQueueFor(receiver);
+        sendJson(res, 200, {
+          items: threadId ? items.filter((item) => item?.thread_id === threadId) : [...items]
+        });
+        return;
+      }
+
+      const healthMatch = pathname.match(/^\/v1\/receivers\/([^/]+)\/health$/);
+      if (method === "GET" && healthMatch) {
+        const receiver = decodeURIComponent(healthMatch[1]);
+        sendJson(res, 200, {
+          ok: true,
+          receiver,
+          queue_depth: relayQueueFor(receiver).length
+        });
+        return;
+      }
+
+      sendError(res, 404, "not_found", "no matching embedded relay route", { path: pathname });
+    });
+
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(state.config.runtime.ports.relay, "127.0.0.1", resolve);
+    });
+
+    const processInfo = {
+      name: "relay",
+      child: null,
+      pid: process.pid,
+      logs: [],
+      startedAt: nowIso(),
+      launchMode: "embedded_local",
+      exited: false,
+      exitedAt: null,
+      exitCode: null,
+      lastError: null,
+      close: async () => {
+        if (processInfo.exited) {
+          return;
+        }
+        await new Promise((resolve) => server.close(resolve));
+        processInfo.exited = true;
+        processInfo.exitedAt = nowIso();
+        processInfo.exitCode = 0;
+      }
+    };
+
+    server.on("error", (error) => {
+      processInfo.lastError = error instanceof Error ? error.message : "embedded_relay_error";
+      appendSupervisorEvent({
+        type: "service_error",
+        service: "relay",
+        message: processInfo.lastError
+      });
+    });
+    server.on("close", () => {
+      if (!processInfo.exited) {
+        processInfo.exited = true;
+        processInfo.exitedAt = nowIso();
+        processInfo.exitCode = 0;
+      }
+      appendSupervisorEvent({
+        type: "service_exit",
+        service: "relay",
+        exit_code: processInfo.exitCode
+      });
+    });
+
+    runtime.processes.set("relay", processInfo);
+    appendSupervisorEvent({
+      type: "service_started",
+      service: "relay",
+      pid: process.pid,
+      launch_mode: "embedded_local"
+    });
+    return processInfo;
+  }
+
+  async function stopProcessInfo(processInfo) {
+    if (!processInfo || processInfo.exited) {
+      return;
+    }
+    if (typeof processInfo.close === "function") {
+      await processInfo.close();
+      return;
+    }
+    if (processInfo.child) {
+      processInfo.child.kill();
+      const deadline = Date.now() + 3000;
+      while (!processInfo.exited && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
   }
 
   function serviceEnv(name) {
@@ -1041,6 +1226,9 @@ export function createOpsSupervisorServer() {
     if (current && !current.exited) {
       return current;
     }
+    if (name === "relay" && shouldUseEmbeddedRelay()) {
+      return startEmbeddedRelay();
+    }
     const ports = state.config.runtime.ports;
     const portMap = {
       caller: ports.caller,
@@ -1126,15 +1314,34 @@ export function createOpsSupervisorServer() {
     }
   }
 
+  async function waitForServiceHealth(name, maxWaitMs = 8000) {
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      const health = await fetchHealth(name);
+      if (health?.status === 200) {
+        return health;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return null;
+  }
+
   async function ensureBaseServices() {
     if (usesManagedRelay()) {
       await ensureService("relay");
-      await waitForRelay();
+      if (shouldUseEmbeddedRelay()) {
+        await waitForServiceHealth("relay");
+      } else {
+        await waitForRelay();
+      }
     }
     await ensureService("caller");
+    await waitForServiceHealth("caller");
     await ensureService("skill-adapter");
+    await waitForServiceHealth("skill-adapter");
     if (state.config.responder.enabled) {
       await ensureService("responder");
+      await waitForServiceHealth("responder");
     }
   }
 
@@ -1267,11 +1474,7 @@ export function createOpsSupervisorServer() {
     }
     const processInfo = runtime.processes.get("responder");
     if (processInfo && !processInfo.exited) {
-      // Mark exited synchronously before kill so ensureService (called below)
-      // sees the process as dead and spawns a fresh one. The OS exit event fires
-      // asynchronously and would arrive too late for ensureService to observe.
-      processInfo.exited = true;
-      processInfo.child.kill();
+      await stopProcessInfo(processInfo);
     }
     await ensureService("responder");
   }
@@ -1338,6 +1541,7 @@ export function createOpsSupervisorServer() {
       return counts;
     }, {});
     state.config.caller.api_key_configured = Boolean(secrets.caller_api_key);
+    state.config.caller.registration_mode ||= state.config.caller.api_key_configured ? "platform" : null;
     state.config.platform_console ||= {};
     state.config.platform_console.admin_api_key_configured = Boolean(secrets.platform_admin_api_key);
     return {
@@ -1361,6 +1565,14 @@ export function createOpsSupervisorServer() {
         hotline_count: hotlines.length,
         pending_review_count: pendingReviewCount,
         review_summary: reviewStatusCounts,
+        platform_enabled: platformFeaturesEnabled(state)
+      },
+      caller: {
+        enabled: state.config.caller.enabled !== false,
+        registered: state.config.caller.registration_mode === "local_only" || state.config.caller.api_key_configured === true,
+        registration_mode: state.config.caller.registration_mode || null,
+        contact_email: state.config.caller.contact_email || null,
+        api_key_configured: state.config.caller.api_key_configured === true,
         platform_enabled: platformFeaturesEnabled(state)
       },
       requests: await fetchRecentRequestsSummary(),
@@ -1445,7 +1657,24 @@ export function createOpsSupervisorServer() {
     return [...events, ...logAlerts].slice(-maxItems).reverse();
   }
 
-  async function registerCaller(contactEmail) {
+  async function registerCaller(contactEmail, { localOnly = false, forcePlatform = false } = {}) {
+    if (!forcePlatform && (localOnly || !platformFeaturesEnabled(state))) {
+      const nextEmail = normalizedString(contactEmail) || state.config.caller.contact_email || null;
+      state.config.caller.contact_email = nextEmail;
+      state.config.caller.registration_mode = "local_only";
+      state.config.caller.api_key = null;
+      state.config.caller.api_key_configured = false;
+      state.env = saveOpsState(state);
+      return {
+        status: 201,
+        body: {
+          ok: true,
+          registered: true,
+          mode: "local_only",
+          contact_email: nextEmail
+        }
+      };
+    }
     const response = await requestJson(state.config.platform.base_url, "/v1/users/register", {
       method: "POST",
       body: {
@@ -1456,6 +1685,7 @@ export function createOpsSupervisorServer() {
       return response;
     }
     state.config.caller.contact_email = response.body.contact_email || contactEmail;
+    state.config.caller.registration_mode = "platform";
     state.config.caller.api_key_configured = true;
     if (hasEncryptedSecretStore()) {
       writeOpsSecrets(runtime.auth.passphrase, {
@@ -1682,7 +1912,9 @@ function buildResponderRegisterHeaders() {
 
   async function dispatchExampleRequest(body = {}) {
     await ensureBaseServices();
-    if (!getResolvedSecrets(state, runtime).caller_api_key) {
+    const callerRegistered =
+      state.config.caller.registration_mode === "local_only" || Boolean(getResolvedSecrets(state, runtime).caller_api_key);
+    if (!callerRegistered) {
       return {
         status: 409,
         body: buildStructuredError("CALLER_NOT_REGISTERED", "caller must be registered before running the local example", {
@@ -1730,16 +1962,69 @@ function buildResponderRegisterHeaders() {
       signerPublicKeyPem = selected.responder_public_key_pem || signerPublicKeyPem;
     }
 
-    return requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/remote-requests", {
-      method: "POST",
-      headers: buildPlatformHeaders(state, runtime),
-      body: buildExampleRequestBody({
-        text: body.text,
-        responderId: state.config.responder.responder_id,
-        hotlineId: LOCAL_EXAMPLE_HOTLINE_ID,
-        signerPublicKeyPem
-      })
+    const requestBody = buildExampleRequestBody({
+      text: body.text,
+      responderId: state.config.responder.responder_id,
+      hotlineId: LOCAL_EXAMPLE_HOTLINE_ID,
+      signerPublicKeyPem
     });
+    let response;
+    if (platformFeaturesEnabled(state)) {
+      response = await requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/remote-requests", {
+        method: "POST",
+        headers: buildPlatformHeaders(state, runtime),
+        body: requestBody
+      });
+    } else {
+      const created = await requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/requests", {
+        method: "POST",
+        body: requestBody
+      });
+      if (created.status !== 201 || !created.body?.request_id) {
+        response = created;
+      } else {
+        await requestJson(
+          processBaseUrl(state.config.runtime.ports.caller),
+          `/controller/requests/${encodeURIComponent(created.body.request_id)}/contract-draft`,
+          {
+            method: "POST",
+            body: {}
+          }
+        );
+        const dispatched = await requestJson(
+          processBaseUrl(state.config.runtime.ports.caller),
+          `/controller/requests/${encodeURIComponent(created.body.request_id)}/dispatch`,
+          {
+            method: "POST",
+            body: {
+              thread_id: LOCAL_EXAMPLE_HOTLINE_ID,
+              payload: requestBody.payload,
+              task_input: requestBody.input
+            }
+          }
+        );
+        response = {
+          status: dispatched.status === 202 ? 201 : dispatched.status,
+          body: {
+            request_id: created.body.request_id,
+            request: dispatched.body?.request || created.body,
+            accepted: dispatched.body?.accepted === true,
+            delivery_meta: null,
+            task_token: null
+          }
+        };
+      }
+    }
+    const draft = loadHotlineRegistrationDraft(state, example);
+    return {
+      status: response.status,
+      body: {
+        ...(response.body || {}),
+        hotline_id: LOCAL_EXAMPLE_HOTLINE_ID,
+        draft_file: draft.draft_file,
+        draft_ready: Boolean(draft.draft)
+      }
+    };
   }
 
   const server = http.createServer(async (req, res) => {
@@ -2009,7 +2294,10 @@ function buildResponderRegisterHeaders() {
       }
       if (method === "POST" && pathname === "/auth/register-caller") {
         const body = await parseJsonBody(req);
-        const registered = await registerCaller(body.contact_email);
+        const registered = await registerCaller(body.contact_email, {
+          localOnly: normalizedString(body.mode) === "local_only",
+          forcePlatform: normalizedString(body.mode) === "platform"
+        });
         appendSupervisorEvent({
           type: "caller_registered",
           ok: registered.status === 201,
@@ -2019,11 +2307,7 @@ function buildResponderRegisterHeaders() {
           for (const svc of ["caller", "skill-adapter"]) {
             const existing = runtime.processes.get(svc);
             if (existing && !existing.exited) {
-              existing.child.kill();
-              const deadline = Date.now() + 3000;
-              while (!existing.exited && Date.now() < deadline) {
-                await new Promise((r) => setTimeout(r, 100));
-              }
+              await stopProcessInfo(existing);
             }
             await ensureService(svc);
           }
@@ -2456,11 +2740,7 @@ function buildResponderRegisterHeaders() {
         }
         const existing = runtime.processes.get(name);
         if (existing && !existing.exited) {
-          existing.child.kill();
-          const deadline = Date.now() + 3000;
-          while (!existing.exited && Date.now() < deadline) {
-            await new Promise((r) => setTimeout(r, 100));
-          }
+          await stopProcessInfo(existing);
         }
         await ensureService(name);
         appendSupervisorEvent({ type: "service_restarted", service: name });
@@ -2487,9 +2767,7 @@ function buildResponderRegisterHeaders() {
 
   server.stopManagedServices = async () => {
     for (const processInfo of runtime.processes.values()) {
-      if (!processInfo.exited) {
-        processInfo.child.kill();
-      }
+      await stopProcessInfo(processInfo);
     }
     appendSupervisorEvent({ type: "managed_services_stopped" });
   };

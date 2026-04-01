@@ -15,6 +15,14 @@
 5. 本地 Hotline 发现
 6. 本地示例自调用
 
+现在这条路径已经正式支持以下前提：
+
+- 不启动 platform
+- 不启动 Docker
+- 不安装外部 relay 包
+- 不伪造 platform API key
+- 不手工修改 `ops.config.json`
+
 ## 适用范围
 
 本地模式表示：
@@ -63,6 +71,8 @@ OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
 corepack pnpm --filter @delexec/ops exec node src/cli.js start
 ```
 
+当 `TRANSPORT_TYPE=local` 时，`delexec-ops start` 会自动启用内置的 embedded local relay，不需要 `OPS_RELAY_BIN` 或额外 relay 安装。
+
 检查状态：
 
 ```bash
@@ -72,7 +82,7 @@ curl http://127.0.0.1:8179/status
 预期：
 
 - `platform.enabled` 为 `false`
-- `setup_required` 为 `true`
+- `runtime.relay.launch_mode = "embedded_local"`
 - responder 还未启用
 - 当前没有已配置 hotline
 
@@ -111,9 +121,16 @@ curl -X POST http://127.0.0.1:8179/auth/register-caller \
 
 预期：
 
-- 返回 `user_id`
-- 生成本地 caller API key
-- `roles` 包含 `caller`
+- 返回 `mode = "local_only"`
+- 返回 `registered = true`
+- `/status` 中 `caller.registration_mode = "local_only"`
+- 本地模式不需要 platform API key
+
+对应 CLI 命令：
+
+```bash
+delexec-ops auth register --local --email localtest@example.com
+```
 
 ## 启用本地 Responder Runtime
 
@@ -202,6 +219,11 @@ curl -X POST http://127.0.0.1:8179/requests/example \
 ```bash
 export REQUEST_ID="<返回的 request_id>"
 ```
+
+返回中还应包含：
+
+- `hotline_id = "local.delegated-execution.workspace-summary.v1"`
+- `draft_file`，指向 `DELEXEC_HOME/hotline-registration-drafts/` 下的本地 draft
 
 读取结果：
 

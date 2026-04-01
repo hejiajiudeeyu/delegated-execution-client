@@ -9,6 +9,7 @@
 - 不发布到 platform catalog
 - 不执行 `submit-review`
 - 不启动 Docker
+- 不依赖外部 relay 包
 
 ## Agent 需要完成什么
 
@@ -76,6 +77,8 @@ OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
 corepack pnpm --filter @delexec/ops exec node src/cli.js start
 ```
 
+这条路径下，`delexec-ops start` 应自动拉起 embedded local relay。agent 不应注入 `OPS_RELAY_BIN`、自写 mock relay，也不应手工改 `ops.config.json`。
+
 机器本地的 hotline 状态应集中放在 `DELEXEC_HOME` 下：
 
 - `ops.config.json`
@@ -110,6 +113,12 @@ curl -X POST http://127.0.0.1:8179/auth/register-caller \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{"contact_email":"agent-local@example.com"}'
+```
+
+对应 CLI 命令：
+
+```bash
+delexec-ops auth register --local --email agent-local@example.com
 ```
 
 ## 启用本地 Responder
@@ -150,6 +159,7 @@ agent 应确认：
 - 每个输入字段都在 `input_schema.properties.<field>.description` 中提供面向 Caller 的填写说明
 - `hotline-integrations/` 下存在本机 integration 文件
 - `hotline-hooks/` 下存在本机 hook stub
+- 本地模式状态明确显示 `caller.registration_mode = "local_only"`
 
 ## 发起第一条本地 Call
 
@@ -167,6 +177,11 @@ curl http://127.0.0.1:8179/requests/<request_id>/result \
   -H "X-Ops-Session: $OPS_SESSION"
 ```
 
+第一次发起请求的返回里就应包含：
+
+- `hotline_id = "local.delegated-execution.workspace-summary.v1"`
+- `draft_file`，指向 `DELEXEC_HOME/hotline-registration-drafts/...`
+
 ## 成功判定
 
 只有满足以下条件，agent 才应报告成功：
@@ -178,6 +193,7 @@ curl http://127.0.0.1:8179/requests/<request_id>/result \
 - draft 可读
 - 示例自调用到达 `SUCCEEDED`
 - 结果包可读且带签名
+- 不需要伪造 platform 凭据，也不需要手工改配置
 
 ## 给另一个 Agent 的提示模板
 

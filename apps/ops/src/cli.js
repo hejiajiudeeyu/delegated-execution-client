@@ -27,8 +27,11 @@ const CLIENT_ROOT = path.resolve(path.dirname(CLI_PATH), "../../..");
 const OPS_CONSOLE_DIR = path.join(CLIENT_ROOT, "apps/ops-console");
 const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 const DEFAULT_CONSOLE_PORT = 4173;
-const OPS_SESSION_FILE = path.join(ensureOpsDirectories(), "run", "session.json");
 const OPS_SESSION_HEADER = "X-Ops-Session";
+
+function getOpsSessionFile() {
+  return path.join(ensureOpsDirectories(), "run", "session.json");
+}
 
 function usage() {
   console.log(`Usage:
@@ -37,7 +40,7 @@ function usage() {
   delexec-ops status
   delexec-ops bootstrap [--email <email>] [--platform <url>] [--text <text>] [--open-ui] [--ui-port <port>] [--ui-host <host>] [--no-browser]
   delexec-ops ui start [--host <host>] [--port <port>] [--open] [--no-browser]
-  delexec-ops auth register --email <email> [--platform <url>]
+  delexec-ops auth register --email <email> [--local] [--platform <url>]
   delexec-ops enable-responder [--responder-id <id>] [--display-name <name>]
   delexec-ops add-hotline --type <process|http> --hotline-id <id> [options]
   delexec-ops attach-project --project-path <path> [--project-name <name>] [--project-description <text>] [--hotline-id <id>] [--cmd <command> | --url <url>] [--task-type <type>] [--capability <capability>]
@@ -139,7 +142,7 @@ async function requestJson(baseUrl, pathname, { method = "GET", headers = {}, bo
 }
 
 function readSupervisorSessionToken() {
-  const session = readJsonFile(OPS_SESSION_FILE, null);
+  const session = readJsonFile(getOpsSessionFile(), null);
   if (!session?.token || !session?.expires_at) {
     return null;
   }
@@ -155,8 +158,9 @@ function writeSupervisorSessionToken(session) {
     return false;
   }
   ensureOpsDirectories();
+  const sessionFile = getOpsSessionFile();
   fs.writeFileSync(
-    OPS_SESSION_FILE,
+    sessionFile,
     `${JSON.stringify({ token: String(session.token), expires_at: String(session.expires_at) }, null, 2)}\n`,
     "utf8"
   );
@@ -183,9 +187,10 @@ async function requestSupervisorJson(state, pathname, options = {}) {
     headers: withSupervisorSessionHeaders(options.headers || {})
   });
   if (response.status === 401 && response.body?.error?.code === "AUTH_SESSION_REQUIRED") {
-    if (fs.existsSync(OPS_SESSION_FILE)) {
+    const sessionFile = getOpsSessionFile();
+    if (fs.existsSync(sessionFile)) {
       try {
-        fs.rmSync(OPS_SESSION_FILE, { force: true });
+        fs.rmSync(sessionFile, { force: true });
       } catch {}
     }
     const recovered = await recoverSupervisorSession(state).catch(() => false);
@@ -651,6 +656,7 @@ async function commandStatus() {
 
 async function commandAuthRegister(args) {
   const state = ensureOpsState();
+  const localOnly = args.local === true;
   if (args.platform) {
     state.config.platform.base_url = String(args.platform).trim();
     state.env = saveOpsState(state);
@@ -677,13 +683,33 @@ async function commandAuthRegister(args) {
   try {
     response = await requestSupervisorJson(state, "/auth/register-caller", {
       method: "POST",
-      body: { contact_email: email }
+      body: {
+        contact_email: email,
+        mode: localOnly ? "local_only" : "platform"
+      }
     });
-    if (response.status === 401 && response.body?.error?.code === "AUTH_SESSION_REQUIRED") {
+    if (!localOnly && response.status === 401 && response.body?.error?.code === "AUTH_SESSION_REQUIRED") {
       response = await fallbackRegister();
     }
   } catch {
-    response = await fallbackRegister();
+    response = localOnly
+      ? (() => {
+          state.config.caller.contact_email = email;
+          state.config.caller.registration_mode = "local_only";
+          state.config.caller.api_key = null;
+          state.config.caller.api_key_configured = false;
+          state.env = saveOpsState(state);
+          return {
+            status: 201,
+            body: {
+              ok: true,
+              registered: true,
+              mode: "local_only",
+              contact_email: email
+            }
+          };
+        })()
+      : await fallbackRegister();
   }
   emit({
     ok: response.status === 201,
@@ -1066,12 +1092,21 @@ async function commandBootstrap(args) {
 
   const platformUrl = String(args.platform || initialState.config.platform.base_url || process.env.PLATFORM_API_BASE_URL || "http://127.0.0.1:8080").trim();
   const env = { ...process.env, PLATFORM_API_BASE_URL: platformUrl };
+  const bootstrapUsesPlatform = Boolean(args.platform || process.env.PLATFORM_API_BASE_URL);
 
   try {
     const setup = await runCliSubcommand(setupArgs, env);
     logBootstrapStep(steps, "setup_ok", true, { ops_home: setup.ops_home });
 
     let state = ensureOpsState();
+    if (bootstrapUsesPlatform) {
+      state.config.platform.enabled = true;
+      state.config.platform.base_url = platformUrl;
+      state.config.platform_console ||= {};
+      state.config.platform_console.base_url = platformUrl;
+      state.env = saveOpsState(state);
+      logBootstrapStep(steps, "platform_enabled", true, { platform_url: platformUrl });
+    }
     const email =
       String(args.email || state.config.caller.contact_email || process.env.BOOTSTRAP_CALLER_EMAIL || "").trim() ||
       `ops-user-${Date.now()}@local.test`;
@@ -1081,9 +1116,13 @@ async function commandBootstrap(args) {
         existing: true
       });
     } else {
-      const register = await runCliSubcommand(["auth", "register", "--email", email, "--platform", platformUrl], env);
+      const registerArgs = bootstrapUsesPlatform
+        ? ["auth", "register", "--email", email, "--platform", platformUrl]
+        : ["auth", "register", "--email", email, "--local"];
+      const register = await runCliSubcommand(registerArgs, env);
       logBootstrapStep(steps, "caller_registered", register.ok === true, {
-        caller_email: register.contact_email || email
+        caller_email: register.contact_email || email,
+        mode: register.mode || (bootstrapUsesPlatform ? "platform" : "local_only")
       });
       if (register.ok !== true) {
         emit({
@@ -1121,26 +1160,32 @@ async function commandBootstrap(args) {
 
     state = ensureOpsState();
     const example = (state.config.responder.hotlines || []).find((item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID);
-    if (example?.submitted_for_review === true) {
-      logBootstrapStep(steps, "review_submitted", true, {
-        submitted: 0,
-        existing: true
-      });
-    } else {
-      const review = await runCliSubcommand(["submit-review"], env);
-      const reviewOk = review.ok === true || typeof review.submitted === "number";
-      logBootstrapStep(steps, "review_submitted", reviewOk, {
-        submitted: review.submitted || 0
-      });
-      if (!reviewOk) {
-        emit({
-          ok: false,
-          stage: "submit_review_failed",
-          steps,
-          response: review
+    if (bootstrapUsesPlatform) {
+      if (example?.submitted_for_review === true) {
+        logBootstrapStep(steps, "review_submitted", true, {
+          submitted: 0,
+          existing: true
         });
-        return;
+      } else {
+        const review = await runCliSubcommand(["submit-review"], env);
+        const reviewOk = review.ok === true || typeof review.submitted === "number";
+        logBootstrapStep(steps, "review_submitted", reviewOk, {
+          submitted: review.submitted || 0
+        });
+        if (!reviewOk) {
+          emit({
+            ok: false,
+            stage: "submit_review_failed",
+            steps,
+            response: review
+          });
+          return;
+        }
       }
+    } else {
+      logBootstrapStep(steps, "review_skipped", true, {
+        mode: "local_only"
+      });
     }
 
     const enabled = await runCliSubcommand(["enable-responder"], env);
@@ -1160,21 +1205,43 @@ async function commandBootstrap(args) {
     const supervisor = await ensureSupervisorAvailable(supervisorUrl, env);
     logBootstrapStep(steps, "supervisor_started", true, supervisor);
 
-    let catalogVisible = null;
-    try {
-      catalogVisible = await waitForCatalogVisibility(supervisorUrl, responderId, {
-        timeoutMs: 750,
-        intervalMs: 150
-      });
-    } catch {}
+    const adminApiKey = process.env.PLATFORM_ADMIN_API_KEY || process.env.ADMIN_API_KEY || null;
+    if (bootstrapUsesPlatform) {
+      let catalogVisible = null;
+      try {
+        catalogVisible = await waitForCatalogVisibility(supervisorUrl, responderId, {
+          timeoutMs: 750,
+          intervalMs: 150
+        });
+      } catch {}
 
-    if (!catalogVisible) {
-      const approved = await maybeApproveExample({
-        platformUrl,
-        adminApiKey: process.env.PLATFORM_ADMIN_API_KEY || process.env.ADMIN_API_KEY || null,
-        responderId
-      });
-      if (!approved.ok) {
+      if (adminApiKey) {
+        const approved = await maybeApproveExample({
+          platformUrl,
+          adminApiKey,
+          responderId
+        });
+        if (!approved.ok && !catalogVisible) {
+          emit({
+            ok: false,
+            stage: "awaiting_admin_approval",
+            steps,
+            responder_id: responderId,
+            hotline_id: LOCAL_EXAMPLE_HOTLINE_ID,
+            next_action: "Approve the responder and hotline runtime, then rerun delexec-ops bootstrap or delexec-ops run-example.",
+            reason: approved.reason || "approval_failed"
+          });
+          return;
+        }
+        if (approved.ok) {
+          logBootstrapStep(steps, "responder_approved", true);
+          logBootstrapStep(steps, "hotline_approved", true);
+        }
+        catalogVisible = await waitForCatalogVisibility(supervisorUrl, responderId, {
+          timeoutMs: 15000,
+          intervalMs: 250
+        });
+      } else if (!catalogVisible) {
         emit({
           ok: false,
           stage: "awaiting_admin_approval",
@@ -1182,18 +1249,14 @@ async function commandBootstrap(args) {
           responder_id: responderId,
           hotline_id: LOCAL_EXAMPLE_HOTLINE_ID,
           next_action: "Approve the responder and hotline runtime, then rerun delexec-ops bootstrap or delexec-ops run-example.",
-          reason: approved.reason || "approval_failed"
+          reason: "admin_api_key_missing"
         });
         return;
       }
-      logBootstrapStep(steps, "responder_approved", true);
-      logBootstrapStep(steps, "hotline_approved", true);
-      catalogVisible = await waitForCatalogVisibility(supervisorUrl, responderId, {
-        timeoutMs: 15000,
-        intervalMs: 250
-      });
+      logBootstrapStep(steps, "catalog_visible", true, { hotline_id: LOCAL_EXAMPLE_HOTLINE_ID });
+    } else {
+      logBootstrapStep(steps, "local_hotline_ready", true, { hotline_id: LOCAL_EXAMPLE_HOTLINE_ID });
     }
-    logBootstrapStep(steps, "catalog_visible", true, { hotline_id: LOCAL_EXAMPLE_HOTLINE_ID });
 
     const started = await requestJson(supervisorUrl, "/requests/example", {
       method: "POST",
@@ -1202,6 +1265,18 @@ async function commandBootstrap(args) {
       }
     });
     if (started.status !== 201 || !started.body?.request_id) {
+      if (bootstrapUsesPlatform && !adminApiKey) {
+        emit({
+          ok: false,
+          stage: "awaiting_admin_approval",
+          steps,
+          responder_id: responderId,
+          hotline_id: LOCAL_EXAMPLE_HOTLINE_ID,
+          next_action: "Approve the responder and hotline runtime, then rerun delexec-ops bootstrap or delexec-ops run-example.",
+          reason: started.body?.error?.code || "request_not_callable"
+        });
+        return;
+      }
       emit({
         ok: false,
         stage: "request_start_failed",

@@ -19,6 +19,14 @@
 
 如果你希望直接让另一个 agent 代你完成安装，请从[Agent 本地安装剧本](docs/current/guides/agent-local-install-playbook.zh-CN.md)开始。
 
+当前官方本地路径包括：
+
+- `delexec-ops start` 自动拉起 embedded local relay
+- `delexec-ops auth register --local --email <email>`
+- 本地 responder 启用
+- 示例 hotline draft 查看
+- 本地自调用到 `SUCCEEDED`
+
 机器本地的 hotline 接入配置和 hook 文件应统一放在 `DELEXEC_HOME` 下，不要放进 git 工作区。当前本地运行时使用：
 
 - `ops.config.json`：运行时状态
