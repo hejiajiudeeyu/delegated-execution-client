@@ -59,6 +59,8 @@ export OPS_PORT_RELAY=8190
 export OPS_PORT_SKILL_ADAPTER=8191
 ```
 
+如果你没有显式导出这些变量，本地运行时会回落到默认端口 `8079/8081/8082/8090/8091`。后续 `curl` 示例里的端口应和你实际启动时使用的端口保持一致。
+
 ## 启动本地运行时
 
 ```bash
@@ -76,7 +78,7 @@ npm run ops -- start
 检查状态：
 
 ```bash
-curl http://127.0.0.1:8179/status
+curl "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/status"
 ```
 
 预期：
@@ -91,7 +93,7 @@ curl http://127.0.0.1:8179/status
 初始化运行时状态：
 
 ```bash
-curl -X POST http://127.0.0.1:8179/setup \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/setup" \
   -H 'content-type: application/json' \
   -d '{}'
 ```
@@ -99,7 +101,7 @@ curl -X POST http://127.0.0.1:8179/setup \
 设置本地 passphrase：
 
 ```bash
-curl -X POST http://127.0.0.1:8179/auth/session/setup \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/auth/session/setup" \
   -H 'content-type: application/json' \
   -d '{"passphrase":"client-localtest-123"}'
 ```
@@ -113,7 +115,7 @@ export OPS_SESSION="<返回的 token>"
 ## 注册本地 Caller
 
 ```bash
-curl -X POST http://127.0.0.1:8179/auth/register-caller \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/auth/register-caller" \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{"contact_email":"localtest@example.com"}'
@@ -135,7 +137,7 @@ delexec-ops auth register --local --email localtest@example.com
 ## 启用本地 Responder Runtime
 
 ```bash
-curl -X POST http://127.0.0.1:8179/responder/enable \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/responder/enable" \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{"responder_id":"client-local-responder","display_name":"Client Local Responder"}'
@@ -146,7 +148,7 @@ curl -X POST http://127.0.0.1:8179/responder/enable \
 ## 添加官方示例 Hotline
 
 ```bash
-curl -X POST http://127.0.0.1:8179/responder/hotlines/example \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/responder/hotlines/example" \
   -H 'content-type: application/json' \
   -d '{}'
 ```
@@ -162,7 +164,7 @@ curl -X POST http://127.0.0.1:8179/responder/hotlines/example \
 ## 查看本地 draft
 
 ```bash
-curl http://127.0.0.1:8179/responder/hotlines/local.delegated-execution.workspace-summary.v1/draft \
+curl "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/responder/hotlines/local.delegated-execution.workspace-summary.v1/draft" \
   -H "X-Ops-Session: $OPS_SESSION"
 ```
 
@@ -194,7 +196,7 @@ curl http://127.0.0.1:8179/responder/hotlines/local.delegated-execution.workspac
 ## 验证本地发现
 
 ```bash
-curl http://127.0.0.1:8179/catalog/hotlines \
+curl "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/catalog/hotlines" \
   -H "X-Ops-Session: $OPS_SESSION"
 ```
 
@@ -208,7 +210,7 @@ curl http://127.0.0.1:8179/catalog/hotlines \
 ## 发起本地示例调用
 
 ```bash
-curl -X POST http://127.0.0.1:8179/requests/example \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/requests/example" \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{}'
@@ -228,7 +230,7 @@ export REQUEST_ID="<返回的 request_id>"
 读取结果：
 
 ```bash
-curl http://127.0.0.1:8179/requests/$REQUEST_ID/result \
+curl "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/requests/$REQUEST_ID/result" \
   -H "X-Ops-Session: $OPS_SESSION"
 ```
 

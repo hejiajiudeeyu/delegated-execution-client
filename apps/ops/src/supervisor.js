@@ -857,7 +857,12 @@ export function createOpsSupervisorServer() {
   }
 
   function usesManagedRelay() {
-    return getRuntimeTransport(state).type === "local";
+    const runtimeTransport = getRuntimeTransport(state);
+    const managedRelayBaseUrl = processBaseUrl(state.config.runtime.ports.relay);
+    return (
+      runtimeTransport.type === "local" ||
+      (runtimeTransport.type === "relay_http" && normalizedString(runtimeTransport.relay_http.base_url) === managedRelayBaseUrl)
+    );
   }
 
   function resolveRelayPackageEntry() {
@@ -1687,6 +1692,7 @@ export function createOpsSupervisorServer() {
     state.config.caller.contact_email = response.body.contact_email || contactEmail;
     state.config.caller.registration_mode = "platform";
     state.config.caller.api_key_configured = true;
+    state.config.platform.enabled = true;
     if (hasEncryptedSecretStore()) {
       writeOpsSecrets(runtime.auth.passphrase, {
         [OPS_SECRET_KEYS.caller_api_key]: response.body.api_key
@@ -1886,7 +1892,7 @@ function buildResponderRegisterHeaders() {
       });
     }
     saveOpsState(state);
-    return { status: 201, body: { responder_id: responderIdentity.responder_id, submitted: results.length, results } };
+    return { status: 201, body: { ok: true, responder_id: responderIdentity.responder_id, submitted: results.length, results } };
   }
 
   async function addOfficialExampleHotline() {

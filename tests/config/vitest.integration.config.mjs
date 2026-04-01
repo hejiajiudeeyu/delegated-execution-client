@@ -28,7 +28,10 @@ export default mergeConfig(
       }
     },
     test: {
-      include: ["tests/integration/**/*.test.js"]
+      include: ["tests/integration/**/*.test.js"],
+      fileParallelism: false,
+      maxWorkers: 1,
+      minWorkers: 1
     }
   })
 );

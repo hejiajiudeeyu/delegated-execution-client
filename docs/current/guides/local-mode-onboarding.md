@@ -59,6 +59,8 @@ export OPS_PORT_RELAY=8190
 export OPS_PORT_SKILL_ADAPTER=8191
 ```
 
+If you do not export these variables, the local runtime falls back to the default ports `8079/8081/8082/8090/8091`. Keep the `curl` examples aligned with whichever port set you actually start with.
+
 ## Start the local runtime
 
 ```bash
@@ -76,7 +78,7 @@ npm run ops -- start
 Check status:
 
 ```bash
-curl http://127.0.0.1:8179/status
+curl "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/status"
 ```
 
 Expected:
@@ -91,7 +93,7 @@ Expected:
 Initialize runtime state:
 
 ```bash
-curl -X POST http://127.0.0.1:8179/setup \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/setup" \
   -H 'content-type: application/json' \
   -d '{}'
 ```
@@ -99,7 +101,7 @@ curl -X POST http://127.0.0.1:8179/setup \
 Create a local passphrase:
 
 ```bash
-curl -X POST http://127.0.0.1:8179/auth/session/setup \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/auth/session/setup" \
   -H 'content-type: application/json' \
   -d '{"passphrase":"client-localtest-123"}'
 ```
@@ -113,7 +115,7 @@ export OPS_SESSION="<returned token>"
 ## Register the local caller
 
 ```bash
-curl -X POST http://127.0.0.1:8179/auth/register-caller \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/auth/register-caller" \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{"contact_email":"localtest@example.com"}'
@@ -135,7 +137,7 @@ delexec-ops auth register --local --email localtest@example.com
 ## Enable the local responder runtime
 
 ```bash
-curl -X POST http://127.0.0.1:8179/responder/enable \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/responder/enable" \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{"responder_id":"client-local-responder","display_name":"Client Local Responder"}'
@@ -146,7 +148,7 @@ This step enables the **local responder runtime** only. It does not publish anyt
 ## Add the official example hotline
 
 ```bash
-curl -X POST http://127.0.0.1:8179/responder/hotlines/example \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/responder/hotlines/example" \
   -H 'content-type: application/json' \
   -d '{}'
 ```
@@ -162,7 +164,7 @@ Expected:
 ## Inspect the local draft
 
 ```bash
-curl http://127.0.0.1:8179/responder/hotlines/local.delegated-execution.workspace-summary.v1/draft \
+curl "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/responder/hotlines/local.delegated-execution.workspace-summary.v1/draft" \
   -H "X-Ops-Session: $OPS_SESSION"
 ```
 
@@ -194,7 +196,7 @@ Keep machine-specific commands, URLs, paths, and hooks there so they do not end 
 ## Verify local discovery
 
 ```bash
-curl http://127.0.0.1:8179/catalog/hotlines \
+curl "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/catalog/hotlines" \
   -H "X-Ops-Session: $OPS_SESSION"
 ```
 
@@ -208,7 +210,7 @@ Expected:
 ## Run a local example call
 
 ```bash
-curl -X POST http://127.0.0.1:8179/requests/example \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/requests/example" \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{}'
@@ -228,7 +230,7 @@ The response should also include:
 Poll the result:
 
 ```bash
-curl http://127.0.0.1:8179/requests/$REQUEST_ID/result \
+curl "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/requests/$REQUEST_ID/result" \
   -H "X-Ops-Session: $OPS_SESSION"
 ```
 

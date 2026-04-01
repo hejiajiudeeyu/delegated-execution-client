@@ -8,17 +8,61 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createPlatformServer, createPlatformState } from "@delexec/platform-api";
 import { createOpsSupervisorServer } from "../../apps/ops/src/supervisor.js";
-import { closeServer, jsonRequest, listenServer } from "../helpers/http.js";
+import { closeServer, jsonRequest, listenServer, reserveFreePorts } from "../helpers/http.js";
 
 const execFileAsync = promisify(execFile);
 
 const CLI_PATH = path.resolve(process.cwd(), "apps/ops/src/cli.js");
+const OPS_ENV_KEYS = [
+  "DELEXEC_HOME",
+  "OPS_PORT_SUPERVISOR",
+  "OPS_PORT_RELAY",
+  "OPS_PORT_CALLER",
+  "OPS_PORT_RESPONDER",
+  "OPS_RELAY_BIN",
+  "OPS_RELAY_ARGS",
+  "PLATFORM_API_BASE_URL",
+  "PLATFORM_ADMIN_API_KEY",
+  "ADMIN_API_KEY",
+  "CALLER_PLATFORM_API_KEY",
+  "PLATFORM_API_KEY",
+  "CALLER_CONTACT_EMAIL",
+  "RESPONDER_ID",
+  "RESPONDER_PLATFORM_API_KEY",
+  "RESPONDER_SIGNING_PUBLIC_KEY_PEM",
+  "RESPONDER_SIGNING_PRIVATE_KEY_PEM",
+  "HOTLINE_IDS",
+  "TRANSPORT_TYPE",
+  "TRANSPORT_BASE_URL",
+  "TRANSPORT_PROVIDER",
+  "TRANSPORT_EMAIL_PROVIDER",
+  "TRANSPORT_EMAIL_MODE",
+  "TRANSPORT_EMAIL_SENDER",
+  "TRANSPORT_EMAIL_RECEIVER",
+  "TRANSPORT_EMAIL_POLL_INTERVAL_MS",
+  "TRANSPORT_EMAILENGINE_BASE_URL",
+  "TRANSPORT_EMAILENGINE_ACCOUNT",
+  "TRANSPORT_EMAILENGINE_ACCESS_TOKEN",
+  "TRANSPORT_GMAIL_CLIENT_ID",
+  "TRANSPORT_GMAIL_USER",
+  "TRANSPORT_GMAIL_CLIENT_SECRET",
+  "TRANSPORT_GMAIL_REFRESH_TOKEN"
+];
+
+function clearOpsEnv() {
+  for (const key of OPS_ENV_KEYS) {
+    delete process.env[key];
+  }
+}
+
+clearOpsEnv();
 
 describe("ops cli integration", () => {
   const cleanupDirs = [];
   const cleanupPids = [];
 
   afterEach(async () => {
+    clearOpsEnv();
     while (cleanupPids.length > 0) {
       const pid = cleanupPids.pop();
       try {
@@ -527,10 +571,7 @@ describe("ops cli integration", () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-bootstrap-awaiting-"));
     cleanupDirs.push(opsHome);
 
-    const supervisorPort = String(56000 + Math.floor(Math.random() * 500));
-    const relayPort = String(56500 + Math.floor(Math.random() * 500));
-    const callerPort = String(57000 + Math.floor(Math.random() * 500));
-    const responderPort = String(57500 + Math.floor(Math.random() * 500));
+    const [supervisorPort, relayPort, callerPort, responderPort] = (await reserveFreePorts(4)).map(String);
 
     const platformState = createPlatformState();
     const platformServer = createPlatformServer({ serviceName: "ops-cli-bootstrap-awaiting", state: platformState });
@@ -585,10 +626,7 @@ describe("ops cli integration", () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-bootstrap-success-"));
     cleanupDirs.push(opsHome);
 
-    const supervisorPort = String(58000 + Math.floor(Math.random() * 500));
-    const relayPort = String(58500 + Math.floor(Math.random() * 500));
-    const callerPort = String(59000 + Math.floor(Math.random() * 500));
-    const responderPort = String(59500 + Math.floor(Math.random() * 500));
+    const [supervisorPort, relayPort, callerPort, responderPort] = (await reserveFreePorts(4)).map(String);
 
     const platformState = createPlatformState();
     const platformServer = createPlatformServer({ serviceName: "ops-cli-bootstrap-success", state: platformState });

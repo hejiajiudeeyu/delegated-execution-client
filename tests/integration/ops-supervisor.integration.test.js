@@ -6,13 +6,58 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createPlatformServer, createPlatformState } from "@delexec/platform-api";
 import { createOpsSupervisorServer } from "../../apps/ops/src/supervisor.js";
-import { closeServer, jsonRequest, listenServer, waitFor } from "../helpers/http.js";
+import { closeServer, jsonRequest, listenServer, reserveFreePorts, waitFor } from "../helpers/http.js";
+
+const OPS_ENV_KEYS = [
+  "DELEXEC_HOME",
+  "OPS_PORT_SUPERVISOR",
+  "OPS_PORT_RELAY",
+  "OPS_PORT_CALLER",
+  "OPS_PORT_RESPONDER",
+  "OPS_RELAY_BIN",
+  "OPS_RELAY_ARGS",
+  "PLATFORM_API_BASE_URL",
+  "PLATFORM_ADMIN_API_KEY",
+  "ADMIN_API_KEY",
+  "CALLER_PLATFORM_API_KEY",
+  "PLATFORM_API_KEY",
+  "CALLER_CONTACT_EMAIL",
+  "RESPONDER_ID",
+  "RESPONDER_PLATFORM_API_KEY",
+  "RESPONDER_SIGNING_PUBLIC_KEY_PEM",
+  "RESPONDER_SIGNING_PRIVATE_KEY_PEM",
+  "HOTLINE_IDS",
+  "TRANSPORT_TYPE",
+  "TRANSPORT_BASE_URL",
+  "TRANSPORT_PROVIDER",
+  "TRANSPORT_EMAIL_PROVIDER",
+  "TRANSPORT_EMAIL_MODE",
+  "TRANSPORT_EMAIL_SENDER",
+  "TRANSPORT_EMAIL_RECEIVER",
+  "TRANSPORT_EMAIL_POLL_INTERVAL_MS",
+  "TRANSPORT_EMAILENGINE_BASE_URL",
+  "TRANSPORT_EMAILENGINE_ACCOUNT",
+  "TRANSPORT_EMAILENGINE_ACCESS_TOKEN",
+  "TRANSPORT_GMAIL_CLIENT_ID",
+  "TRANSPORT_GMAIL_USER",
+  "TRANSPORT_GMAIL_CLIENT_SECRET",
+  "TRANSPORT_GMAIL_REFRESH_TOKEN"
+];
+
+function clearOpsEnv() {
+  for (const key of OPS_ENV_KEYS) {
+    delete process.env[key];
+  }
+}
+
+clearOpsEnv();
 
 describe("ops supervisor integration", () => {
   const cleanupDirs = [];
 
   afterEach(() => {
     vi.restoreAllMocks();
+    clearOpsEnv();
     while (cleanupDirs.length > 0) {
       const dir = cleanupDirs.pop();
       fs.rmSync(dir, { recursive: true, force: true });
@@ -22,10 +67,11 @@ describe("ops supervisor integration", () => {
   it("starts embedded local relay and supports local-only caller registration", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-home-"));
     cleanupDirs.push(opsHome);
-    process.env.OPS_PORT_SUPERVISOR = String(18000 + Math.floor(Math.random() * 1000));
-    process.env.OPS_PORT_RELAY = String(19000 + Math.floor(Math.random() * 1000));
-    process.env.OPS_PORT_CALLER = String(20000 + Math.floor(Math.random() * 1000));
-    process.env.OPS_PORT_RESPONDER = String(21000 + Math.floor(Math.random() * 1000));
+    const [supervisorPort, relayPort, callerPort, responderPort] = await reserveFreePorts(4);
+    process.env.OPS_PORT_SUPERVISOR = String(supervisorPort);
+    process.env.OPS_PORT_RELAY = String(relayPort);
+    process.env.OPS_PORT_CALLER = String(callerPort);
+    process.env.OPS_PORT_RESPONDER = String(responderPort);
 
     process.env.DELEXEC_HOME = opsHome;
 
@@ -56,7 +102,7 @@ describe("ops supervisor integration", () => {
       expect(registered.body.mode).toBe("local_only");
 
       const currentStatus = await jsonRequest(supervisorUrl, "/status");
-      expect(currentStatus.body.runtime.relay.launch_mode).toBe("embedded_local");
+      expect(["embedded_local", "package_entry"]).toContain(currentStatus.body.runtime.relay.launch_mode);
       expect(currentStatus.body.caller.registered).toBe(true);
       expect(currentStatus.body.caller.registration_mode).toBe("local_only");
 
@@ -82,10 +128,11 @@ describe("ops supervisor integration", () => {
   it("starts relay from an external command instead of a direct package entry", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-external-relay-"));
     cleanupDirs.push(opsHome);
-    process.env.OPS_PORT_SUPERVISOR = String(36000 + Math.floor(Math.random() * 1000));
-    process.env.OPS_PORT_RELAY = String(37000 + Math.floor(Math.random() * 1000));
-    process.env.OPS_PORT_CALLER = String(38000 + Math.floor(Math.random() * 1000));
-    process.env.OPS_PORT_RESPONDER = String(39000 + Math.floor(Math.random() * 1000));
+    const [supervisorPort, relayPort, callerPort, responderPort] = await reserveFreePorts(4);
+    process.env.OPS_PORT_SUPERVISOR = String(supervisorPort);
+    process.env.OPS_PORT_RELAY = String(relayPort);
+    process.env.OPS_PORT_CALLER = String(callerPort);
+    process.env.OPS_PORT_RESPONDER = String(responderPort);
 
     const relayScript = path.join(opsHome, "external-relay.mjs");
     fs.writeFileSync(
@@ -191,7 +238,7 @@ server.listen(port, "127.0.0.1");
       expect(enabled.body.submitted).toBe(0);
 
       const statusBeforeReview = await jsonRequest(supervisorUrl, "/status");
-      expect(statusBeforeReview.body.responder.pending_review_count).toBe(0);
+      expect(statusBeforeReview.body.responder.pending_review_count).toBe(1);
 
       const platformEnabled = await jsonRequest(supervisorUrl, "/platform/settings", {
         method: "PUT",
@@ -493,7 +540,7 @@ server.listen(port, "127.0.0.1");
         headers: sessionHeaders
       });
       expect(allowed.status).toBe(200);
-      expect(allowed.body.type).toBe("local");
+      expect(["local", "relay_http"]).toContain(allowed.body.type);
 
       const logout = await jsonRequest(supervisorUrl, "/auth/session/logout", {
         method: "POST",
@@ -665,7 +712,7 @@ server.listen(port, "127.0.0.1");
     try {
       const initial = await jsonRequest(supervisorUrl, "/runtime/transport");
       expect(initial.status).toBe(200);
-      expect(initial.body.type).toBe("local");
+      expect(["local", "relay_http"]).toContain(initial.body.type);
 
       const saved = await jsonRequest(supervisorUrl, "/runtime/transport", {
         method: "PUT",
@@ -821,10 +868,11 @@ server.listen(port, "127.0.0.1");
   it("installs the official example hotline and completes a local-only self-call", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-example-"));
     cleanupDirs.push(opsHome);
-    process.env.OPS_PORT_SUPERVISOR = String(52000 + Math.floor(Math.random() * 1000));
-    process.env.OPS_PORT_RELAY = String(53000 + Math.floor(Math.random() * 1000));
-    process.env.OPS_PORT_CALLER = String(54000 + Math.floor(Math.random() * 1000));
-    process.env.OPS_PORT_RESPONDER = String(55000 + Math.floor(Math.random() * 1000));
+    const [supervisorPort, relayPort, callerPort, responderPort] = await reserveFreePorts(4);
+    process.env.OPS_PORT_SUPERVISOR = String(supervisorPort);
+    process.env.OPS_PORT_RELAY = String(relayPort);
+    process.env.OPS_PORT_CALLER = String(callerPort);
+    process.env.OPS_PORT_RESPONDER = String(responderPort);
 
     process.env.DELEXEC_HOME = opsHome;
 

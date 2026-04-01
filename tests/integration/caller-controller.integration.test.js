@@ -11,6 +11,10 @@ import { InMemoryEmailTransport } from "@delexec/transport-email";
 import { createLocalTransportAdapter, createLocalTransportHub } from "@delexec/transport-local";
 import { closeServer, jsonRequest, listenServer, waitFor } from "../helpers/http.js";
 
+function normalizePemForAssert(value) {
+  return typeof value === "string" ? value.replace(/\r\n/g, "\n").trim() : value;
+}
+
 describe("caller-controller integration", () => {
   let server;
   let baseUrl;
@@ -643,7 +647,9 @@ describe("caller-controller integration", () => {
       expect(prepared.body.delivery_meta.task_delivery.address).toBeTypeOf("string");
       expect(prepared.body.delivery_meta.task_delivery.address.startsWith("local://")).toBe(true);
       expect(prepared.body.delivery_meta.result_delivery).toEqual({ kind: "local", address: "caller-controller", thread_hint: `req:${requestId}` });
-      expect(prepared.body.request.expected_signer_public_key_pem).toBe(selected.responder_public_key_pem);
+      expect(normalizePemForAssert(prepared.body.request.expected_signer_public_key_pem)).toBe(
+        normalizePemForAssert(selected.responder_public_key_pem)
+      );
 
       const dispatched = await jsonRequest(callerUrl, `/controller/requests/${requestId}/dispatch`, {
         method: "POST",

@@ -659,6 +659,9 @@ async function commandAuthRegister(args) {
   const localOnly = args.local === true;
   if (args.platform) {
     state.config.platform.base_url = String(args.platform).trim();
+    state.config.platform.enabled = true;
+    state.config.platform_console ||= {};
+    state.config.platform_console.base_url = state.config.platform.base_url;
     state.env = saveOpsState(state);
   }
   const email = String(args.email || "").trim();
@@ -668,6 +671,9 @@ async function commandAuthRegister(args) {
   const fallbackRegister = async () => {
     const local = ensureOpsState();
     local.config.platform.base_url = String(args.platform || local.config.platform.base_url).trim();
+    local.config.platform.enabled = true;
+    local.config.platform_console ||= {};
+    local.config.platform_console.base_url = local.config.platform.base_url;
     const direct = await requestJson(local.config.platform.base_url, "/v1/users/register", {
       method: "POST",
       body: { contact_email: email }

@@ -1,3 +1,5 @@
+import net from "node:net";
+
 export async function listenServer(server) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -43,7 +45,39 @@ export async function jsonRequest(baseUrl, pathname, options = {}) {
   };
 }
 
-export async function waitFor(fn, { timeoutMs = 4000, intervalMs = 50 } = {}) {
+export async function getFreePort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    await new Promise((resolve) => server.close(resolve));
+    throw new Error("free_port_unavailable");
+  }
+  const { port } = address;
+  await new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+  return port;
+}
+
+export async function reserveFreePorts(count) {
+  const ports = [];
+  for (let index = 0; index < count; index += 1) {
+    ports.push(await getFreePort());
+  }
+  return ports;
+}
+
+export async function waitFor(fn, { timeoutMs = 8000, intervalMs = 50 } = {}) {
   const started = Date.now();
   for (;;) {
     try {

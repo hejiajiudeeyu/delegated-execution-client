@@ -61,6 +61,8 @@ export OPS_PORT_RELAY=8190
 export OPS_PORT_SKILL_ADAPTER=8191
 ```
 
+If the agent skips these exports, the runtime falls back to the default ports `8079/8081/8082/8090/8091`. Every follow-up health check and `curl` command must match the actual port set used for startup.
+
 ## Install And Start
 
 ```bash
@@ -93,11 +95,11 @@ Do not create hotline-specific command, URL, path, or hook files inside the git 
 ## Initialize Local Mode
 
 ```bash
-curl -X POST http://127.0.0.1:8179/setup \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/setup" \
   -H 'content-type: application/json' \
   -d '{}'
 
-curl -X POST http://127.0.0.1:8179/auth/session/setup \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/auth/session/setup" \
   -H 'content-type: application/json' \
   -d '{"passphrase":"agent-local-install-123"}'
 ```
@@ -111,7 +113,7 @@ export OPS_SESSION="<returned token>"
 ## Register Caller
 
 ```bash
-curl -X POST http://127.0.0.1:8179/auth/register-caller \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/auth/register-caller" \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{"contact_email":"agent-local@example.com"}'
@@ -126,7 +128,7 @@ delexec-ops auth register --local --email agent-local@example.com
 ## Enable Local Responder
 
 ```bash
-curl -X POST http://127.0.0.1:8179/responder/enable \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/responder/enable" \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{"responder_id":"agent-local-responder","display_name":"Agent Local Responder"}'
@@ -135,7 +137,7 @@ curl -X POST http://127.0.0.1:8179/responder/enable \
 ## Add The First Hotline
 
 ```bash
-curl -X POST http://127.0.0.1:8179/responder/hotlines/example \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/responder/hotlines/example" \
   -H 'content-type: application/json' \
   -d '{}'
 ```
@@ -149,7 +151,7 @@ local.delegated-execution.workspace-summary.v1
 ## Inspect The Draft
 
 ```bash
-curl http://127.0.0.1:8179/responder/hotlines/local.delegated-execution.workspace-summary.v1/draft \
+curl "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/responder/hotlines/local.delegated-execution.workspace-summary.v1/draft" \
   -H "X-Ops-Session: $OPS_SESSION"
 ```
 
@@ -166,7 +168,7 @@ The agent should verify:
 ## Run The First Local Call
 
 ```bash
-curl -X POST http://127.0.0.1:8179/requests/example \
+curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/requests/example" \
   -H 'content-type: application/json' \
   -H "X-Ops-Session: $OPS_SESSION" \
   -d '{}'
@@ -175,7 +177,7 @@ curl -X POST http://127.0.0.1:8179/requests/example \
 Then poll:
 
 ```bash
-curl http://127.0.0.1:8179/requests/<request_id>/result \
+curl "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/requests/<request_id>/result" \
   -H "X-Ops-Session: $OPS_SESSION"
 ```
 
