@@ -25,6 +25,9 @@ function isDirectRun() {
 }
 
 function loadPlatformConfigFromEnv() {
+  if (String(process.env.PLATFORM_ENABLED || "true") !== "true") {
+    return null;
+  }
   const baseUrl = process.env.PLATFORM_API_BASE_URL || null;
   if (!baseUrl) {
     return null;

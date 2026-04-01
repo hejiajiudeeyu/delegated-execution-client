@@ -71,6 +71,17 @@ function createUpstreamError(code, response) {
   return error;
 }
 
+function normalizePemString(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.replace(/\\n/g, "\n");
+}
+
 function sendUpstreamError(res, error, fallbackCode, fallbackMessage = "upstream service error") {
   if (error?.response) {
     sendJson(res, error.response.status, error.response.body || { error: { code: fallbackCode, message: fallbackMessage, retryable: true } });
@@ -284,6 +295,96 @@ export function createCallerPlatformClient({ baseUrl, apiKey } = {}) {
       }
 
       return response.body;
+    }
+  };
+}
+
+function createLocalFallbackPlatformClient() {
+  const responderId = process.env.RESPONDER_ID || null;
+  const responderPublicKeyPem = normalizePemString(process.env.RESPONDER_SIGNING_PUBLIC_KEY_PEM);
+  const hotlineIds = String(process.env.HOTLINE_IDS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (!responderId || !responderPublicKeyPem || hotlineIds.length === 0) {
+    return null;
+  }
+
+  return {
+    config: {
+      baseUrl: "local://responder",
+      apiKey: null
+    },
+
+    async listCatalogHotlines(filters = {}) {
+      let items = hotlineIds.map((hotlineId) => ({
+        responder_id: responderId,
+        hotline_id: hotlineId,
+        display_name: hotlineId,
+        availability_status: "healthy",
+        responder_public_key_pem: responderPublicKeyPem,
+        task_types: [],
+        capabilities: [],
+        tags: [],
+        review_status: "local_only",
+        catalog_visibility: "local"
+      }));
+      if (filters.responder_id) {
+        items = items.filter((item) => item.responder_id === filters.responder_id);
+      }
+      if (filters.hotline_id) {
+        items = items.filter((item) => item.hotline_id === filters.hotline_id);
+      }
+      return { items };
+    },
+
+    async issueTaskToken({ requestId, responderId: nextResponderId, hotlineId }) {
+      if (nextResponderId !== responderId || !hotlineIds.includes(hotlineId)) {
+        const error = new Error("CATALOG_HOTLINE_NOT_FOUND");
+        error.response = {
+          status: 404,
+          body: buildStructuredError("CATALOG_HOTLINE_NOT_FOUND", "hotline not found or not enabled")
+        };
+        throw error;
+      }
+      return {
+        task_token: `local_task_${requestId}`,
+        claims: {
+          mode: "local",
+          request_id: requestId,
+          responder_id: nextResponderId,
+          hotline_id: hotlineId
+        }
+      };
+    },
+
+    async getDeliveryMeta({ responderId: nextResponderId, hotlineId, taskToken, resultDelivery }) {
+      if (nextResponderId !== responderId || !hotlineIds.includes(hotlineId)) {
+        const error = new Error("CATALOG_HOTLINE_NOT_FOUND");
+        error.response = {
+          status: 404,
+          body: buildStructuredError("CATALOG_HOTLINE_NOT_FOUND", "hotline not found or not enabled")
+        };
+        throw error;
+      }
+      return {
+        task_delivery: {
+          kind: "local",
+          address: responderId,
+          receiver: responderId
+        },
+        result_delivery: resultDelivery || { kind: "local", address: "caller-controller" },
+        verification: {
+          display_code: crypto.randomBytes(3).toString("hex").toUpperCase()
+        },
+        responder_public_key_pem: responderPublicKeyPem,
+        task_token: taskToken
+      };
+    },
+
+    async postMetricEvent() {
+      return { accepted: true, mode: "local" };
     }
   };
 }
@@ -510,7 +611,7 @@ function verifyResultSignature(request, body) {
   try {
     const bytes = Buffer.from(JSON.stringify(canonicalizeResultPackageForSignature(body)), "utf8");
     const signature = Buffer.from(body.signature_base64, "base64");
-    const publicKey = crypto.createPublicKey(request.expected_signer_public_key_pem);
+    const publicKey = crypto.createPublicKey(normalizePemString(request.expected_signer_public_key_pem));
     return crypto.verify(null, bytes, publicKey, signature);
   } catch {
     return false;
@@ -844,11 +945,10 @@ export async function prepareCallerRequest(request, platformClient, options = {}
     resultDelivery: options.result_delivery || options.resultDelivery || request.result_delivery
   });
 
-  if (
-    request.expected_signer_public_key_pem &&
-    deliveryMeta.responder_public_key_pem &&
-    request.expected_signer_public_key_pem !== deliveryMeta.responder_public_key_pem
-  ) {
+  const expectedSignerPublicKeyPem = normalizePemString(request.expected_signer_public_key_pem);
+  const deliveredSignerPublicKeyPem = normalizePemString(deliveryMeta.responder_public_key_pem);
+
+  if (expectedSignerPublicKeyPem && deliveredSignerPublicKeyPem && expectedSignerPublicKeyPem !== deliveredSignerPublicKeyPem) {
     throw new Error("caller_signer_binding_mismatch");
   }
 
@@ -858,8 +958,7 @@ export async function prepareCallerRequest(request, platformClient, options = {}
   request.result_delivery = deliveryMeta.result_delivery || request.result_delivery || null;
   request.verification = deliveryMeta.verification || request.verification || null;
   request.delivery_meta = deliveryMeta;
-  request.expected_signer_public_key_pem =
-    request.expected_signer_public_key_pem || deliveryMeta.responder_public_key_pem || null;
+  request.expected_signer_public_key_pem = expectedSignerPublicKeyPem || deliveredSignerPublicKeyPem || null;
   request.last_error_code = null;
   markUpdated(request, "PREPARED");
 
@@ -996,6 +1095,7 @@ export function createCallerControllerServer({
 } = {}) {
   const defaultPlatformClient = platform?.baseUrl ? createCallerPlatformClient(platform) : null;
   const defaultBackgroundPlatformClient = platform?.baseUrl && platform?.apiKey ? createCallerPlatformClient(platform) : null;
+  const localFallbackClient = createLocalFallbackPlatformClient();
   const requestPlatformAuth = new Map();
 
   function resolvePlatformConfig(req) {
@@ -1017,7 +1117,7 @@ export function createCallerControllerServer({
   function resolvePlatformClient(req) {
     const resolved = resolvePlatformConfig(req);
     if (!resolved?.baseUrl) {
-      return null;
+      return localFallbackClient;
     }
     if (resolved === platform && defaultPlatformClient) {
       return defaultPlatformClient;
@@ -1056,7 +1156,7 @@ export function createCallerControllerServer({
           service: serviceName,
           status: "running",
           config,
-          platform: platformClient ? { configured: true, base_url: platform.baseUrl } : { configured: false },
+          platform: platformClient ? { configured: true, base_url: platformClient.config?.baseUrl || null } : { configured: false },
           local_defaults: {
             caller_contact_email: process.env.CALLER_CONTACT_EMAIL || null,
             platform_api_key_configured: Boolean(platform?.apiKey)

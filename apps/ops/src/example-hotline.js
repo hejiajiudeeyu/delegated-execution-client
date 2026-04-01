@@ -1,8 +1,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const LOCAL_EXAMPLE_HOTLINE_ID = "local.summary.v1";
-export const LOCAL_EXAMPLE_DISPLAY_NAME = "Local Summary Example";
+export const LOCAL_EXAMPLE_HOTLINE_ID = "local.delegated-execution.workspace-summary.v1";
+export const LOCAL_EXAMPLE_DISPLAY_NAME = "Delegated Execution Workspace Summary";
 export const LOCAL_EXAMPLE_TASK_TYPE = "text_summarize";
 export const LOCAL_EXAMPLE_CAPABILITY = "text.summarize";
 

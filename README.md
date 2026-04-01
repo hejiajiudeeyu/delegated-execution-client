@@ -10,6 +10,26 @@ Install once and use `delexec-ops` to act as a **Caller** (delegate tasks to rem
 
 ## Quick Start
 
+### Local Mode
+
+Use local mode when you want to validate the client-only flow on one machine without platform review or catalog publishing.
+
+See [Local Mode Onboarding](docs/current/guides/local-mode-onboarding.md).
+If you want another agent to perform the installation for you, start with [Agent Local Install Playbook](docs/current/guides/agent-local-install-playbook.md).
+
+Keep machine-local hotline integration config and hook files under `DELEXEC_HOME`, not in the git worktree. The local runtime uses:
+
+- `ops.config.json` for runtime state
+- `hotline-registration-drafts/` for hotline drafts
+- `hotline-integrations/` for machine-local adapter config
+- `hotline-hooks/` for optional machine-local hook stubs
+
+### Platform Bootstrap (Later Workflow)
+
+Platform/community publishing is not the current primary product path in this repository. Treat it as a later workflow after local mode already works.
+
+If you are validating the current product path, stop at local mode and do **not** start here first.
+
 ```bash
 npm install -g @delexec/ops
 delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080
@@ -29,7 +49,7 @@ The setup wizard guides you through setting a local passphrase and registering y
 
 ## Dashboard
 
-After login, the Dashboard gives a live overview of all local service processes and their connectivity to the platform.
+After login, the Dashboard gives a live overview of all local service processes. Platform connectivity is optional and should be treated as a later enhancement, not as the first-use requirement.
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
@@ -58,7 +78,7 @@ Switch the transport channel between **Local**, **Relay HTTP**, and **Email** fr
 
 ### Hotline Catalog
 
-Browse and invoke available Hotlines published on the platform.
+In the current product path, browse and invoke local Hotlines first. Platform-published Hotlines are a later workflow after local mode is already working.
 
 ![Hotline Catalog](docs/screenshots/caller-catalog.png)
 
@@ -76,7 +96,7 @@ Track all outgoing call requests and their status in real time. The manual test 
 
 ### Hotline Management
 
-Register your local project as a Hotline and enable or disable it with a single toggle. The Responder side manages which Hotlines are active and tracks their review status before they appear in the catalog.
+Register your local project as a Hotline and enable or disable it with a single toggle. The Responder side manages which Hotlines are active locally first. Platform review and catalog publishing remain later workflows.
 
 ![Hotline Management](docs/screenshots/responder-hotlines.png)
 

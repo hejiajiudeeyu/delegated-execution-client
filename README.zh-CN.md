@@ -11,6 +11,25 @@
 
 ## 快速开始
 
+### 本地模式
+
+如果你只想在一台机器上验证 `client` 仓本地闭环，不接入 platform 审核或 catalog 发布，请先看：
+
+[本地模式上手指南](docs/current/guides/local-mode-onboarding.zh-CN.md)
+
+如果你希望直接让另一个 agent 代你完成安装，请从[Agent 本地安装剧本](docs/current/guides/agent-local-install-playbook.zh-CN.md)开始。
+
+机器本地的 hotline 接入配置和 hook 文件应统一放在 `DELEXEC_HOME` 下，不要放进 git 工作区。当前本地运行时使用：
+
+- `ops.config.json`：运行时状态
+- `hotline-registration-drafts/`：热线 draft
+- `hotline-integrations/`：本机接入配置
+- `hotline-hooks/`：可选本机 hook stub
+
+### Platform Bootstrap（后续流程）
+
+platform / 社区发布不是当前仓库的主要产品路径。请先跑通本地模式，再视需要进入这条后续流程。
+
 ```bash
 npm install -g @delexec/ops
 delexec-ops bootstrap --email you@example.com --platform http://127.0.0.1:8080

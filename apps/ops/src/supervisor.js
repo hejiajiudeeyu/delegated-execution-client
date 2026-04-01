@@ -8,12 +8,15 @@ import { fileURLToPath } from "node:url";
 
 import { buildStructuredError } from "@delexec/contracts";
 import {
+  buildHotlineOnboardingBody,
+  ensureHotlineRegistrationDraft,
   buildTransportEnvUpdates,
   buildTransportSecretUpdates,
   ensureResponderIdentity,
   ensureOpsState,
   hasEncryptedSecretStore,
   listLegacySecretKeys,
+  loadHotlineRegistrationDraft,
   normalizeTransportConfig,
   OPS_SECRET_KEYS,
   readTransportSecretsFromEnv,
@@ -41,14 +44,39 @@ import {
   readServiceLogTail,
   readSupervisorEventTail
 } from "./logging.js";
-import { initializeSecretStore, rotateSecretStorePassphrase } from "@delexec/runtime-utils";
+import {
+  ensureOpsDirectories,
+  getOpsHomeDir,
+  initializeSecretStore,
+  rotateSecretStorePassphrase,
+  writeJsonFile
+} from "@delexec/runtime-utils";
 
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const OPS_SESSION_STATE_FILE = path.join(getOpsHomeDir(), "run", "session.json");
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function persistActiveSession(session) {
+  ensureOpsDirectories();
+  if (!session?.token) {
+    if (fs.existsSync(OPS_SESSION_STATE_FILE)) {
+      fs.rmSync(OPS_SESSION_STATE_FILE, { force: true });
+    }
+    return;
+  }
+  writeJsonFile(OPS_SESSION_STATE_FILE, {
+    token: session.token,
+    expires_at: session.expires_at
+  });
+}
+
+function clearActiveSession() {
+  persistActiveSession(null);
 }
 
 function sendJson(res, statusCode, data) {
@@ -170,6 +198,7 @@ function pruneExpiredSessions(runtime) {
     runtime.auth.unlockedSecrets = null;
     runtime.auth.passphrase = null;
     runtime.auth.unlockedAt = null;
+    clearActiveSession();
   }
 }
 
@@ -185,10 +214,12 @@ function createAuthenticatedSession(runtime, passphrase, secrets) {
     createdAt: nowIso(),
     expiresAt
   });
-  return {
+  const session = {
     token,
     expires_at: new Date(expiresAt).toISOString()
   };
+  persistActiveSession(session);
+  return session;
 }
 
 function readSessionToken(req) {
@@ -210,20 +241,69 @@ function getCurrentSession(runtime, req) {
     return null;
   }
   session.expiresAt = Date.now() + SESSION_TTL_MS;
-  return {
+  const activeSession = {
     token,
     expires_at: new Date(session.expiresAt).toISOString()
   };
+  persistActiveSession(activeSession);
+  return activeSession;
+}
+
+function isLocalResponderConfigRoute(method, pathname) {
+  if (method === "POST" && (pathname === "/responder/hotlines" || pathname === "/responder/hotlines/example")) {
+    return true;
+  }
+  if (method === "DELETE" && /^\/responder\/hotlines\/[^/]+$/.test(pathname)) {
+    return true;
+  }
+  if (method === "POST" && /^\/responder\/hotlines\/[^/]+\/(enable|disable)$/.test(pathname)) {
+    return true;
+  }
+  return false;
 }
 
 function isProtectedRoute(method, pathname) {
   if (pathname === "/healthz" || pathname === "/status" || pathname === "/setup" || pathname.startsWith("/auth/session")) {
     return false;
   }
+  if (isLocalResponderConfigRoute(method, pathname)) {
+    return false;
+  }
   if (method === "GET" && pathname === "/") {
     return false;
   }
   return true;
+}
+
+function buildResponderRuntimeStatus(state, runtime, hotlineId = null) {
+  const responderProcess = runtime.processes.get("responder") || null;
+  const configuredHotlineIds = (state.config.responder?.hotlines || []).map((item) => item.hotline_id).filter(Boolean);
+  return {
+    responder_running: Boolean(responderProcess && !responderProcess.exited),
+    responder_healthy: Boolean(responderProcess?.health?.status === 200),
+    configured_hotline_ids: configuredHotlineIds,
+    hotline_configured: hotlineId ? configuredHotlineIds.includes(hotlineId) : null
+  };
+}
+
+function platformFeaturesEnabled(state) {
+  return state.config?.platform?.enabled === true;
+}
+
+function serializeHotlineForUi(state, runtime, hotline) {
+  const draftFile = hotline?.metadata?.registration?.draft_file || null;
+  const localIntegrationFile = hotline?.metadata?.local?.integration_file || null;
+  const localHookFile = hotline?.metadata?.local?.hook_file || null;
+  const runtimeStatus = buildResponderRuntimeStatus(state, runtime, hotline?.hotline_id || null);
+  return {
+    ...hotline,
+    draft_ready: Boolean(draftFile),
+    draft_file: draftFile,
+    local_integration_file: localIntegrationFile,
+    local_hook_file: localHookFile,
+    runtime_loaded: Boolean(runtimeStatus.responder_running && hotline?.enabled !== false && runtimeStatus.hotline_configured),
+    local_status: hotline?.enabled === false ? "disabled" : draftFile ? "draft_ready" : "configured"
+  };
 }
 
 function getAuthState(runtime, state) {
@@ -240,6 +320,18 @@ function getAuthState(runtime, state) {
     authenticated: configured ? runtime.auth.sessions.size > 0 : true,
     setup_required: !configured,
     expires_at: activeSession ? new Date(activeSession.expiresAt).toISOString() : null
+  };
+}
+
+function getRecoverableSession(runtime) {
+  pruneExpiredSessions(runtime);
+  const activeSession = runtime.auth.sessions.values().next().value || null;
+  if (!activeSession) {
+    return null;
+  }
+  return {
+    token: activeSession.token,
+    expires_at: new Date(activeSession.expiresAt).toISOString()
   };
 }
 
@@ -453,6 +545,9 @@ function scoreCandidate(item, { taskType = null, responderId = null, hotlineId =
 }
 
 async function fetchCatalogCandidates(state, runtime, filters = {}) {
+  if (!platformFeaturesEnabled(state)) {
+    return listLocalCatalogHotlines(state, runtime, filters);
+  }
   const params = new URLSearchParams();
   if (filters.hotline_id) {
     params.set("hotline_id", filters.hotline_id);
@@ -475,6 +570,70 @@ async function fetchCatalogCandidates(state, runtime, filters = {}) {
     }
   );
   return response.body?.items || [];
+}
+
+function buildLocalCatalogHotline(state, runtime, hotline) {
+  const responderIdentity = ensureResponderIdentity(state);
+  const { draft } = loadHotlineRegistrationDraft(state, hotline);
+  const runtimeStatus = buildResponderRuntimeStatus(state, runtime, hotline.hotline_id);
+  const source = draft || {};
+  return {
+    responder_id: state.config.responder.responder_id || responderIdentity.responder_id,
+    hotline_id: hotline.hotline_id,
+    display_name: source.display_name || hotline.display_name || hotline.hotline_id,
+    description: source.description || null,
+    summary: source.summary || null,
+    status: hotline.enabled === false ? "disabled" : "enabled",
+    review_status: hotline.review_status || "local_only",
+    submission_version: null,
+    submitted_at: null,
+    reviewed_at: null,
+    reviewed_by: null,
+    review_reason: null,
+    availability_status:
+      runtimeStatus.responder_running && hotline.enabled !== false && runtimeStatus.hotline_configured ? "healthy" : "offline",
+    last_heartbeat_at: null,
+    template_ref: source.template_ref || `docs/templates/hotlines/${hotline.hotline_id}/`,
+    task_types: source.task_types || hotline.task_types || [],
+    capabilities: source.capabilities || hotline.capabilities || [],
+    tags: source.tags || hotline.tags || [],
+    recommended_for: Array.isArray(source.recommended_for) ? source.recommended_for : [],
+    not_recommended_for: Array.isArray(source.not_recommended_for) ? source.not_recommended_for : [],
+    limitations: Array.isArray(source.limitations) ? source.limitations : [],
+    input_summary: source.input_summary || null,
+    output_summary: source.output_summary || null,
+    input_schema: source.input_schema || null,
+    output_schema: source.output_schema || null,
+    input_attachments: source.input_attachments || null,
+    output_attachments: source.output_attachments || null,
+    input_examples: Array.isArray(source.input_examples) ? source.input_examples : null,
+    output_examples: Array.isArray(source.output_examples) ? source.output_examples : null,
+    responder_public_key_pem: responderIdentity.public_key_pem,
+    responder_public_keys_pem: responderIdentity.public_key_pem ? [responderIdentity.public_key_pem] : [],
+    catalog_visibility: "local",
+    source: "local"
+  };
+}
+
+function listLocalCatalogHotlines(state, runtime, filters = {}) {
+  return (state.config.responder?.hotlines || [])
+    .filter((item) => item.enabled !== false)
+    .map((item) => buildLocalCatalogHotline(state, runtime, item))
+    .filter((item) => {
+      if (filters.hotline_id && item.hotline_id !== filters.hotline_id) {
+        return false;
+      }
+      if (filters.responder_id && item.responder_id !== filters.responder_id) {
+        return false;
+      }
+      if (filters.task_type && !(item.task_types || []).includes(filters.task_type)) {
+        return false;
+      }
+      if (filters.capability && !(item.capabilities || []).includes(filters.capability)) {
+        return false;
+      }
+      return true;
+    });
 }
 
 
@@ -822,7 +981,17 @@ export function createOpsSupervisorServer() {
         ...base,
         PORT: String(ports.caller),
         SERVICE_NAME: "caller-controller",
+        PLATFORM_ENABLED: String(platformFeaturesEnabled(state)),
         TRANSPORT_RECEIVER: "caller-controller"
+      };
+    }
+    if (name === "skill-adapter") {
+      return {
+        ...base,
+        PORT: String(ports.skill_adapter || 8091),
+        SERVICE_NAME: "caller-skill-adapter",
+        PLATFORM_ENABLED: String(platformFeaturesEnabled(state)),
+        CALLER_CONTROLLER_BASE_URL: processBaseUrl(ports.caller)
       };
     }
     return {
@@ -836,6 +1005,9 @@ export function createOpsSupervisorServer() {
   function serviceEntry(name) {
     if (name === "caller") {
       return require.resolve("@delexec/caller-controller");
+    }
+    if (name === "skill-adapter") {
+      return require.resolve("@delexec/caller-skill-adapter");
     }
     return require.resolve("@delexec/responder-controller");
   }
@@ -870,7 +1042,31 @@ export function createOpsSupervisorServer() {
       return current;
     }
     const ports = state.config.runtime.ports;
-    const portMap = {caller: ports.caller, responder: ports.responder, relay: ports.relay};
+    const portMap = {
+      caller: ports.caller,
+      responder: ports.responder,
+      relay: ports.relay,
+      "skill-adapter": ports.skill_adapter || 8091
+    };
+    // Kill any orphaned process holding the port before starting
+    const targetPort = portMap[name];
+    if (targetPort) {
+      await new Promise((resolve) => {
+        const killer = spawn(process.execPath, [
+          "-e",
+          `const { execSync } = require("child_process");
+           try {
+             const out = execSync("lsof -ti:${targetPort} 2>/dev/null", { encoding: "utf8" }).trim();
+             if (out) { out.split("\\n").forEach(pid => { try { process.kill(Number(pid), "SIGKILL"); } catch(_) {} }); }
+           } catch(_) {}
+          `
+        ]);
+        killer.on("exit", resolve);
+        setTimeout(resolve, 2000);
+      });
+      // Brief pause to let OS release the port
+      await new Promise((r) => setTimeout(r, 300));
+    }
     const launch = serviceLaunchSpec(name);
     const child = spawn(launch.command, launch.args, {
       env: serviceEnv(name),
@@ -936,6 +1132,7 @@ export function createOpsSupervisorServer() {
       await waitForRelay();
     }
     await ensureService("caller");
+    await ensureService("skill-adapter");
     if (state.config.responder.enabled) {
       await ensureService("responder");
     }
@@ -1080,7 +1277,8 @@ export function createOpsSupervisorServer() {
   }
 
   async function fetchHealth(name) {
-    const port = state.config.runtime.ports[name];
+    const portKey = name === "skill-adapter" ? "skill_adapter" : name;
+    const port = state.config.runtime.ports[portKey];
     if (name === "relay" && !usesManagedRelay()) {
       const runtimeTransport = getRuntimeTransport(state);
       if (runtimeTransport.type !== "relay_http") {
@@ -1127,10 +1325,13 @@ export function createOpsSupervisorServer() {
   }
 
   async function buildStatus() {
+    await syncResponderReviewStatusesFromPlatform();
     const hotlines = state.config.responder.hotlines || [];
     const secrets = getResolvedSecrets(state, runtime);
     const runtimeTransport = getRuntimeTransport(state);
-    const pendingReviewCount = hotlines.filter((item) => item.submitted_for_review !== true).length;
+    const pendingReviewCount = platformFeaturesEnabled(state)
+      ? hotlines.filter((item) => item.submitted_for_review !== true).length
+      : 0;
     const reviewStatusCounts = hotlines.reduce((counts, item) => {
       const key = item.review_status || "local_only";
       counts[key] = (counts[key] || 0) + 1;
@@ -1149,6 +1350,7 @@ export function createOpsSupervisorServer() {
         service_logs: {
           relay: getServiceLogFile("relay"),
           caller: getServiceLogFile("caller"),
+          skill_adapter: getServiceLogFile("skill-adapter"),
           responder: getServiceLogFile("responder")
         }
       },
@@ -1158,7 +1360,8 @@ export function createOpsSupervisorServer() {
         display_name: state.config.responder.display_name,
         hotline_count: hotlines.length,
         pending_review_count: pendingReviewCount,
-        review_summary: reviewStatusCounts
+        review_summary: reviewStatusCounts,
+        platform_enabled: platformFeaturesEnabled(state)
       },
       requests: await fetchRecentRequestsSummary(),
       runtime: {
@@ -1175,6 +1378,10 @@ export function createOpsSupervisorServer() {
         caller: {
           ...getRuntimeStatus("caller"),
           health: await fetchHealth("caller")
+        },
+        skill_adapter: {
+          ...getRuntimeStatus("skill-adapter"),
+          health: await fetchHealth("skill-adapter")
         },
         responder: {
           ...getRuntimeStatus("responder"),
@@ -1270,32 +1477,152 @@ export function createOpsSupervisorServer() {
     return response;
   }
 
-  function buildResponderRegisterHeaders() {
+function buildResponderRegisterHeaders() {
+  const secrets = getResolvedSecrets(state, runtime);
+  const apiKey = secrets.caller_api_key || secrets.responder_platform_api_key;
+  if (!apiKey) {
+    throw new Error("caller_platform_api_key_required");
+  }
+  return { Authorization: `Bearer ${apiKey}` };
+}
+
+  function buildPlatformReadHeaders() {
     const secrets = getResolvedSecrets(state, runtime);
-    const apiKey = secrets.caller_api_key || secrets.responder_platform_api_key;
-    if (!apiKey) {
-      throw new Error("caller_platform_api_key_required");
-    }
-    return { Authorization: `Bearer ${apiKey}` };
+    const apiKey = secrets.platform_admin_api_key || secrets.caller_api_key || secrets.responder_platform_api_key;
+    return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
   }
 
-  async function submitPendingResponderReviews() {
+  async function syncResponderReviewStatusesFromPlatform() {
+    if (!platformFeaturesEnabled(state)) {
+      return false;
+    }
+    const hotlines = state.config.responder.hotlines || [];
+    const submitted = hotlines.filter((item) => item.submitted_for_review === true);
+    if (submitted.length === 0) {
+      return false;
+    }
+    const headers = buildPlatformReadHeaders();
+    let changed = false;
+    for (const item of submitted) {
+      let response;
+      try {
+        response = await requestJson(
+          state.config.platform.base_url,
+          `/v1/catalog/hotlines/${encodeURIComponent(item.hotline_id)}`,
+          { headers }
+        );
+      } catch {
+        continue;
+      }
+      if (response.status !== 200 || !response.body) {
+        continue;
+      }
+      const nextReviewStatus = response.body.review_status || item.review_status || "pending";
+      if (item.review_status !== nextReviewStatus) {
+        item.review_status = nextReviewStatus;
+        changed = true;
+      }
+      if (item.submitted_for_review !== true) {
+        item.submitted_for_review = true;
+        changed = true;
+      }
+    }
+    if (changed) {
+      state.env = saveOpsState(state);
+    }
+    return changed;
+  }
+
+  async function verifyRegisteredHotline({ hotlineId, expectedTemplateRef }) {
+    let detail;
+    let bundle;
+    try {
+      detail = await requestJson(
+        state.config.platform.base_url,
+        `/v1/catalog/hotlines/${encodeURIComponent(hotlineId)}`,
+        {
+          headers: buildResponderRegisterHeaders()
+        }
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        catalog_visible: false,
+        template_ref_matches: false,
+        template_bundle_available: false,
+        catalog_status: null,
+        template_bundle_status: null,
+        error: error instanceof Error ? error.message : "catalog_verification_failed"
+      };
+    }
+
+    const actualTemplateRef = detail.body?.template_ref || null;
+    const templateRefMatches = Boolean(detail.status === 200 && actualTemplateRef && actualTemplateRef === expectedTemplateRef);
+    if (detail.status === 200 && actualTemplateRef) {
+      try {
+        bundle = await requestJson(
+          state.config.platform.base_url,
+          `/v1/catalog/hotlines/${encodeURIComponent(hotlineId)}/template-bundle?template_ref=${encodeURIComponent(actualTemplateRef)}`,
+          {
+            headers: buildResponderRegisterHeaders()
+          }
+        );
+      } catch (error) {
+        bundle = {
+          status: null,
+          body: {
+            ok: false,
+            error: error instanceof Error ? error.message : "template_bundle_verification_failed"
+          }
+        };
+      }
+    }
+
+    const templateBundleAvailable = Boolean(bundle?.status === 200);
+    return {
+      ok: Boolean(detail.status === 200 && templateRefMatches && templateBundleAvailable),
+      catalog_visible: detail.status === 200,
+      template_ref_matches: templateRefMatches,
+      template_bundle_available: templateBundleAvailable,
+      catalog_status: detail.status,
+      template_bundle_status: bundle?.status ?? null,
+      template_ref: actualTemplateRef || expectedTemplateRef || null
+    };
+  }
+
+  async function submitPendingResponderReviews({ hotlineId = null } = {}) {
+    if (!platformFeaturesEnabled(state)) {
+      return {
+        status: 409,
+        body: buildStructuredError(
+          "PLATFORM_FEATURES_DISABLED",
+          "platform publishing is disabled; enable platform features before submitting hotline reviews"
+        )
+      };
+    }
     const responderIdentity = ensureResponderIdentity(state);
-    const pending = (state.config.responder.hotlines || []).filter((item) => item.submitted_for_review !== true);
+    const pending = (state.config.responder.hotlines || []).filter(
+      (item) => item.submitted_for_review !== true && (!hotlineId || item.hotline_id === hotlineId)
+    );
     const results = [];
     for (const item of pending) {
+      let onboarding;
+      try {
+        onboarding = buildHotlineOnboardingBody(state, item, responderIdentity);
+      } catch (error) {
+        return {
+          status: 400,
+          body: buildStructuredError(
+            error?.code || "HOTLINE_DRAFT_INVALID",
+            error instanceof Error ? error.message : "hotline registration draft is invalid",
+            { fields: Array.isArray(error?.fields) ? error.fields : [] }
+          )
+        };
+      }
       const response = await requestJson(state.config.platform.base_url, "/v2/hotlines", {
         method: "POST",
         headers: buildResponderRegisterHeaders(),
-        body: {
-          responder_id: responderIdentity.responder_id,
-          hotline_id: item.hotline_id,
-          display_name: item.display_name || item.hotline_id,
-          responder_public_key_pem: responderIdentity.public_key_pem,
-          task_types: item.task_types || [],
-          capabilities: item.capabilities || [],
-          tags: item.tags || []
-        }
+        body: onboarding.body
       });
       if (response.status !== 201) {
         return response;
@@ -1317,7 +1644,16 @@ export function createOpsSupervisorServer() {
       }
       item.submitted_for_review = true;
       item.review_status = response.body.hotline_review_status || response.body.review_status || "pending";
-      results.push(response.body);
+      const verification = await verifyRegisteredHotline({
+        hotlineId: item.hotline_id,
+        expectedTemplateRef: onboarding.body.template_ref
+      });
+      results.push({
+        ...response.body,
+        draft_file: onboarding.draft_file,
+        used_draft: onboarding.used_draft,
+        verification
+      });
     }
     saveOpsState(state);
     return { status: 201, body: { responder_id: responderIdentity.responder_id, submitted: results.length, results } };
@@ -1325,6 +1661,7 @@ export function createOpsSupervisorServer() {
 
   async function addOfficialExampleHotline() {
     const definition = buildExampleHotlineDefinition();
+    const registrationDraft = ensureHotlineRegistrationDraft(state, definition);
     upsertHotline(state, definition);
     state.env = saveOpsState(state);
     await reloadResponderIfRunning();
@@ -1334,7 +1671,13 @@ export function createOpsSupervisorServer() {
       adapter_type: definition.adapter_type,
       example: true
     });
-    return definition;
+    return {
+      ...definition,
+      local_integration_file: registrationDraft.integration_file,
+      local_hook_file: registrationDraft.hook_file,
+      registration_draft_file: registrationDraft.draft_file,
+      registration_draft: registrationDraft.draft
+    };
   }
 
   async function dispatchExampleRequest(body = {}) {
@@ -1360,25 +1703,31 @@ export function createOpsSupervisorServer() {
     if (!example) {
       return buildExampleVisibilityError(example);
     }
-    if (example.submitted_for_review !== true) {
-      return buildExampleVisibilityError(example);
-    }
+    const responderIdentity = ensureResponderIdentity(state);
+    let signerPublicKeyPem = responderIdentity.public_key_pem;
 
-    const catalog = await requestJson(
-      processBaseUrl(state.config.runtime.ports.caller),
-      `/controller/hotlines?hotline_id=${encodeURIComponent(LOCAL_EXAMPLE_HOTLINE_ID)}&responder_id=${encodeURIComponent(
-        state.config.responder.responder_id || ""
-      )}`,
-      {
-        headers: buildPlatformHeaders(state, runtime)
+    if (platformFeaturesEnabled(state)) {
+      if (example.submitted_for_review !== true) {
+        return buildExampleVisibilityError(example);
       }
-    );
 
-    const selected = catalog.body?.items?.find(
-      (item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID && item.responder_id === state.config.responder.responder_id
-    );
-    if (!selected) {
-      return buildExampleVisibilityError(example);
+      const catalog = await requestJson(
+        processBaseUrl(state.config.runtime.ports.caller),
+        `/controller/hotlines?hotline_id=${encodeURIComponent(LOCAL_EXAMPLE_HOTLINE_ID)}&responder_id=${encodeURIComponent(
+          state.config.responder.responder_id || ""
+        )}`,
+        {
+          headers: buildPlatformHeaders(state, runtime)
+        }
+      );
+
+      const selected = catalog.body?.items?.find(
+        (item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID && item.responder_id === state.config.responder.responder_id
+      );
+      if (!selected) {
+        return buildExampleVisibilityError(example);
+      }
+      signerPublicKeyPem = selected.responder_public_key_pem || signerPublicKeyPem;
     }
 
     return requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/remote-requests", {
@@ -1386,9 +1735,9 @@ export function createOpsSupervisorServer() {
       headers: buildPlatformHeaders(state, runtime),
       body: buildExampleRequestBody({
         text: body.text,
-        responderId: selected.responder_id,
-        hotlineId: selected.hotline_id,
-        signerPublicKeyPem: selected.responder_public_key_pem
+        responderId: state.config.responder.responder_id,
+        hotlineId: LOCAL_EXAMPLE_HOTLINE_ID,
+        signerPublicKeyPem
       })
     });
   }
@@ -1416,9 +1765,14 @@ export function createOpsSupervisorServer() {
         return;
       }
       if (method === "GET" && pathname === "/auth/session") {
+        const recoverableSession = getRecoverableSession(runtime);
+        if (recoverableSession) {
+          persistActiveSession(recoverableSession);
+        }
         sendJson(res, 200, {
           ok: true,
-          session: getAuthState(runtime, state)
+          session: getAuthState(runtime, state),
+          recoverable_session: recoverableSession
         });
         return;
       }
@@ -1479,6 +1833,18 @@ export function createOpsSupervisorServer() {
           const secrets = unlockOpsSecrets(passphrase);
           const session = createAuthenticatedSession(runtime, passphrase, secrets);
           appendSupervisorEvent({ type: "auth_session_login" });
+          for (const svc of ["caller", "skill-adapter"]) {
+            const existing = runtime.processes.get(svc);
+            if (existing && !existing.exited) {
+              existing.child.kill();
+              const deadline = Date.now() + 3000;
+              while (!existing.exited && Date.now() < deadline) {
+                await new Promise((r) => setTimeout(r, 100));
+              }
+            }
+            await ensureService(svc);
+          }
+          appendSupervisorEvent({ type: "services_restarted_after_login", services: ["caller", "skill-adapter"] });
           sendJson(res, 200, {
             ok: true,
             token: session.token,
@@ -1498,6 +1864,9 @@ export function createOpsSupervisorServer() {
           runtime.auth.sessions.clear();
         }
         pruneExpiredSessions(runtime);
+        if (runtime.auth.sessions.size === 0) {
+          clearActiveSession();
+        }
         appendSupervisorEvent({ type: "auth_session_logout" });
         sendJson(res, 200, {
           ok: true,
@@ -1539,6 +1908,48 @@ export function createOpsSupervisorServer() {
       }
       if (method === "GET" && pathname === "/status") {
         sendJson(res, 200, await buildStatus());
+        return;
+      }
+      if (method === "GET" && pathname === "/platform/settings") {
+        sendJson(res, 200, {
+          enabled: platformFeaturesEnabled(state),
+          base_url: state.config.platform?.base_url || null
+        });
+        return;
+      }
+      if (method === "PUT" && pathname === "/platform/settings") {
+        const body = await parseJsonBody(req);
+        state.config.platform ||= {};
+        if (typeof body.enabled === "boolean") {
+          state.config.platform.enabled = body.enabled;
+        }
+        if (normalizedString(body.base_url)) {
+          state.config.platform.base_url = normalizedString(body.base_url);
+          state.config.platform_console ||= {};
+          state.config.platform_console.base_url = state.config.platform.base_url;
+        }
+        state.env = saveOpsState(state);
+        for (const svc of ["caller", "skill-adapter"]) {
+          const existing = runtime.processes.get(svc);
+          if (existing && !existing.exited) {
+            existing.child.kill();
+            const deadline = Date.now() + 3000;
+            while (!existing.exited && Date.now() < deadline) {
+              await new Promise((r) => setTimeout(r, 100));
+            }
+          }
+          await ensureService(svc);
+        }
+        appendSupervisorEvent({
+          type: "platform_settings_updated",
+          enabled: platformFeaturesEnabled(state),
+          base_url: state.config.platform.base_url
+        });
+        sendJson(res, 200, {
+          ok: true,
+          enabled: platformFeaturesEnabled(state),
+          base_url: state.config.platform.base_url
+        });
         return;
       }
       if (method === "GET" && pathname === "/runtime/transport") {
@@ -1604,15 +2015,91 @@ export function createOpsSupervisorServer() {
           ok: registered.status === 201,
           contact_email: body.contact_email || null
         });
+        if (registered.status === 201) {
+          for (const svc of ["caller", "skill-adapter"]) {
+            const existing = runtime.processes.get(svc);
+            if (existing && !existing.exited) {
+              existing.child.kill();
+              const deadline = Date.now() + 3000;
+              while (!existing.exited && Date.now() < deadline) {
+                await new Promise((r) => setTimeout(r, 100));
+              }
+            }
+            await ensureService(svc);
+          }
+          appendSupervisorEvent({ type: "services_restarted_after_registration", services: ["caller", "skill-adapter"] });
+        }
         sendJson(res, registered.status, registered.body);
         return;
       }
       if (method === "GET" && pathname === "/catalog/hotlines") {
+        if (!platformFeaturesEnabled(state)) {
+          const items = listLocalCatalogHotlines(state, runtime, {
+            hotline_id: url.searchParams.get("hotline_id") || undefined,
+            responder_id: url.searchParams.get("responder_id") || undefined,
+            task_type: url.searchParams.get("task_type") || undefined,
+            capability: url.searchParams.get("capability") || undefined
+          });
+          sendJson(res, 200, { items });
+          return;
+        }
         const response = await requestJson(
           processBaseUrl(state.config.runtime.ports.caller),
           `/controller/hotlines${url.search}`
         , {
           headers: buildPlatformHeaders(state, runtime)
+        });
+        sendJson(res, response.status, response.body);
+        return;
+      }
+      const catalogDetailMatch = pathname.match(/^\/catalog\/hotlines\/([^/]+)$/);
+      if (method === "GET" && catalogDetailMatch) {
+        const hotlineId = decodeURIComponent(catalogDetailMatch[1]);
+        if (!platformFeaturesEnabled(state)) {
+          const localItem = listLocalCatalogHotlines(state, runtime, { hotline_id: hotlineId })[0] || null;
+          if (!localItem) {
+            sendError(res, 404, "HOTLINE_NOT_FOUND", "hotline is not configured locally");
+            return;
+          }
+          sendJson(res, 200, localItem);
+          return;
+        }
+        const response = await requestJson(
+          state.config.platform.base_url,
+          `/v1/catalog/hotlines/${encodeURIComponent(hotlineId)}`,
+          {
+            headers: buildPlatformReadHeaders()
+          }
+        );
+        sendJson(res, response.status, response.body);
+        return;
+      }
+
+      // ------------------------------------------------------------------
+      // /caller/approvals proxy → Skill Adapter
+      // Allows the Ops Console to read and action pending approval records
+      // ------------------------------------------------------------------
+      if (pathname.startsWith("/caller/approvals")) {
+        const skillAdapterBase = processBaseUrl(state.config.runtime.ports.skill_adapter);
+        const upstreamPath = `/skills/remote-hotline/approvals${pathname.slice("/caller/approvals".length)}${url.search}`;
+        const body = ["POST", "PUT", "PATCH"].includes(method) ? await parseJsonBody(req) : undefined;
+        const response = await requestJson(skillAdapterBase, upstreamPath, {
+          method,
+          body
+        });
+        sendJson(res, response.status, response.body);
+        return;
+      }
+
+      // ------------------------------------------------------------------
+      // /caller/global-policy proxy → Skill Adapter
+      // ------------------------------------------------------------------
+      if (pathname === "/caller/global-policy") {
+        const skillAdapterBase = processBaseUrl(state.config.runtime.ports.skill_adapter);
+        const body = ["POST", "PUT", "PATCH"].includes(method) ? await parseJsonBody(req) : undefined;
+        const response = await requestJson(skillAdapterBase, `/skills/remote-hotline/global-policy`, {
+          method,
+          body
         });
         sendJson(res, response.status, response.body);
         return;
@@ -1681,17 +2168,48 @@ export function createOpsSupervisorServer() {
         return;
       }
       if (method === "GET" && pathname === "/responder") {
+        await syncResponderReviewStatusesFromPlatform();
         sendJson(res, 200, {
           enabled: state.config.responder.enabled,
           responder_id: state.config.responder.responder_id,
           display_name: state.config.responder.display_name,
+          platform_enabled: platformFeaturesEnabled(state),
           hotline_count: (state.config.responder.hotlines || []).length,
-          hotlines: state.config.responder.hotlines || []
+          hotlines: (state.config.responder.hotlines || []).map((item) => serializeHotlineForUi(state, runtime, item))
         });
         return;
       }
       if (method === "GET" && pathname === "/responder/hotlines") {
-        sendJson(res, 200, { items: state.config.responder.hotlines || [] });
+        await syncResponderReviewStatusesFromPlatform();
+        sendJson(res, 200, {
+          platform_enabled: platformFeaturesEnabled(state),
+          items: (state.config.responder.hotlines || []).map((item) => serializeHotlineForUi(state, runtime, item))
+        });
+        return;
+      }
+      const hotlineDraftMatch = pathname.match(/^\/responder\/hotlines\/([^/]+)\/draft$/);
+      if (method === "GET" && hotlineDraftMatch) {
+        const hotlineId = decodeURIComponent(hotlineDraftMatch[1]);
+        const hotline = (state.config.responder.hotlines || []).find((item) => item.hotline_id === hotlineId);
+        if (!hotline) {
+          sendError(res, 404, "hotline_not_found", "no hotline found with this id", { hotline_id: hotlineId });
+          return;
+        }
+        await syncResponderReviewStatusesFromPlatform();
+        const registrationDraft = loadHotlineRegistrationDraft(state, hotline);
+        sendJson(res, 200, {
+          ok: Boolean(registrationDraft.draft),
+          hotline_id: hotline.hotline_id,
+          platform_enabled: platformFeaturesEnabled(state),
+          review_status: hotline.review_status || "local_only",
+          submitted_for_review: hotline.submitted_for_review === true,
+          draft_file: registrationDraft.draft_file,
+          local_integration_file: hotline?.metadata?.local?.integration_file || null,
+          local_hook_file: hotline?.metadata?.local?.hook_file || null,
+          draft_ready: Boolean(registrationDraft.draft_file),
+          runtime: buildResponderRuntimeStatus(state, runtime, hotline.hotline_id),
+          draft: registrationDraft.draft
+        });
         return;
       }
       if (method === "POST" && pathname === "/responder/hotlines/example") {
@@ -1719,6 +2237,7 @@ export function createOpsSupervisorServer() {
           review_status: "local_only",
           submitted_for_review: false
         };
+        const registrationDraft = ensureHotlineRegistrationDraft(state, definition);
         upsertHotline(state, definition);
         state.env = saveOpsState(state);
         await reloadResponderIfRunning();
@@ -1727,7 +2246,14 @@ export function createOpsSupervisorServer() {
           hotline_id: definition.hotline_id,
           adapter_type: definition.adapter_type
         });
-        sendJson(res, 201, definition);
+        sendJson(res, 201, {
+          ...definition,
+          local_integration_file: registrationDraft.integration_file,
+          local_hook_file: registrationDraft.hook_file,
+          registration_draft_file: registrationDraft.draft_file,
+          registration_draft: registrationDraft.draft,
+          runtime: buildResponderRuntimeStatus(state, runtime, definition.hotline_id)
+        });
         return;
       }
       const hotlineToggleMatch = pathname.match(/^\/responder\/hotlines\/([^/]+)\/(enable|disable)$/);
@@ -1751,7 +2277,8 @@ export function createOpsSupervisorServer() {
           hotline_id: item.hotline_id,
           enabled: item.enabled !== false,
           review_status: item.review_status || "local_only",
-          submitted_for_review: item.submitted_for_review === true
+          submitted_for_review: item.submitted_for_review === true,
+          runtime: buildResponderRuntimeStatus(state, runtime, item.hotline_id)
         });
         return;
       }
@@ -1774,8 +2301,31 @@ export function createOpsSupervisorServer() {
           removed: {
             hotline_id: removed.hotline_id,
             review_status: removed.review_status || "local_only"
-          }
+          },
+          runtime: buildResponderRuntimeStatus(state, runtime, removed.hotline_id)
         });
+        return;
+      }
+      const hotlineSubmitDraftMatch = pathname.match(/^\/responder\/hotlines\/([^/]+)\/submit-review$/);
+      if (method === "POST" && hotlineSubmitDraftMatch) {
+        const hotlineId = decodeURIComponent(hotlineSubmitDraftMatch[1]);
+        const hotline = (state.config.responder.hotlines || []).find((item) => item.hotline_id === hotlineId);
+        if (!hotline) {
+          sendError(res, 404, "hotline_not_found", "no hotline found with this id", { hotline_id: hotlineId });
+          return;
+        }
+        ensureResponderIdentity(state);
+        state.env = saveOpsState(state);
+        const submitted = await submitPendingResponderReviews({ hotlineId });
+        await reloadResponderIfRunning();
+        appendSupervisorEvent({
+          type: "responder_review_submitted",
+          responder_id: state.config.responder.responder_id,
+          hotline_id: hotlineId,
+          submitted: submitted.body?.submitted || 0,
+          ok: submitted.status === 201
+        });
+        sendJson(res, submitted.status, submitted.body);
         return;
       }
       if (method === "POST" && pathname === "/responder/enable") {
@@ -1786,7 +2336,7 @@ export function createOpsSupervisorServer() {
         });
         state.config.responder.enabled = true;
         if (body.hotline_id) {
-          upsertHotline(state, {
+          const definition = {
             hotline_id: body.hotline_id,
             display_name: body.display_name || body.hotline_id,
             enabled: true,
@@ -1798,7 +2348,9 @@ export function createOpsSupervisorServer() {
             timeouts: body.timeouts || { soft_timeout_s: 60, hard_timeout_s: 180 },
             review_status: "local_only",
             submitted_for_review: false
-          });
+          };
+          ensureHotlineRegistrationDraft(state, definition);
+          upsertHotline(state, definition);
         }
         state.env = saveOpsState(state);
         await ensureService("responder");
@@ -1821,11 +2373,14 @@ export function createOpsSupervisorServer() {
           displayName: body.display_name || state.config.responder.display_name || null
         });
         state.env = saveOpsState(state);
-        const submitted = await submitPendingResponderReviews();
+        const submitted = await submitPendingResponderReviews({
+          hotlineId: normalizedString(body.hotline_id) || null
+        });
         await reloadResponderIfRunning();
         appendSupervisorEvent({
           type: "responder_review_submitted",
           responder_id: state.config.responder.responder_id,
+          hotline_id: normalizedString(body.hotline_id) || null,
           submitted: submitted.body?.submitted || 0,
           ok: submitted.status === 201
         });
@@ -1895,8 +2450,8 @@ export function createOpsSupervisorServer() {
       const serviceRestartMatch = pathname.match(/^\/runtime\/services\/([^/]+)\/restart$/);
       if (method === "POST" && serviceRestartMatch) {
         const name = serviceRestartMatch[1];
-        if (!["caller", "responder", "relay"].includes(name)) {
-          sendError(res, 400, "invalid_service", "service must be caller, responder, or relay");
+        if (!["caller", "responder", "relay", "skill-adapter"].includes(name)) {
+          sendError(res, 400, "invalid_service", "service must be caller, responder, relay, or skill-adapter");
           return;
         }
         const existing = runtime.processes.get(name);

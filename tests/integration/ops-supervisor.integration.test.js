@@ -191,7 +191,13 @@ server.listen(port, "127.0.0.1");
       expect(enabled.body.submitted).toBe(0);
 
       const statusBeforeReview = await jsonRequest(supervisorUrl, "/status");
-      expect(statusBeforeReview.body.responder.pending_review_count).toBe(1);
+      expect(statusBeforeReview.body.responder.pending_review_count).toBe(0);
+
+      const platformEnabled = await jsonRequest(supervisorUrl, "/platform/settings", {
+        method: "PUT",
+        body: { enabled: true }
+      });
+      expect(platformEnabled.status).toBe(200);
 
       const submitted = await jsonRequest(supervisorUrl, "/responder/submit-review", {
         method: "POST",
@@ -199,10 +205,175 @@ server.listen(port, "127.0.0.1");
       });
       expect(submitted.status).toBe(201);
       expect(submitted.body.submitted).toBe(1);
+      expect(submitted.body.results[0].verification.catalog_visible).toBe(true);
+      expect(submitted.body.results[0].verification.template_ref_matches).toBe(true);
+      expect(submitted.body.results[0].verification.template_bundle_available).toBe(true);
 
       const statusAfterReview = await jsonRequest(supervisorUrl, "/status");
       expect(statusAfterReview.body.responder.pending_review_count).toBe(0);
       expect(statusAfterReview.body.responder.review_summary.pending).toBe(1);
+    } finally {
+      await supervisor.stopManagedServices();
+      await closeServer(supervisor);
+      await closeServer(platformServer);
+      delete process.env.DELEXEC_HOME;
+      delete process.env.PLATFORM_API_BASE_URL;
+      delete process.env.OPS_PORT_SUPERVISOR;
+      delete process.env.OPS_PORT_RELAY;
+      delete process.env.OPS_PORT_CALLER;
+      delete process.env.OPS_PORT_RESPONDER;
+    }
+  });
+
+  it("exposes responder draft inspection and single-hotline draft submission", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-draft-"));
+    cleanupDirs.push(opsHome);
+    process.env.OPS_PORT_SUPERVISOR = String(26000 + Math.floor(Math.random() * 1000));
+    process.env.OPS_PORT_RELAY = String(27000 + Math.floor(Math.random() * 1000));
+    process.env.OPS_PORT_CALLER = String(28000 + Math.floor(Math.random() * 1000));
+    process.env.OPS_PORT_RESPONDER = String(29000 + Math.floor(Math.random() * 1000));
+
+    const platformState = createPlatformState();
+    const platformServer = createPlatformServer({ serviceName: "platform-ops-draft-test", state: platformState });
+    const platformUrl = await listenServer(platformServer);
+    process.env.DELEXEC_HOME = opsHome;
+    process.env.PLATFORM_API_BASE_URL = platformUrl;
+
+    const supervisor = createOpsSupervisorServer();
+    supervisor.listen(0, "127.0.0.1");
+    await new Promise((resolve) => supervisor.once("listening", resolve));
+    const supervisorUrl = `http://127.0.0.1:${supervisor.address().port}`;
+    await jsonRequest(supervisorUrl, "/setup", { method: "POST", body: {} });
+    await supervisor.startManagedServices();
+
+    try {
+      const registered = await jsonRequest(supervisorUrl, "/auth/register-caller", {
+        method: "POST",
+        body: { contact_email: "ops-draft@test.local" }
+      });
+      expect(registered.status).toBe(201);
+
+      await jsonRequest(supervisorUrl, "/responder/hotlines", {
+        method: "POST",
+        body: {
+          hotline_id: "ops.draft.one.v1",
+          display_name: "Ops Draft One",
+          task_types: ["text_summarize"],
+          capabilities: ["text.summarize"],
+          adapter_type: "process",
+          adapter: { cmd: "node worker.js" }
+        }
+      });
+      await jsonRequest(supervisorUrl, "/responder/hotlines", {
+        method: "POST",
+        body: {
+          hotline_id: "ops.draft.two.v1",
+          display_name: "Ops Draft Two",
+          task_types: ["text_summarize"],
+          capabilities: ["text.summarize"],
+          adapter_type: "process",
+          adapter: { cmd: "node worker.js" }
+        }
+      });
+
+      const draft = await jsonRequest(supervisorUrl, "/responder/hotlines/ops.draft.one.v1/draft");
+      expect(draft.status).toBe(200);
+      expect(draft.body.ok).toBe(true);
+      expect(draft.body.hotline_id).toBe("ops.draft.one.v1");
+      expect(draft.body.draft_file).toContain("ops.draft.one.v1.registration.json");
+      expect(draft.body.local_integration_file).toContain("ops.draft.one.v1.integration.json");
+      expect(draft.body.local_hook_file).toContain("ops.draft.one.v1.hooks.json");
+      expect(fs.existsSync(draft.body.local_integration_file)).toBe(true);
+      expect(fs.existsSync(draft.body.local_hook_file)).toBe(true);
+
+      const platformEnabled = await jsonRequest(supervisorUrl, "/platform/settings", {
+        method: "PUT",
+        body: { enabled: true }
+      });
+      expect(platformEnabled.status).toBe(200);
+
+      const submitted = await jsonRequest(supervisorUrl, "/responder/hotlines/ops.draft.one.v1/submit-review", {
+        method: "POST",
+        body: {}
+      });
+      expect(submitted.status).toBe(201);
+      expect(submitted.body.submitted).toBe(1);
+      expect(submitted.body.results[0].verification.ok).toBe(true);
+
+      const status = await jsonRequest(supervisorUrl, "/status");
+      expect(status.body.responder.pending_review_count).toBe(1);
+    } finally {
+      await supervisor.stopManagedServices();
+      await closeServer(supervisor);
+      await closeServer(platformServer);
+      delete process.env.DELEXEC_HOME;
+      delete process.env.PLATFORM_API_BASE_URL;
+      delete process.env.OPS_PORT_SUPERVISOR;
+      delete process.env.OPS_PORT_RELAY;
+      delete process.env.OPS_PORT_CALLER;
+      delete process.env.OPS_PORT_RESPONDER;
+    }
+  });
+
+  it("rejects single-hotline draft submission when any input field lacks caller guidance", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-invalid-guidance-"));
+    cleanupDirs.push(opsHome);
+    process.env.OPS_PORT_SUPERVISOR = String(30000 + Math.floor(Math.random() * 1000));
+    process.env.OPS_PORT_RELAY = String(31000 + Math.floor(Math.random() * 1000));
+    process.env.OPS_PORT_CALLER = String(32000 + Math.floor(Math.random() * 1000));
+    process.env.OPS_PORT_RESPONDER = String(33000 + Math.floor(Math.random() * 1000));
+
+    const platformState = createPlatformState();
+    const platformServer = createPlatformServer({ serviceName: "platform-ops-invalid-guidance-test", state: platformState });
+    const platformUrl = await listenServer(platformServer);
+    process.env.DELEXEC_HOME = opsHome;
+    process.env.PLATFORM_API_BASE_URL = platformUrl;
+
+    const supervisor = createOpsSupervisorServer();
+    supervisor.listen(0, "127.0.0.1");
+    await new Promise((resolve) => supervisor.once("listening", resolve));
+    const supervisorUrl = `http://127.0.0.1:${supervisor.address().port}`;
+    await jsonRequest(supervisorUrl, "/setup", { method: "POST", body: {} });
+    await supervisor.startManagedServices();
+
+    try {
+      const registered = await jsonRequest(supervisorUrl, "/auth/register-caller", {
+        method: "POST",
+        body: { contact_email: "ops-invalid-guidance@test.local" }
+      });
+      expect(registered.status).toBe(201);
+
+      await jsonRequest(supervisorUrl, "/responder/hotlines", {
+        method: "POST",
+        body: {
+          hotline_id: "ops.invalid.guidance.v1",
+          display_name: "Ops Invalid Guidance",
+          task_types: ["text_summarize"],
+          capabilities: ["text.summarize"],
+          adapter_type: "process",
+          adapter: { cmd: "node worker.js" }
+        }
+      });
+
+      const draftFile = path.join(opsHome, "hotline-registration-drafts", "ops.invalid.guidance.v1.registration.json");
+      const draft = JSON.parse(fs.readFileSync(draftFile, "utf8"));
+      const invalidField = Object.keys(draft.input_schema.properties || {})[0];
+      draft.input_schema.properties[invalidField].description = "Source text.";
+      fs.writeFileSync(draftFile, `${JSON.stringify(draft, null, 2)}\n`);
+
+      const platformEnabled = await jsonRequest(supervisorUrl, "/platform/settings", {
+        method: "PUT",
+        body: { enabled: true }
+      });
+      expect(platformEnabled.status).toBe(200);
+
+      const submitted = await jsonRequest(supervisorUrl, "/responder/hotlines/ops.invalid.guidance.v1/submit-review", {
+        method: "POST",
+        body: {}
+      });
+      expect(submitted.status).toBe(400);
+      expect(submitted.body.error.code).toBe("HOTLINE_INPUT_GUIDANCE_REQUIRED");
+      expect(submitted.body.fields).toContain(invalidField);
     } finally {
       await supervisor.stopManagedServices();
       await closeServer(supervisor);
@@ -303,6 +474,17 @@ server.listen(port, "127.0.0.1");
 
       const denied = await jsonRequest(supervisorUrl, "/runtime/transport");
       expect(denied.status).toBe(401);
+
+      const localHotlineUpdate = await jsonRequest(supervisorUrl, "/responder/hotlines", {
+        method: "POST",
+        body: {
+          hotline_id: "ops.local-config.v1",
+          adapter_type: "process",
+          adapter: { cmd: "node worker.js" }
+        }
+      });
+      expect(localHotlineUpdate.status).toBe(201);
+      expect(localHotlineUpdate.body.runtime.hotline_configured).toBe(true);
 
       const sessionHeaders = {
         "X-Ops-Session": setupSession.body.token
@@ -668,7 +850,7 @@ server.listen(port, "127.0.0.1");
         body: {}
       });
       expect(added.status).toBe(201);
-      expect(added.body.hotline_id).toBe("local.summary.v1");
+      expect(added.body.hotline_id).toBe("local.delegated-execution.workspace-summary.v1");
 
       const enabled = await jsonRequest(supervisorUrl, "/responder/enable", {
         method: "POST",

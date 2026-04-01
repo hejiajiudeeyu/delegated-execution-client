@@ -5,8 +5,20 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
+import { ensureOpsDirectories, readJsonFile } from "@delexec/runtime-utils";
+import { buildStructuredError } from "@delexec/contracts";
 import { createOpsSupervisorServer } from "./supervisor.js";
-import { ensureOpsState, ensureResponderIdentity, removeHotline, saveOpsState, setHotlineEnabled, upsertHotline } from "./config.js";
+import {
+  buildHotlineOnboardingBody,
+  ensureHotlineRegistrationDraft,
+  ensureOpsState,
+  ensureResponderIdentity,
+  loadHotlineRegistrationDraft,
+  removeHotline,
+  saveOpsState,
+  setHotlineEnabled,
+  upsertHotline
+} from "./config.js";
 import { buildExampleHotlineDefinition, LOCAL_EXAMPLE_HOTLINE_ID } from "./example-hotline.js";
 
 const execFileAsync = promisify(execFile);
@@ -15,6 +27,8 @@ const CLIENT_ROOT = path.resolve(path.dirname(CLI_PATH), "../../..");
 const OPS_CONSOLE_DIR = path.join(CLIENT_ROOT, "apps/ops-console");
 const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 const DEFAULT_CONSOLE_PORT = 4173;
+const OPS_SESSION_FILE = path.join(ensureOpsDirectories(), "run", "session.json");
+const OPS_SESSION_HEADER = "X-Ops-Session";
 
 function usage() {
   console.log(`Usage:
@@ -31,7 +45,9 @@ function usage() {
   delexec-ops remove-hotline --hotline-id <id>
   delexec-ops enable-hotline --hotline-id <id>
   delexec-ops disable-hotline --hotline-id <id>
-  delexec-ops submit-review
+  delexec-ops submit-review [--hotline-id <id>]
+  delexec-ops responder show-draft --hotline-id <id>
+  delexec-ops responder submit-draft --hotline-id <id>
   delexec-ops run-example [--text <text>]
   delexec-ops doctor
   delexec-ops debug-snapshot
@@ -120,6 +136,67 @@ async function requestJson(baseUrl, pathname, { method = "GET", headers = {}, bo
     status: response.status,
     body: text ? JSON.parse(text) : null
   };
+}
+
+function readSupervisorSessionToken() {
+  const session = readJsonFile(OPS_SESSION_FILE, null);
+  if (!session?.token || !session?.expires_at) {
+    return null;
+  }
+  const expiresAt = Date.parse(session.expires_at);
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    return null;
+  }
+  return String(session.token);
+}
+
+function writeSupervisorSessionToken(session) {
+  if (!session?.token || !session?.expires_at) {
+    return false;
+  }
+  ensureOpsDirectories();
+  fs.writeFileSync(
+    OPS_SESSION_FILE,
+    `${JSON.stringify({ token: String(session.token), expires_at: String(session.expires_at) }, null, 2)}\n`,
+    "utf8"
+  );
+  return true;
+}
+
+function withSupervisorSessionHeaders(headers = {}) {
+  const token = readSupervisorSessionToken();
+  return token ? { ...headers, [OPS_SESSION_HEADER]: token } : headers;
+}
+
+async function recoverSupervisorSession(state) {
+  const response = await requestJson(supervisorUrlFromState(state), "/auth/session");
+  const session = response.body?.recoverable_session;
+  if (!session?.token || !session?.expires_at) {
+    return false;
+  }
+  return writeSupervisorSessionToken(session);
+}
+
+async function requestSupervisorJson(state, pathname, options = {}) {
+  let response = await requestJson(supervisorUrlFromState(state), pathname, {
+    ...options,
+    headers: withSupervisorSessionHeaders(options.headers || {})
+  });
+  if (response.status === 401 && response.body?.error?.code === "AUTH_SESSION_REQUIRED") {
+    if (fs.existsSync(OPS_SESSION_FILE)) {
+      try {
+        fs.rmSync(OPS_SESSION_FILE, { force: true });
+      } catch {}
+    }
+    const recovered = await recoverSupervisorSession(state).catch(() => false);
+    if (recovered) {
+      response = await requestJson(supervisorUrlFromState(state), pathname, {
+        ...options,
+        headers: withSupervisorSessionHeaders(options.headers || {})
+      });
+    }
+  }
+  return response;
 }
 
 async function runCliSubcommand(args, env) {
@@ -286,11 +363,70 @@ async function ensureUiAvailable(args = {}, env = process.env) {
 }
 
 function buildResponderRegisterHeaders(state) {
-  const apiKey = state.config.caller.api_key || state.env.RESPONDER_PLATFORM_API_KEY || state.env.PLATFORM_API_KEY;
+  const apiKey =
+    state.config.caller.api_key ||
+    state.env.CALLER_PLATFORM_API_KEY ||
+    state.env.PLATFORM_API_KEY ||
+    process.env.CALLER_PLATFORM_API_KEY ||
+    process.env.PLATFORM_API_KEY ||
+    state.env.RESPONDER_PLATFORM_API_KEY;
   if (!apiKey) {
     throw new Error("caller_platform_api_key_required");
   }
   return { Authorization: `Bearer ${apiKey}` };
+}
+
+async function verifyRegisteredHotline(state, { hotlineId, expectedTemplateRef }) {
+  let detail;
+  let bundle;
+  try {
+    detail = await requestJson(state.config.platform.base_url, `/v1/catalog/hotlines/${encodeURIComponent(hotlineId)}`, {
+      headers: buildResponderRegisterHeaders(state)
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      catalog_visible: false,
+      template_ref_matches: false,
+      template_bundle_available: false,
+      catalog_status: null,
+      template_bundle_status: null,
+      error: error instanceof Error ? error.message : "catalog_verification_failed"
+    };
+  }
+
+  const actualTemplateRef = detail.body?.template_ref || null;
+  const templateRefMatches = Boolean(detail.status === 200 && actualTemplateRef && actualTemplateRef === expectedTemplateRef);
+  if (detail.status === 200 && actualTemplateRef) {
+    try {
+      bundle = await requestJson(
+        state.config.platform.base_url,
+        `/v1/catalog/hotlines/${encodeURIComponent(hotlineId)}/template-bundle?template_ref=${encodeURIComponent(actualTemplateRef)}`,
+        {
+          headers: buildResponderRegisterHeaders(state)
+        }
+      );
+    } catch (error) {
+      bundle = {
+        status: null,
+        body: {
+          ok: false,
+          error: error instanceof Error ? error.message : "template_bundle_verification_failed"
+        }
+      };
+    }
+  }
+
+  const templateBundleAvailable = Boolean(bundle?.status === 200);
+  return {
+    ok: Boolean(detail.status === 200 && templateRefMatches && templateBundleAvailable),
+    catalog_visible: detail.status === 200,
+    template_ref_matches: templateRefMatches,
+    template_bundle_available: templateBundleAvailable,
+    catalog_status: detail.status,
+    template_bundle_status: bundle?.status ?? null,
+    template_ref: actualTemplateRef || expectedTemplateRef || null
+  };
 }
 
 function parseHotlineDefinition(args) {
@@ -523,10 +659,7 @@ async function commandAuthRegister(args) {
   if (!email) {
     throw new Error("email_required");
   }
-  const response = await requestJson(supervisorUrlFromState(state), "/auth/register-caller", {
-    method: "POST",
-    body: { contact_email: email }
-  }).catch(async () => {
+  const fallbackRegister = async () => {
     const local = ensureOpsState();
     local.config.platform.base_url = String(args.platform || local.config.platform.base_url).trim();
     const direct = await requestJson(local.config.platform.base_url, "/v1/users/register", {
@@ -539,7 +672,19 @@ async function commandAuthRegister(args) {
       local.env = saveOpsState(local);
     }
     return direct;
-  });
+  };
+  let response;
+  try {
+    response = await requestSupervisorJson(state, "/auth/register-caller", {
+      method: "POST",
+      body: { contact_email: email }
+    });
+    if (response.status === 401 && response.body?.error?.code === "AUTH_SESSION_REQUIRED") {
+      response = await fallbackRegister();
+    }
+  } catch {
+    response = await fallbackRegister();
+  }
   emit({
     ok: response.status === 201,
     ...response.body
@@ -555,7 +700,7 @@ async function commandEnableResponder(args) {
   });
   state.env = saveOpsState(state);
   try {
-    const response = await requestJson(supervisorUrlFromState(state), "/responder/enable", {
+    const response = await requestSupervisorJson(state, "/responder/enable", {
       method: "POST",
       body: {
         responder_id: state.config.responder.responder_id,
@@ -576,43 +721,76 @@ async function commandEnableResponder(args) {
 async function commandAddHotline(args) {
   const state = ensureOpsState();
   const definition = parseHotlineDefinition(args);
+  const registrationDraft = ensureHotlineRegistrationDraft(state, definition);
   upsertHotline(state, definition);
   state.env = saveOpsState(state);
+  let runtime = { synced: false, auth_required: false };
   try {
-    await requestJson(supervisorUrlFromState(state), "/responder/hotlines", {
+    const response = await requestSupervisorJson(state, "/responder/hotlines", {
       method: "POST",
       body: definition
     });
+    if (response.status === 201) {
+      runtime = {
+        synced: true,
+        auth_required: false,
+        ...(response.body?.runtime || {})
+      };
+    } else if (response.status === 401 && response.body?.error?.code === "AUTH_SESSION_REQUIRED") {
+      runtime = { synced: false, auth_required: true };
+    }
   } catch {}
   emit({
     ok: true,
     hotline_id: definition.hotline_id,
-    adapter_type: definition.adapter_type
+    adapter_type: definition.adapter_type,
+    runtime,
+    local_integration_file: registrationDraft.integration_file,
+    local_hook_file: registrationDraft.hook_file,
+    registration_draft_file: registrationDraft.draft_file,
+    registration_draft: registrationDraft.draft
   });
 }
 
 async function commandAttachProject(args) {
   const state = ensureOpsState();
   const definition = buildProjectHotlineDefinition(args);
+  const registrationDraft = ensureHotlineRegistrationDraft(state, definition);
   upsertHotline(state, definition);
   state.env = saveOpsState(state);
+  let runtime = { synced: false, auth_required: false };
   try {
-    await requestJson(supervisorUrlFromState(state), "/responder/hotlines", {
+    const response = await requestSupervisorJson(state, "/responder/hotlines", {
       method: "POST",
       body: definition
     });
+    if (response.status === 201) {
+      runtime = {
+        synced: true,
+        auth_required: false,
+        ...(response.body?.runtime || {})
+      };
+    } else if (response.status === 401 && response.body?.error?.code === "AUTH_SESSION_REQUIRED") {
+      runtime = { synced: false, auth_required: true };
+    }
   } catch {}
   emit({
     ok: true,
     hotline_id: definition.hotline_id,
     adapter_type: definition.adapter_type,
-    project: definition.metadata.project
+    project: definition.metadata.project,
+    runtime,
+    local_integration_file: registrationDraft.integration_file,
+    local_hook_file: registrationDraft.hook_file,
+    registration_draft_file: registrationDraft.draft_file,
+    registration_draft: registrationDraft.draft
   });
 }
 
 async function commandAddExampleHotline() {
   const state = ensureOpsState();
   const definition = buildExampleHotlineDefinition();
+  const registrationDraft = ensureHotlineRegistrationDraft(state, definition);
   upsertHotline(state, definition);
   state.env = saveOpsState(state);
   try {
@@ -627,7 +805,11 @@ async function commandAddExampleHotline() {
     ok: true,
     example: true,
     hotline_id: definition.hotline_id,
-    adapter_type: definition.adapter_type
+    adapter_type: definition.adapter_type,
+    local_integration_file: registrationDraft.integration_file,
+    local_hook_file: registrationDraft.hook_file,
+    registration_draft_file: registrationDraft.draft_file,
+    registration_draft: registrationDraft.draft
   });
 }
 
@@ -643,8 +825,8 @@ async function commandSetHotlineEnabled(args, enabled) {
   }
   state.env = saveOpsState(state);
   try {
-    const response = await requestJson(
-      supervisorUrlFromState(state),
+    const response = await requestSupervisorJson(
+      state,
       `/responder/hotlines/${encodeURIComponent(hotlineId)}/${enabled ? "enable" : "disable"}`,
       {
         method: "POST",
@@ -673,7 +855,7 @@ async function commandRemoveHotline(args) {
   }
   state.env = saveOpsState(state);
   try {
-    const response = await requestJson(supervisorUrlFromState(state), `/responder/hotlines/${encodeURIComponent(hotlineId)}`, {
+    const response = await requestSupervisorJson(state, `/responder/hotlines/${encodeURIComponent(hotlineId)}`, {
       method: "DELETE"
     });
     emit(response.body);
@@ -687,40 +869,102 @@ async function commandRemoveHotline(args) {
   });
 }
 
+function requireHotlineIdArg(args) {
+  const hotlineId = String(args["hotline-id"] || "").trim();
+  if (!hotlineId) {
+    throw new Error("hotline_id_required");
+  }
+  return hotlineId;
+}
+
+async function commandShowDraft(args = {}) {
+  const state = ensureOpsState();
+  const hotlineId = requireHotlineIdArg(args);
+  const hotline = (state.config.responder.hotlines || []).find((item) => item.hotline_id === hotlineId);
+  if (!hotline) {
+    throw new Error("hotline_not_found");
+  }
+  try {
+    const response = await requestSupervisorJson(state, `/responder/hotlines/${encodeURIComponent(hotlineId)}/draft`);
+    if (response.status === 200) {
+      emit(response.body);
+      return;
+    }
+  } catch {}
+
+  const registrationDraft = loadHotlineRegistrationDraft(state, hotline);
+  emit({
+    ok: Boolean(registrationDraft.draft),
+    hotline_id: hotline.hotline_id,
+    review_status: hotline.review_status || "local_only",
+    submitted_for_review: hotline.submitted_for_review === true,
+    local_integration_file: hotline?.metadata?.local?.integration_file || null,
+    local_hook_file: hotline?.metadata?.local?.hook_file || null,
+    draft_file: registrationDraft.draft_file,
+    draft: registrationDraft.draft
+  });
+}
+
 async function commandSubmitReview(args = {}) {
   const state = ensureOpsState();
+  const hotlineId = args["hotline-id"] ? requireHotlineIdArg(args) : null;
+  if (hotlineId) {
+    const hotline = (state.config.responder.hotlines || []).find((item) => item.hotline_id === hotlineId);
+    if (!hotline) {
+      throw new Error("hotline_not_found");
+    }
+  }
   const responderIdentity = ensureResponderIdentity(state, {
     responderId: args["responder-id"] ? String(args["responder-id"]) : null,
     displayName: args["display-name"] ? String(args["display-name"]) : null
   });
   state.env = saveOpsState(state);
+  const pending = (state.config.responder.hotlines || []).filter(
+    (item) => item.submitted_for_review !== true && (!hotlineId || item.hotline_id === hotlineId)
+  );
+  for (const item of pending) {
+    try {
+      buildHotlineOnboardingBody(state, item, responderIdentity);
+    } catch (error) {
+      emit(buildStructuredError(
+        error?.code || "HOTLINE_DRAFT_INVALID",
+        error instanceof Error ? error.message : "hotline registration draft is invalid",
+        { fields: Array.isArray(error?.fields) ? error.fields : [] }
+      ));
+      return;
+    }
+  }
   try {
-    const response = await requestJson(supervisorUrlFromState(state), "/responder/submit-review", {
+    const response = await requestSupervisorJson(state, "/responder/submit-review", {
       method: "POST",
       body: {
         responder_id: state.config.responder.responder_id,
-        display_name: state.config.responder.display_name
+        display_name: state.config.responder.display_name,
+        hotline_id: hotlineId
       }
     });
-    emit(response.body);
-    return;
+    if (response.status === 201) {
+      emit(response.body);
+      return;
+    }
   } catch {}
-
-  const pending = (state.config.responder.hotlines || []).filter((item) => item.submitted_for_review !== true);
   const results = [];
   for (const item of pending) {
+    let onboarding;
+    try {
+      onboarding = buildHotlineOnboardingBody(state, item, responderIdentity);
+    } catch (error) {
+      emit(buildStructuredError(
+        error?.code || "HOTLINE_DRAFT_INVALID",
+        error instanceof Error ? error.message : "hotline registration draft is invalid",
+        { fields: Array.isArray(error?.fields) ? error.fields : [] }
+      ));
+      return;
+    }
     const response = await requestJson(state.config.platform.base_url, "/v2/hotlines", {
       method: "POST",
       headers: buildResponderRegisterHeaders(state),
-      body: {
-        responder_id: responderIdentity.responder_id,
-        hotline_id: item.hotline_id,
-        display_name: item.display_name || item.hotline_id,
-        responder_public_key_pem: responderIdentity.public_key_pem,
-        task_types: item.task_types || [],
-        capabilities: item.capabilities || [],
-        tags: item.tags || []
-      }
+      body: onboarding.body
     });
     if (response.status !== 201) {
       emit(response.body);
@@ -729,7 +973,16 @@ async function commandSubmitReview(args = {}) {
     state.env.RESPONDER_PLATFORM_API_KEY = response.body.responder_api_key || response.body.api_key;
     item.submitted_for_review = true;
     item.review_status = response.body.hotline_review_status || response.body.review_status || "pending";
-    results.push(response.body);
+    const verification = await verifyRegisteredHotline(state, {
+      hotlineId: item.hotline_id,
+      expectedTemplateRef: onboarding.body.template_ref
+    });
+    results.push({
+      ...response.body,
+      draft_file: onboarding.draft_file,
+      used_draft: onboarding.used_draft,
+      verification
+    });
   }
   state.env = saveOpsState(state);
   emit({
@@ -783,14 +1036,14 @@ async function commandDoctor() {
 
 async function commandDebugSnapshot() {
   const state = ensureOpsState();
-  const response = await requestJson(supervisorUrlFromState(state), "/debug/snapshot");
+  const response = await requestSupervisorJson(state, "/debug/snapshot");
   emit(response.body);
 }
 
 async function commandRunExample(args) {
   const state = ensureOpsState();
   const text = String(args.text || "Summarize this local example request.").trim();
-  const response = await requestJson(supervisorUrlFromState(state), "/requests/example", {
+  const response = await requestSupervisorJson(state, "/requests/example", {
     method: "POST",
     body: { text }
   });
@@ -1101,6 +1354,14 @@ async function main() {
     return;
   }
   if ((group === "responder" || group === "responder") && command === "register") {
+    await commandSubmitReview(args);
+    return;
+  }
+  if ((group === "responder" || group === "responder") && command === "show-draft") {
+    await commandShowDraft(args);
+    return;
+  }
+  if ((group === "responder" || group === "responder") && command === "submit-draft") {
     await commandSubmitReview(args);
     return;
   }

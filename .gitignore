@@ -27,3 +27,11 @@ junit.xml
 
 # Process files
 *.pid
+
+# Local hotline integrations and hooks
+.delexec/
+.delexec-*/
+hotline-integrations/
+hotline-hooks/
+*.integration.local.json
+*.hooks.local.json
