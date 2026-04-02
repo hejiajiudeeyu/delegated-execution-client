@@ -15,6 +15,7 @@ const OPS_ENV_KEYS = [
   "OPS_PORT_CALLER",
   "OPS_PORT_RESPONDER",
   "OPS_PORT_SKILL_ADAPTER",
+  "OPS_PORT_MCP_ADAPTER",
   "OPS_RELAY_BIN",
   "OPS_RELAY_ARGS",
   "PLATFORM_API_BASE_URL",
@@ -68,11 +69,13 @@ describe("ops supervisor integration", () => {
   it("starts embedded local relay and supports local-only caller registration", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-home-"));
     cleanupDirs.push(opsHome);
-    const [supervisorPort, relayPort, callerPort, responderPort] = await reserveFreePorts(4);
+    const [supervisorPort, relayPort, callerPort, responderPort, skillAdapterPort, mcpAdapterPort] = await reserveFreePorts(6);
     process.env.OPS_PORT_SUPERVISOR = String(supervisorPort);
     process.env.OPS_PORT_RELAY = String(relayPort);
     process.env.OPS_PORT_CALLER = String(callerPort);
     process.env.OPS_PORT_RESPONDER = String(responderPort);
+    process.env.OPS_PORT_SKILL_ADAPTER = String(skillAdapterPort);
+    process.env.OPS_PORT_MCP_ADAPTER = String(mcpAdapterPort);
 
     process.env.DELEXEC_HOME = opsHome;
 
@@ -106,9 +109,16 @@ describe("ops supervisor integration", () => {
       expect(["embedded_local", "package_entry"]).toContain(currentStatus.body.runtime.relay.launch_mode);
       expect(currentStatus.body.caller.registered).toBe(true);
       expect(currentStatus.body.caller.registration_mode).toBe("local_only");
-      expect(currentStatus.body.runtime.mcp_adapter.mode).toBe("stdio");
-      expect(currentStatus.body.runtime.mcp_adapter.available).toBe(true);
-      expect(currentStatus.body.runtime.mcp_adapter.env.CALLER_SKILL_BASE_URL).toBe("http://127.0.0.1:8091");
+      expect(currentStatus.body.runtime.mcp_adapter.running).toBe(true);
+      expect(currentStatus.body.runtime.mcp_adapter.health.status).toBe(200);
+      expect(currentStatus.body.runtime.mcp_adapter.spec.mode).toBe("multi_transport");
+      expect(currentStatus.body.runtime.mcp_adapter.spec.preferred_transport).toBe("streamable_http");
+      expect(currentStatus.body.runtime.mcp_adapter.spec.stdio.env.CALLER_SKILL_BASE_URL).toBe(
+        `http://127.0.0.1:${skillAdapterPort}`
+      );
+      expect(currentStatus.body.runtime.mcp_adapter.spec.streamable_http.url).toBe(
+        `http://127.0.0.1:${mcpAdapterPort}/mcp`
+      );
 
       const requests = await waitFor(async () => {
         const current = await jsonRequest(supervisorUrl, "/requests");
@@ -122,8 +132,9 @@ describe("ops supervisor integration", () => {
       const mcpSpec = await jsonRequest(supervisorUrl, "/mcp-adapter/spec");
       expect(mcpSpec.status).toBe(200);
       expect(mcpSpec.body.ok).toBe(true);
-      expect(mcpSpec.body.spec.mode).toBe("stdio");
-      expect(mcpSpec.body.spec.env.CALLER_SKILL_BASE_URL).toBe(`http://127.0.0.1:${8091}`);
+      expect(mcpSpec.body.spec.mode).toBe("multi_transport");
+      expect(mcpSpec.body.spec.stdio.env.CALLER_SKILL_BASE_URL).toBe(`http://127.0.0.1:${skillAdapterPort}`);
+      expect(mcpSpec.body.spec.streamable_http.url).toBe(`http://127.0.0.1:${mcpAdapterPort}/mcp`);
     } finally {
       await supervisor.stopManagedServices();
       await closeServer(supervisor);
@@ -133,6 +144,7 @@ describe("ops supervisor integration", () => {
       delete process.env.OPS_PORT_CALLER;
       delete process.env.OPS_PORT_RESPONDER;
       delete process.env.OPS_PORT_SKILL_ADAPTER;
+      delete process.env.OPS_PORT_MCP_ADAPTER;
     }
   });
 

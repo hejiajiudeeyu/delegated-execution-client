@@ -23,7 +23,8 @@ export const DEFAULT_PORTS = Object.freeze({
   relay: 8090,
   caller: 8081,
   responder: 8082,
-  skill_adapter: 8091
+  skill_adapter: 8091,
+  mcp_adapter: 8092
 });
 
 export const DEFAULT_TRANSPORT_TYPE = "local";
@@ -60,7 +61,8 @@ function resolveDefaultPorts() {
     relay: Number(process.env.OPS_PORT_RELAY || DEFAULT_PORTS.relay),
     caller: Number(process.env.OPS_PORT_CALLER || DEFAULT_PORTS.caller),
     responder: Number(process.env.OPS_PORT_RESPONDER || DEFAULT_PORTS.responder),
-    skill_adapter: Number(process.env.OPS_PORT_SKILL_ADAPTER || DEFAULT_PORTS.skill_adapter)
+    skill_adapter: Number(process.env.OPS_PORT_SKILL_ADAPTER || DEFAULT_PORTS.skill_adapter),
+    mcp_adapter: Number(process.env.OPS_PORT_MCP_ADAPTER || DEFAULT_PORTS.mcp_adapter)
   };
 }
 

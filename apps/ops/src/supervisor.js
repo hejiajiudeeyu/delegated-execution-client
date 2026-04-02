@@ -135,6 +135,10 @@ function processBaseUrl(port) {
   return `http://127.0.0.1:${port}`;
 }
 
+function appendPath(baseUrl, pathname) {
+  return new URL(pathname, `${baseUrl}/`).toString();
+}
+
 function parseJsonArrayEnv(value) {
   const normalized = normalizedString(value);
   if (!normalized) {
@@ -1190,6 +1194,15 @@ export function createOpsSupervisorServer() {
         CALLER_CONTROLLER_BASE_URL: processBaseUrl(ports.caller)
       };
     }
+    if (name === "mcp-adapter") {
+      return {
+        ...base,
+        PORT: String(ports.mcp_adapter || 8092),
+        SERVICE_NAME: "caller-skill-mcp-adapter",
+        MCP_ADAPTER_TRANSPORT: "http",
+        CALLER_SKILL_BASE_URL: processBaseUrl(ports.skill_adapter || 8091)
+      };
+    }
     return {
       ...base,
       PORT: String(ports.responder),
@@ -1205,23 +1218,37 @@ export function createOpsSupervisorServer() {
     if (name === "skill-adapter") {
       return require.resolve("@delexec/caller-skill-adapter");
     }
+    if (name === "mcp-adapter") {
+      return path.resolve(__dirname, "../../caller-skill-mcp-adapter/src/server.js");
+    }
     return require.resolve("@delexec/responder-controller");
   }
 
   function buildMcpAdapterSpec() {
     const callerSkillBaseUrl = processBaseUrl(state.config.runtime.ports.skill_adapter || 8091);
     const mcpEntry = path.resolve(__dirname, "../../caller-skill-mcp-adapter/src/server.js");
+    const httpBaseUrl = processBaseUrl(state.config.runtime.ports.mcp_adapter || 8092);
     return {
-      mode: "stdio",
+      mode: "multi_transport",
       available: true,
       recommended_for: ["codex", "cursor", "claude-code"],
-      command: process.execPath,
-      args: [mcpEntry],
-      env: {
-        CALLER_SKILL_BASE_URL: callerSkillBaseUrl
+      preferred_transport: "streamable_http",
+      stdio: {
+        mode: "stdio",
+        command: process.execPath,
+        args: [mcpEntry],
+        env: {
+          CALLER_SKILL_BASE_URL: callerSkillBaseUrl
+        }
+      },
+      streamable_http: {
+        mode: "streamable_http",
+        url: appendPath(httpBaseUrl, "/mcp"),
+        health_url: appendPath(httpBaseUrl, "/healthz")
       },
       entry_file: mcpEntry,
-      caller_skill_base_url: callerSkillBaseUrl
+      caller_skill_base_url: callerSkillBaseUrl,
+      base_url: httpBaseUrl
     };
   }
 
@@ -1262,7 +1289,8 @@ export function createOpsSupervisorServer() {
       caller: ports.caller,
       responder: ports.responder,
       relay: ports.relay,
-      "skill-adapter": ports.skill_adapter || 8091
+      "skill-adapter": ports.skill_adapter || 8091,
+      "mcp-adapter": ports.mcp_adapter || 8092
     };
     // Kill any orphaned process holding the port before starting
     const targetPort = portMap[name];
@@ -1367,6 +1395,8 @@ export function createOpsSupervisorServer() {
     await waitForServiceHealth("caller");
     await ensureService("skill-adapter");
     await waitForServiceHealth("skill-adapter");
+    await ensureService("mcp-adapter");
+    await waitForServiceHealth("mcp-adapter");
     if (state.config.responder.enabled) {
       await ensureService("responder");
       await waitForServiceHealth("responder");
@@ -1508,7 +1538,7 @@ export function createOpsSupervisorServer() {
   }
 
   async function fetchHealth(name) {
-    const portKey = name === "skill-adapter" ? "skill_adapter" : name;
+    const portKey = name === "skill-adapter" ? "skill_adapter" : name === "mcp-adapter" ? "mcp_adapter" : name;
     const port = state.config.runtime.ports[portKey];
     if (name === "relay" && !usesManagedRelay()) {
       const runtimeTransport = getRuntimeTransport(state);
@@ -1583,6 +1613,7 @@ export function createOpsSupervisorServer() {
           relay: getServiceLogFile("relay"),
           caller: getServiceLogFile("caller"),
           skill_adapter: getServiceLogFile("skill-adapter"),
+          mcp_adapter: getServiceLogFile("mcp-adapter"),
           responder: getServiceLogFile("responder")
         }
       },
@@ -1623,7 +1654,11 @@ export function createOpsSupervisorServer() {
           ...getRuntimeStatus("skill-adapter"),
           health: await fetchHealth("skill-adapter")
         },
-        mcp_adapter: buildMcpAdapterSpec(),
+        mcp_adapter: {
+          ...getRuntimeStatus("mcp-adapter"),
+          health: await fetchHealth("mcp-adapter"),
+          spec: buildMcpAdapterSpec()
+        },
         responder: {
           ...getRuntimeStatus("responder"),
           health: state.config.responder.enabled ? await fetchHealth("responder") : null
@@ -2771,8 +2806,8 @@ function buildResponderRegisterHeaders() {
       const serviceRestartMatch = pathname.match(/^\/runtime\/services\/([^/]+)\/restart$/);
       if (method === "POST" && serviceRestartMatch) {
         const name = serviceRestartMatch[1];
-        if (!["caller", "responder", "relay", "skill-adapter"].includes(name)) {
-          sendError(res, 400, "invalid_service", "service must be caller, responder, relay, or skill-adapter");
+        if (!["caller", "responder", "relay", "skill-adapter", "mcp-adapter"].includes(name)) {
+          sendError(res, 400, "invalid_service", "service must be caller, responder, relay, skill-adapter, or mcp-adapter");
           return;
         }
         const existing = runtime.processes.get(name);

@@ -1,4 +1,10 @@
 import crypto from "node:crypto";
+import http from "node:http";
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import * as z from "zod/v4";
 
 const JSON_RPC_VERSION = "2.0";
 const DEFAULT_PROTOCOL_VERSION = "2025-03-26";
@@ -93,6 +99,33 @@ const toolSchemas = {
   }
 };
 
+const toolShapeSchemas = {
+  search_hotlines_brief: {
+    query: z.string().optional(),
+    task_goal: z.string().optional(),
+    task_type: z.string().optional(),
+    limit: z.number().int().positive().optional()
+  },
+  search_hotlines_detailed: {
+    hotline_ids: z.array(z.string())
+  },
+  read_hotline: {
+    hotline_id: z.string()
+  },
+  prepare_request: {
+    hotline_id: z.string(),
+    input: z.record(z.string(), z.unknown()),
+    agent_session_id: z.string().optional()
+  },
+  send_request: {
+    prepared_request_id: z.string(),
+    wait: z.boolean().optional()
+  },
+  report_response: {
+    request_id: z.string()
+  }
+};
+
 function mapActionToToolName(actionName) {
   return `caller_skill.${actionName}`;
 }
@@ -147,6 +180,10 @@ function buildJsonRpcError(id, code, message, data = null) {
       ...(data === null ? {} : { data })
     }
   };
+}
+
+function buildToolInputShape(actionName) {
+  return toolShapeSchemas[actionName] || {};
 }
 
 export function createCallerSkillMcpAdapter(options = {}) {
@@ -286,64 +323,202 @@ export function createCallerSkillMcpAdapter(options = {}) {
   };
 }
 
-function encodeFrame(message) {
-  const payload = Buffer.from(JSON.stringify(message), "utf8");
-  return Buffer.concat([
-    Buffer.from(`Content-Length: ${payload.length}\r\n\r\n`, "utf8"),
-    payload
-  ]);
+export async function createCallerSkillMcpServer(options = {}) {
+  const adapter = options.adapter || createCallerSkillMcpAdapter(options);
+  const manifest = await adapter.getManifest();
+  const server = new McpServer({
+    name: manifest?.skill?.name || "caller-skill",
+    version: manifest?.skill?.version || "0.1.0"
+  });
+
+  for (const action of manifest.actions || []) {
+    const toolName = mapActionToToolName(action.name);
+    server.registerTool(
+      toolName,
+      {
+        description: action.description,
+        inputSchema: buildToolInputShape(action.name)
+      },
+      async (args) => {
+        const result = await adapter.callTool(toolName, args || {});
+        return buildToolResult(result.body, result.isError);
+      }
+    );
+  }
+
+  return {
+    adapter,
+    server,
+    manifest
+  };
 }
 
-function createContentLengthParser(onMessage) {
-  let buffer = Buffer.alloc(0);
-  return (chunk) => {
-    buffer = Buffer.concat([buffer, chunk]);
-    for (;;) {
-      const headerEnd = buffer.indexOf("\r\n\r\n");
-      if (headerEnd === -1) {
+export async function runCallerSkillMcpAdapter(options = {}) {
+  const { adapter, server, manifest } = await createCallerSkillMcpServer(options);
+  const transport = options.transport || new StdioServerTransport(options.stdin, options.stdout);
+  await server.connect(transport);
+  return {
+    adapter,
+    server,
+    transport,
+    manifest
+  };
+}
+
+function parseJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      if (chunks.length === 0) {
+        resolve(undefined);
         return;
       }
-      const headerText = buffer.subarray(0, headerEnd).toString("utf8");
-      const match = headerText.match(/Content-Length:\s*(\d+)/i);
-      if (!match) {
-        throw new Error("mcp_content_length_missing");
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch (error) {
+        reject(error);
       }
-      const contentLength = Number(match[1]);
-      const frameEnd = headerEnd + 4 + contentLength;
-      if (buffer.length < frameEnd) {
-        return;
-      }
-      const payload = buffer.subarray(headerEnd + 4, frameEnd).toString("utf8");
-      buffer = buffer.subarray(frameEnd);
-      onMessage(JSON.parse(payload));
+    });
+    req.on("error", reject);
+  });
+}
+
+function sendJson(res, statusCode, body) {
+  res.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8"
+  });
+  res.end(JSON.stringify(body));
+}
+
+export async function createCallerSkillMcpHttpServer(options = {}) {
+  const adapter = options.adapter || createCallerSkillMcpAdapter(options);
+  const port = Number(options.port || process.env.PORT || process.env.MCP_ADAPTER_PORT || 8092);
+  const host = options.host || process.env.HOST || "127.0.0.1";
+
+  const server = http.createServer(async (req, res) => {
+    const method = req.method || "GET";
+    const url = new URL(req.url || "/", `http://${host}:${port}`);
+
+    if (method === "GET" && url.pathname === "/healthz") {
+      sendJson(res, 200, {
+        ok: true,
+        service: "caller-skill-mcp-adapter",
+        transport: "streamable_http"
+      });
+      return;
+    }
+
+    if (method === "GET" && url.pathname === "/") {
+      sendJson(res, 200, {
+        ok: true,
+        transport: "streamable_http",
+        endpoint: "/mcp"
+      });
+      return;
+    }
+
+    if (url.pathname !== "/mcp") {
+      sendJson(res, 404, {
+        jsonrpc: JSON_RPC_VERSION,
+        error: {
+          code: -32004,
+          message: "Not found"
+        },
+        id: null
+      });
+      return;
+    }
+
+    if (!["GET", "POST", "DELETE"].includes(method)) {
+      sendJson(res, 405, {
+        jsonrpc: JSON_RPC_VERSION,
+        error: {
+          code: -32000,
+          message: "Method not allowed"
+        },
+        id: null
+      });
+      return;
+    }
+
+    try {
+      const { server: mcpServer } = await createCallerSkillMcpServer({
+        ...options,
+        adapter
+      });
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined
+      });
+      await mcpServer.connect(transport);
+      const parsedBody = method === "POST" ? await parseJsonBody(req) : undefined;
+      await transport.handleRequest(req, res, parsedBody);
+      res.on("close", () => {
+        void transport.close();
+        void mcpServer.close();
+      });
+    } catch (error) {
+      console.error(
+        `[caller-skill-mcp-adapter] streamable_http request failed: ${
+          error instanceof Error ? error.stack || error.message : String(error)
+        }`
+      );
+      sendJson(res, 500, {
+        jsonrpc: JSON_RPC_VERSION,
+        error: {
+          code: -32603,
+          message: error instanceof Error ? error.message : "Internal server error"
+        },
+        id: null
+      });
+    }
+  });
+
+  return {
+    adapter,
+    port,
+    host,
+    server,
+    listen() {
+      return new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, host, () => {
+          server.off("error", reject);
+          resolve({
+            baseUrl: `http://${host}:${port}`,
+            mcpUrl: `http://${host}:${port}/mcp`
+          });
+        });
+      });
+    },
+    close() {
+      return new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
     }
   };
 }
 
-export function runCallerSkillMcpAdapter(options = {}) {
-  const stdin = options.stdin || process.stdin;
-  const stdout = options.stdout || process.stdout;
-  const stderr = options.stderr || process.stderr;
-  const adapter = options.adapter || createCallerSkillMcpAdapter(options);
-
-  stdin.resume();
-  stdin.on(
-    "data",
-    createContentLengthParser(async (message) => {
-      try {
-        const response = await adapter.handleRpcRequest(message);
-        if (response) {
-          stdout.write(encodeFrame(response));
-        }
-      } catch (error) {
-        stderr.write(`[caller-skill-mcp-adapter] ${error instanceof Error ? error.message : String(error)}\n`);
-      }
-    })
-  );
-
-  return adapter;
-}
-
 if (import.meta.url === `file://${process.argv[1]}`) {
-  runCallerSkillMcpAdapter();
+  const mode = process.argv[2] || process.env.MCP_ADAPTER_TRANSPORT || "stdio";
+  const run =
+    mode === "http"
+      ? async () => {
+          const app = await createCallerSkillMcpHttpServer();
+          const { mcpUrl } = await app.listen();
+          console.error(`[caller-skill-mcp-adapter] streamable_http listening on ${mcpUrl}`);
+          return app;
+        }
+      : () => runCallerSkillMcpAdapter();
+
+  run().catch((error) => {
+    console.error(`[caller-skill-mcp-adapter] ${error instanceof Error ? error.stack || error.message : String(error)}`);
+    process.exit(1);
+  });
 }

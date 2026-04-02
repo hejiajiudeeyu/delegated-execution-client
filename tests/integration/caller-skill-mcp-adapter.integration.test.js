@@ -1,8 +1,15 @@
 import http from "node:http";
+import process from "node:process";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-import { createCallerSkillMcpAdapter } from "../../apps/caller-skill-mcp-adapter/src/server.js";
+import {
+  createCallerSkillMcpAdapter,
+  createCallerSkillMcpHttpServer
+} from "../../apps/caller-skill-mcp-adapter/src/server.js";
 import { closeServer, jsonRequest, listenServer } from "../helpers/http.js";
 
 function createFakeCallerSkillServer() {
@@ -183,5 +190,98 @@ describe("caller skill mcp adapter integration", () => {
     });
     expect(report.result.isError).toBe(false);
     expect(report.result.structuredContent.status).toBe("SUCCEEDED");
+  });
+
+  it("exposes caller-skill tools over stdio via the official MCP SDK", async () => {
+    skillServer = createFakeCallerSkillServer();
+    const skillBaseUrl = await listenServer(skillServer);
+
+    const client = new Client({
+      name: "caller-skill-mcp-adapter-test-client",
+      version: "0.1.0"
+    });
+
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [
+        "/Users/hejiajiudeeyu/Documents/Projects/delegated-execution-dev/repos/client/apps/caller-skill-mcp-adapter/src/server.js"
+      ],
+      env: {
+        ...process.env,
+        CALLER_SKILL_BASE_URL: skillBaseUrl
+      },
+      stderr: "pipe"
+    });
+
+    const stderrChunks = [];
+    transport.stderr?.on("data", (chunk) => stderrChunks.push(chunk.toString("utf8")));
+
+    try {
+      await client.connect(transport);
+      const listed = await client.listTools();
+      expect(listed.tools.some((tool) => tool.name === "caller_skill.prepare_request")).toBe(true);
+
+      const sent = await client.callTool({
+        name: "caller_skill.send_request",
+        arguments: {
+          prepared_request_id: "prep_mcp_1",
+          wait: true
+        }
+      });
+
+      expect(sent.isError).not.toBe(true);
+      expect(sent.structuredContent.request_id).toBe("req_mcp_1");
+      expect(sent.structuredContent.result_package.status).toBe("ok");
+    } finally {
+      await client.close();
+    }
+
+    expect(stderrChunks.join("")).toBe("");
+  });
+
+  it("exposes caller-skill tools over streamable HTTP via the official MCP SDK", async () => {
+    skillServer = createFakeCallerSkillServer();
+    const skillBaseUrl = await listenServer(skillServer);
+
+    const httpServer = await createCallerSkillMcpHttpServer({
+      baseUrl: skillBaseUrl,
+      port: 0
+    });
+    const server = httpServer.server;
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const port = server.address().port;
+    const mcpUrl = new URL(`http://127.0.0.1:${port}/mcp`);
+
+    const client = new Client({
+      name: "caller-skill-mcp-adapter-http-test-client",
+      version: "0.1.0"
+    });
+    const transport = new StreamableHTTPClientTransport(mcpUrl);
+
+    try {
+      await client.connect(transport);
+      const listed = await client.listTools();
+      expect(listed.tools.some((tool) => tool.name === "caller_skill.read_hotline")).toBe(true);
+
+      const prepared = await client.callTool({
+        name: "caller_skill.prepare_request",
+        arguments: {
+          hotline_id: "local.delegated-execution.workspace-summary.v1",
+          input: {
+            workspace_path: "/tmp/demo",
+            question: "Summarize the repo"
+          }
+        }
+      });
+
+      expect(prepared.isError).not.toBe(true);
+      expect(prepared.structuredContent.prepared_request_id).toBe("prep_mcp_1");
+    } finally {
+      await client.close();
+      await httpServer.close();
+    }
   });
 });
