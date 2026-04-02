@@ -14,6 +14,7 @@ const OPS_ENV_KEYS = [
   "OPS_PORT_RELAY",
   "OPS_PORT_CALLER",
   "OPS_PORT_RESPONDER",
+  "OPS_PORT_SKILL_ADAPTER",
   "OPS_RELAY_BIN",
   "OPS_RELAY_ARGS",
   "PLATFORM_API_BASE_URL",
@@ -105,6 +106,9 @@ describe("ops supervisor integration", () => {
       expect(["embedded_local", "package_entry"]).toContain(currentStatus.body.runtime.relay.launch_mode);
       expect(currentStatus.body.caller.registered).toBe(true);
       expect(currentStatus.body.caller.registration_mode).toBe("local_only");
+      expect(currentStatus.body.runtime.mcp_adapter.mode).toBe("stdio");
+      expect(currentStatus.body.runtime.mcp_adapter.available).toBe(true);
+      expect(currentStatus.body.runtime.mcp_adapter.env.CALLER_SKILL_BASE_URL).toBe("http://127.0.0.1:8091");
 
       const requests = await waitFor(async () => {
         const current = await jsonRequest(supervisorUrl, "/requests");
@@ -114,6 +118,12 @@ describe("ops supervisor integration", () => {
         return current;
       });
       expect(Array.isArray(requests.body.items)).toBe(true);
+
+      const mcpSpec = await jsonRequest(supervisorUrl, "/mcp-adapter/spec");
+      expect(mcpSpec.status).toBe(200);
+      expect(mcpSpec.body.ok).toBe(true);
+      expect(mcpSpec.body.spec.mode).toBe("stdio");
+      expect(mcpSpec.body.spec.env.CALLER_SKILL_BASE_URL).toBe(`http://127.0.0.1:${8091}`);
     } finally {
       await supervisor.stopManagedServices();
       await closeServer(supervisor);
@@ -122,6 +132,7 @@ describe("ops supervisor integration", () => {
       delete process.env.OPS_PORT_RELAY;
       delete process.env.OPS_PORT_CALLER;
       delete process.env.OPS_PORT_RESPONDER;
+      delete process.env.OPS_PORT_SKILL_ADAPTER;
     }
   });
 

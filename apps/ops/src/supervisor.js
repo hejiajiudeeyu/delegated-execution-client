@@ -266,7 +266,13 @@ function isLocalResponderConfigRoute(method, pathname) {
 }
 
 function isProtectedRoute(method, pathname) {
-  if (pathname === "/healthz" || pathname === "/status" || pathname === "/setup" || pathname.startsWith("/auth/session")) {
+  if (
+    pathname === "/healthz" ||
+    pathname === "/status" ||
+    pathname === "/setup" ||
+    pathname === "/mcp-adapter/spec" ||
+    pathname.startsWith("/auth/session")
+  ) {
     return false;
   }
   if (isLocalResponderConfigRoute(method, pathname)) {
@@ -1202,6 +1208,23 @@ export function createOpsSupervisorServer() {
     return require.resolve("@delexec/responder-controller");
   }
 
+  function buildMcpAdapterSpec() {
+    const callerSkillBaseUrl = processBaseUrl(state.config.runtime.ports.skill_adapter || 8091);
+    const mcpEntry = path.resolve(__dirname, "../../caller-skill-mcp-adapter/src/server.js");
+    return {
+      mode: "stdio",
+      available: true,
+      recommended_for: ["codex", "cursor", "claude-code"],
+      command: process.execPath,
+      args: [mcpEntry],
+      env: {
+        CALLER_SKILL_BASE_URL: callerSkillBaseUrl
+      },
+      entry_file: mcpEntry,
+      caller_skill_base_url: callerSkillBaseUrl
+    };
+  }
+
   function serviceLaunchSpec(name) {
     if (name === "relay") {
       return relayLaunchSpec();
@@ -1600,6 +1623,7 @@ export function createOpsSupervisorServer() {
           ...getRuntimeStatus("skill-adapter"),
           health: await fetchHealth("skill-adapter")
         },
+        mcp_adapter: buildMcpAdapterSpec(),
         responder: {
           ...getRuntimeStatus("responder"),
           health: state.config.responder.enabled ? await fetchHealth("responder") : null
@@ -2733,6 +2757,13 @@ function buildResponderRegisterHeaders() {
             caller: readServiceLogTail("caller", { maxLines: 50 }),
             responder: readServiceLogTail("responder", { maxLines: 50 })
           }
+        });
+        return;
+      }
+      if (method === "GET" && pathname === "/mcp-adapter/spec") {
+        sendJson(res, 200, {
+          ok: true,
+          spec: buildMcpAdapterSpec()
         });
         return;
       }

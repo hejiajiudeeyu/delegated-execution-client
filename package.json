@@ -11,6 +11,7 @@
   "scripts": {
     "ops": "node apps/ops/src/cli.js",
     "ops:start": "node apps/ops/src/cli.js start",
+    "caller-skill:mcp": "node apps/caller-skill-mcp-adapter/src/server.js",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run --config tests/config/vitest.unit.config.mjs",
     "test:integration": "vitest run --config tests/config/vitest.integration.config.mjs",

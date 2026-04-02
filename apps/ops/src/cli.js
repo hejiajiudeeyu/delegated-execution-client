@@ -40,6 +40,7 @@ function usage() {
   delexec-ops status
   delexec-ops bootstrap [--email <email>] [--platform <url>] [--text <text>] [--open-ui] [--ui-port <port>] [--ui-host <host>] [--no-browser]
   delexec-ops ui start [--host <host>] [--port <port>] [--open] [--no-browser]
+  delexec-ops mcp spec
   delexec-ops auth register --email <email> [--local] [--platform <url>]
   delexec-ops enable-responder [--responder-id <id>] [--display-name <name>]
   delexec-ops add-hotline --type <process|http> --hotline-id <id> [options]
@@ -652,6 +653,12 @@ async function commandStatus() {
       config: state.config
     });
   }
+}
+
+async function commandMcpSpec() {
+  const state = ensureOpsState();
+  const response = await requestJson(supervisorUrlFromState(state), "/mcp-adapter/spec");
+  emit(response.body);
 }
 
 async function commandAuthRegister(args) {
@@ -1379,6 +1386,10 @@ async function main() {
   }
   if (group === "ui" && command === "start") {
     await commandUiStart(args);
+    return;
+  }
+  if (group === "mcp" && command === "spec") {
+    await commandMcpSpec();
     return;
   }
   if (group === "enable-responder") {

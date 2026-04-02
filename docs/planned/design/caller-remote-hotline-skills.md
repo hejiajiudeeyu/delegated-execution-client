@@ -1,301 +1,563 @@
-# Caller 注册与 Remote Hotline Skills 接入说明
+# Caller Skill Design
 
-状态：Implemented baseline  
-更新时间：2026-03-13
+Status: Planned
+Updated: 2026-04-01
 
-本文档回答两个问题：
+This document defines the next-step `caller-skill` design for agent access to hotline capabilities in `client`.
 
-1. Caller 如何注册并获得调用 Remote Hotline 的权限。
-2. Caller 侧如何把协议链路封装成 Agent 可一句话调用的 `remote hotline skill`。
+This is a caller-side design. It is not a responder runtime design, and it is not the end-user `ops` product flow. It describes the agent-facing bridge that sits above `caller-controller`.
 
-本文档面向 Caller 侧宿主实现，不面向 Responder 侧运行时。
-本文描述的是 Caller Controller / skill adapter 的较底层接入面，不是终端用户通过统一 `ops` 客户端使用系统的主路径。
+Current scope:
 
-## 1. 目标结论
+- local mode only
+- no platform vendor selection yet
+- no protocol field changes
 
-Caller 不应让宿主 Agent 直接学习 `register -> catalog -> prepare -> dispatch -> sync-events -> pull-result` 这整套协议步骤。
+## 1. Goal
 
-正确分层应是：
+The agent should not learn the low-level caller protocol flow:
 
-1. `Platform API` 负责 Caller 注册、目录、token、delivery-meta、事件。
-2. `Caller Controller` 负责本地请求状态、超时、验签、结果接收。
-3. `Caller Skill Adapter` 负责把上述多步协议封装成一个 Agent 可直接调用的 skill。
+- search catalog
+- inspect contract
+- create request
+- prepare
+- dispatch
+- poll
+- read result
 
-对 Agent 来说，最理想的体验应是：
+Instead, the agent should use a single caller-facing skill surface with progressive disclosure.
 
-- 用户一句话提出需求。
-- 宿主 Agent 调用一个 `remote-hotline` skill。
-- skill adapter 内部完成 Caller Controller 编排。
-- Agent 只拿到结构化结果或结构化错误，不暴露 token、ACK、投递地址等协议细节。
+The intended layering is:
 
-## 2. Caller 注册
+1. `caller-controller` remains the request lifecycle truth layer.
+2. `caller-skill-adapter` remains the agent bridge.
+3. `caller-skill` becomes the formal agent-facing interface.
 
-### 2.1 最小注册步骤
+## 2. Design Principles
 
-1. 调用 `POST /v1/users/register`
-2. 保存返回的：
-   - `user_id`
-   - `api_key`
-   - `role_scopes`（默认应包含 `caller`）
-3. 在 Caller 侧保存该 API key，后续用于：
-   - 拉目录
-   - 申请 task token
-   - 获取 delivery-meta
-   - 拉取 ACK events
-   - 上报 Caller metrics
+### 2.1 Progressive disclosure
 
-### 2.2 当前仓库中的真实接入点
+The agent should not read long catalogs or full hotline contracts too early.
 
-当前参考实现里，Caller 最稳妥的接入方式不是让宿主 Agent 直接打 Platform API，而是：
+The flow should progressively disclose information:
 
-1. 启动 [apps/caller-controller/src/server.js](/Users/hejiajiudeeyu/Documents/Projects/remote-hotline-protocol/apps/caller-controller/src/server.js)
-2. 在调用 Caller Controller 时通过 `x-platform-api-key` 传入 Caller 的平台 API key
-3. 由 Caller Controller 代为完成与 Platform 的控制面交互
+1. broad search
+2. narrow comparison
+3. full contract read
+4. request preparation
+5. send
+6. result report
 
-Caller Controller 当前已经暴露的关键接口见 [packages/caller-controller-core/src/index.js](/Users/hejiajiudeeyu/Documents/Projects/remote-hotline-protocol/packages/caller-controller-core/src/index.js)：
+### 2.2 Search and read are flexible
 
-- `GET /controller/hotlines`
-- `POST /controller/requests`
-- `POST /controller/requests/{request_id}/prepare`
-- `POST /controller/requests/{request_id}/contract-draft`
-- `POST /controller/requests/{request_id}/dispatch`
-- `POST /controller/requests/{request_id}/sync-events`
-- `POST /controller/inbox/pull`
-- `GET /controller/requests/{request_id}`
+The search and read phase is intentionally not a single rigid sequence.
 
-## 3. 推荐的 Caller Skill Adapter 分层
+The agent may:
 
-Caller 侧面向 Agent 的接入层，推荐拆成一个独立的 `skill adapter`，不要把 Agent 直接绑到 Caller Controller 的多步 HTTP 接口上。
+- do one brief search, then one detailed search
+- do multiple brief searches before narrowing
+- read one hotline, then go back to search
+- read several hotlines before deciding
 
-推荐分层如下：
+If the agent is not satisfied after reading a hotline, it should explicitly be allowed to go back to:
 
-```text
-User sentence
-  -> Host Agent
-  -> Caller Skill Adapter
-  -> Caller Controller
-  -> Platform API
-  -> Remote Hotline Runtime
-  -> Caller Controller
-  -> Caller Skill Adapter
-  -> Host Agent
-```
+- `search_hotlines_brief`
+- `search_hotlines_detailed`
 
-原因很直接：
+### 2.3 Request execution is strict
 
-- 宿主 Agent 不适合负责 `request_id`、超时、ACK 轮询、验签。
-- 这些都是确定性控制逻辑，应由代码执行，而不是交给模型反复规划。
-- Skill Adapter 可以把协议能力压缩成“一个 skill 调用 + 一个结构化结果”。
+Once the agent decides to actually send work, the flow must become strict:
 
-## 4. 推荐的一句话接入模型
+1. `read_hotline`
+2. `prepare_request`
+3. `send_request`
+4. `report_response`
 
-### 4.1 面向 Agent 的 skill 语义
+The agent must not bypass `prepare_request`.
 
-对宿主 Agent 暴露时，推荐只暴露一个通用 skill：
+### 2.4 The adapter owns polling
 
-- `remote-hotline`
+The adapter, not the model, should own request polling by default.
 
-其核心输入建议为：
+For normal local-mode calls:
 
-```json
-{
-  "hotlineId": "foxlab.text.classifier.v1",
-  "taskType": "classification",
-  "input": {
-    "text": "Customer asks for refund after duplicate charge."
-  },
-  "constraints": {
-    "softTimeoutS": 90,
-    "hardTimeoutS": 300
-  }
-}
-```
+- `send_request` sends the prepared request
+- the adapter polls until terminal state
+- the adapter returns a terminal response to the agent
 
-其输出建议为：
+This keeps protocol control logic out of the model.
+
+## 3. Caller Skill Surface
+
+The first complete surface should expose six actions:
+
+1. `search_hotlines_brief`
+2. `search_hotlines_detailed`
+3. `read_hotline`
+4. `prepare_request`
+5. `send_request`
+6. `report_response`
+
+## 4. Interface Definitions
+
+## 4.1 `search_hotlines_brief`
+
+Purpose:
+
+- fuzzy narrowing from a large hotline space into a short candidate list
+
+Input:
 
 ```json
 {
-  "requestId": "req_xxx",
-  "status": "SUCCEEDED",
-  "result": {
-    "summary": "Task completed"
-  },
-  "resultPackage": {},
-  "responder": {
-    "responderId": "responder_foxlab",
-    "hotlineId": "foxlab.text.classifier.v1"
-  }
+  "query": "summarize workspace repository",
+  "task_goal": "find a local hotline that can summarize a workspace",
+  "task_type": "text_summarize",
+  "limit": 8
 }
 ```
 
-如果失败，则返回结构化错误：
-
-```json
-{
-  "requestId": "req_xxx",
-  "status": "FAILED",
-  "error": {
-    "code": "AUTH_TOKEN_EXPIRED",
-    "message": "Task token expired"
-  }
-}
-```
-
-### 4.2 宿主 Agent 的一句话使用方式
-
-宿主 Agent 不需要知道 Caller Controller 的中间步骤。对用户侧应允许这种一句话使用方式：
-
-- “调用 `foxlab.text.classifier.v1`，把这段文本做分类，返回 JSON。”
-- “用 `owlworks.data.extractor.v1` 从这段文档里抽取字段。”
-- “把这条工单交给远程分类 skill 处理，只保留结构化结果。”
-
-### 4.3 Skill Adapter 内部应做的事
-
-Skill Adapter 收到一次 `invoke` 后，内部应按固定代码路径完成：
-
-1. 根据 `hotlineId` 读取或刷新 catalog
-2. 创建 `request_id`
-3. 调用 Caller Controller 创建 request
-4. 调用 `prepare`
-5. 可选生成 `contract-draft`
-6. 调用 `dispatch`
-7. 轮询或等待：
-   - `sync-events`
-   - `caller inbox pull`
-   - `GET /controller/requests/{request_id}`
-8. 直到进入终态：
-   - `SUCCEEDED`
-   - `FAILED`
-   - `UNVERIFIED`
-   - `TIMED_OUT`
-9. 将终态映射成 skill 返回值
-
-注意：
-
-- `Responder Pull Inbox` 只属于当前 `L0 local transport` 联调路径，不属于 Caller Skill Adapter 的公开语义。
-- 在真实远程部署里，Responder 应自行运行并消费自身 inbox；Caller 不应操心 Responder 的 pull 步骤。
-
-## 5. Skill Adapter 的最小接口
-
-当前仓库已经内置首版 Caller Skill Adapter：
-
-- [apps/caller-skill-adapter/src/server.js](/Users/hejiajiudeeyu/Documents/Projects/remote-hotline-protocol/apps/caller-skill-adapter/src/server.js)
-
-当前实现仍保持最小化：
-
-- 只暴露一个 skill：`remote-hotline`
-- `invoke` 第一版要求显式传 `hotlineId`
-- 内部复用 Caller Controller 现有 catalog / remote-request / request lookup 能力
-
-### 5.1 `GET /skills/remote-hotline/catalog`
-
-用途：
-
-- 给宿主 Agent 或管理 UI 展示可用的 remote hotline 列表
-
-返回建议：
+Output:
 
 ```json
 {
   "items": [
     {
-      "hotlineId": "foxlab.text.classifier.v1",
-      "responderId": "responder_foxlab",
-      "taskTypes": ["classification"],
-      "status": "active"
+      "hotline_id": "local.delegated-execution.workspace-summary.v1",
+      "display_name": "Workspace Summary",
+      "short_description": "Summarize a local workspace repository",
+      "task_types": ["text_summarize"],
+      "source": "local",
+      "match_reason": "matches workspace + summarize",
+      "score": 0.94
     }
   ]
 }
 ```
 
-### 5.2 `POST /skills/remote-hotline/invoke`
+Notes:
 
-用途：
+- return cards, not full contracts
+- optimized for low context cost
 
-- 一次性执行 Caller 编排并返回终态结果
+## 4.2 `search_hotlines_detailed`
 
-请求体建议：
+Purpose:
+
+- compare a small candidate set in more detail before selection
+
+Input:
 
 ```json
 {
-  "hotlineId": "foxlab.text.classifier.v1",
-  "taskType": "classification",
-  "input": {
-    "text": "Customer asks for refund after duplicate charge."
+  "hotline_ids": [
+    "local.delegated-execution.workspace-summary.v1"
+  ]
+}
+```
+
+Output:
+
+```json
+{
+  "items": [
+    {
+      "hotline_id": "local.delegated-execution.workspace-summary.v1",
+      "display_name": "Workspace Summary",
+      "description": "Summarize a workspace using local runtime",
+      "input_summary": "Provide the workspace path and question",
+      "output_summary": "Returns a structured summary result",
+      "task_types": ["text_summarize"],
+      "draft_ready": true,
+      "local_only": true,
+      "review_status": "local_only"
+    }
+  ]
+}
+```
+
+Notes:
+
+- this is still selection support, not full request preparation
+- the agent may return to brief search after this step
+
+## 4.3 `read_hotline`
+
+Purpose:
+
+- read the selected hotline contract and caller-facing template
+
+Input:
+
+```json
+{
+  "hotline_id": "local.delegated-execution.workspace-summary.v1"
+}
+```
+
+Output:
+
+```json
+{
+  "hotline_id": "local.delegated-execution.workspace-summary.v1",
+  "display_name": "Workspace Summary",
+  "input_summary": "Provide workspace_path and question",
+  "output_summary": "Returns structured summary output",
+  "input_schema": {
+    "type": "object",
+    "required": ["workspace_path", "question"],
+    "properties": {
+      "workspace_path": {
+        "type": "string",
+        "description": "Absolute path to the workspace to inspect"
+      },
+      "question": {
+        "type": "string",
+        "description": "What the hotline should summarize or answer"
+      }
+    }
   },
-  "constraints": {
-    "softTimeoutS": 90,
-    "hardTimeoutS": 300
+  "output_schema": {
+    "type": "object"
   }
 }
 ```
 
-### 5.3 `GET /skills/remote-hotline/requests/{requestId}`
+Notes:
 
-用途：
+- this is the point where the agent enters the fill/preparation stage
+- if the agent decides the hotline is not suitable, it may go back to step 1 or 2
 
-- 面向长任务或需要异步拉取结果的宿主
+## 4.4 `prepare_request`
 
-返回建议：
+Purpose:
 
-- `status`
-- `result`
-- `error`
-- `timeline`
-- `resultPackage`
+- validate and normalize candidate input against the hotline template before sending
 
-## 6. 设计边界
+This step is mandatory.
 
-### 6.1 不要让 Agent 自己做协议编排
+Input:
 
-不要把以下职责直接交给宿主 Agent：
+```json
+{
+  "hotline_id": "local.delegated-execution.workspace-summary.v1",
+  "input": {
+    "workspace_path": "/tmp/demo",
+    "question": "Summarize the repo structure"
+  },
+  "agent_session_id": "agent_123"
+}
+```
 
-- 生成和复用 `request_id`
-- 判断何时 `prepare`
-- 判断何时 `sync-events`
-- ACK deadline 和 hard timeout 决策
-- 结果签名校验
-- schema 校验
-- 结果终态归类
+Output when invalid:
 
-这些都应由 Caller Controller 或 Caller Skill Adapter 的确定性代码负责。
+```json
+{
+  "prepared_request_id": "prep_123",
+  "hotline_id": "local.delegated-execution.workspace-summary.v1",
+  "status": "draft",
+  "normalized_input": {
+    "workspace_path": "/tmp/demo"
+  },
+  "errors": [
+    {
+      "field": "question",
+      "code": "REQUIRED_FIELD_MISSING",
+      "message": "question is required"
+    }
+  ],
+  "warnings": [],
+  "review": {
+    "required": false,
+    "status": "not_required"
+  },
+  "expires_at": "2026-04-02T12:00:00Z"
+}
+```
 
-### 6.2 不要把 Responder 语义暴露给普通 Caller 用户
+Output when valid:
 
-Caller 用户需要知道的是：
+```json
+{
+  "prepared_request_id": "prep_123",
+  "hotline_id": "local.delegated-execution.workspace-summary.v1",
+  "status": "ready",
+  "normalized_input": {
+    "workspace_path": "/tmp/demo",
+    "question": "Summarize the repo structure"
+  },
+  "errors": [],
+  "warnings": [],
+  "review": {
+    "required": false,
+    "status": "not_required"
+  },
+  "expires_at": "2026-04-02T12:00:00Z"
+}
+```
 
-- 我能调用哪些 remote skills
-- 每个 skill 的输入是什么
-- 返回结果是什么
+Validation responsibilities:
 
-Caller 用户通常不需要直接感知：
+- required field missing
+- unexpected field
+- wrong type
+- enum mismatch
+- malformed string/format
+- obvious empty value
+- length/range violation
 
-- responder API key
-- delivery address
-- token introspect
-- ACK event 轮询细节
+Future extension point:
 
-### 6.3 不要把一个 remote hotline 直接等同为一个宿主“内部 tool”
+- call review / approval checks should hook into `prepare_request`
 
-Remote hotline 是跨信任边界的协议调用，不是宿主本地函数。对宿主 Agent 来说，它更像：
+## 4.5 `send_request`
 
-- 一个需要远程授权、远程投递、远程验签的 external skill
+Purpose:
 
-因此 skill adapter 需要保留：
+- send a request that has already passed preparation
 
-- `requestId`
-- `responderId`
-- `hotlineId`
-- `resultPackage`
+`send_request` should directly reuse the prepared content and should not accept raw user input.
 
-这些审计与验收信息。
+Input:
 
-## 7. 对 OpenClaw 的适配原则
+```json
+{
+  "prepared_request_id": "prep_123",
+  "wait": true
+}
+```
 
-OpenClaw 适配的详细说明见 [OpenClaw 适配指南](openclaw-adapter.md)。
+Output when `wait=true`:
 
-这里先冻结三个结论：
+```json
+{
+  "request_id": "req_123",
+  "hotline_id": "local.delegated-execution.workspace-summary.v1",
+  "status": "SUCCEEDED",
+  "result": {
+    "summary": "..."
+  },
+  "result_package": {
+    "status": "ok",
+    "output": {
+      "summary": "..."
+    }
+  },
+  "error": null
+}
+```
 
-1. OpenClaw 不应直接学习 Caller Controller 的多步 HTTP 调用。
-2. OpenClaw 最适合接一个 Caller 侧的 `remote-hotline skill adapter`。
-3. OpenClaw 里推荐先暴露一个通用 skill：`remote-hotline`，而不是一上来为每个 hotline 暴露一堆分散 skill 名称。
+Output when `wait=false`:
+
+```json
+{
+  "request_id": "req_123",
+  "hotline_id": "local.delegated-execution.workspace-summary.v1",
+  "status": "PENDING"
+}
+```
+
+Rules:
+
+- only `status=ready` prepared requests may be sent
+- the adapter reuses the stored normalized input
+- the adapter marks the prepared request as `sent`
+
+## 4.6 `report_response`
+
+Purpose:
+
+- read and normalize terminal request state for agent consumption
+
+Input:
+
+```json
+{
+  "request_id": "req_123"
+}
+```
+
+Output:
+
+```json
+{
+  "request_id": "req_123",
+  "status": "SUCCEEDED",
+  "result": {
+    "summary": "..."
+  },
+  "result_package": {
+    "status": "ok",
+    "output": {
+      "summary": "..."
+    }
+  },
+  "error": null,
+  "human_summary": "Workspace summary completed successfully"
+}
+```
+
+Notes:
+
+- if `send_request(wait=true)` already returned a terminal result, `report_response` may be implemented as an internal step
+- if `wait=false`, `report_response` becomes the explicit follow-up action
+
+## 5. Prepared Request Persistence
+
+`prepare_request` should persist a short-lived local object called `prepared_request`.
+
+This is not a protocol truth layer. It is local caller-skill state.
+
+Recommended storage:
+
+- `DELEXEC_HOME/prepared-requests/`
+
+Recommended file form:
+
+- one file per prepared request
+- example:
+  - `DELEXEC_HOME/prepared-requests/prep_123.json`
+
+## 5.1 State Model
+
+Allowed states:
+
+- `draft`
+- `ready`
+- `sent`
+- `expired`
+- `invalidated`
+
+Meaning:
+
+- `draft`: parsed but not valid for send
+- `ready`: validated and sendable
+- `sent`: already bound to a real `request_id`
+- `expired`: TTL expired
+- `invalidated`: replaced by a newer prepared version
+
+## 5.2 Suggested Record Shape
+
+```json
+{
+  "prepared_request_id": "prep_123",
+  "hotline_id": "local.delegated-execution.workspace-summary.v1",
+  "status": "ready",
+  "normalized_input": {},
+  "errors": [],
+  "warnings": [],
+  "review": {
+    "required": false,
+    "status": "not_required"
+  },
+  "request_id": null,
+  "created_at": "2026-04-01T12:00:00Z",
+  "updated_at": "2026-04-01T12:00:00Z",
+  "expires_at": "2026-04-02T12:00:00Z",
+  "source_agent_session_id": "agent_123"
+}
+```
+
+## 5.3 Cleanup Rules
+
+Suggested cleanup strategy:
+
+1. TTL expiration
+   - `draft` and `ready` expire after a short TTL
+2. send invalidation
+   - once sent, the record becomes `sent`
+3. replacement invalidation
+   - newer prepare results for the same work may invalidate older pending ones
+4. periodic GC
+   - delete old `sent`, `expired`, and `invalidated` records after retention
+
+## 6. Orchestration Rules
+
+Search and read phases do not require a single fixed order.
+
+Allowed patterns:
+
+- brief search -> detailed search -> read
+- brief search -> read -> back to brief search
+- brief search -> detailed search -> read -> back to detailed search
+
+But request execution is mandatory and linear:
+
+1. `read_hotline`
+2. `prepare_request`
+3. `send_request`
+4. `report_response`
+
+The agent must not send directly from search results.
+
+## 7. Polling Policy
+
+Default policy:
+
+- the adapter polls
+- the agent does not poll
+
+Reason:
+
+- polling is deterministic control logic
+- it should not consume model context
+- it keeps the agent focused on task-level reasoning
+
+Terminal states:
+
+- `SUCCEEDED`
+- `FAILED`
+- `UNVERIFIED`
+- `TIMED_OUT`
+
+## 8. Local Mode vs Platform Mode
+
+This design is for local mode only.
+
+Local mode selection focuses on:
+
+- capability fit
+- contract fit
+- local availability
+
+Platform mode should later expand the detailed search/read phase with vendor selection factors:
+
+- responder quality
+- hotline operational performance
+- success rate
+- latency
+- specialization
+- review status
+- service quality / SLA
+
+That is out of scope for this document.
+
+## 9. Mapping to Existing Implementation
+
+The intended implementation base is still:
+
+- [apps/caller-skill-adapter/src/server.js](/Users/hejiajiudeeyu/Documents/Projects/delegated-execution-dev/repos/client/apps/caller-skill-adapter/src/server.js)
+- [packages/caller-controller-core/src/index.js](/Users/hejiajiudeeyu/Documents/Projects/delegated-execution-dev/repos/client/packages/caller-controller-core/src/index.js)
+
+Existing endpoints that can be reused:
+
+- `GET /skills/remote-hotline/catalog`
+- `POST /skills/remote-hotline/invoke`
+- `GET /skills/remote-hotline/requests/:requestId`
+
+Recommended next change:
+
+- refactor the existing `remote-hotline` surface into the six progressive-disclosure actions defined here
+
+## 10. Acceptance Criteria
+
+The caller-skill layer is only considered complete for local mode when:
+
+1. an agent can narrow hotline candidates with low context cost
+2. an agent can compare a small set in more detail
+3. an agent can read the selected hotline contract
+4. an agent can prepare and validate request input
+5. an agent can send only prepared input
+6. the adapter can poll to terminal state automatically
+7. the agent can consume the returned result and continue work
+8. the full chain works without platform
