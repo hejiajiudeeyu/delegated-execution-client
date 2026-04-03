@@ -1,5 +1,7 @@
 import http from "node:http";
 import process from "node:process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -11,6 +13,10 @@ import {
   createCallerSkillMcpHttpServer
 } from "../../apps/caller-skill-mcp-adapter/src/server.js";
 import { closeServer, jsonRequest, listenServer } from "../helpers/http.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const MCP_ADAPTER_ENTRY = path.resolve(__dirname, "../../apps/caller-skill-mcp-adapter/src/server.js");
 
 function createFakeCallerSkillServer() {
   return http.createServer(async (req, res) => {
@@ -203,9 +209,7 @@ describe("caller skill mcp adapter integration", () => {
 
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [
-        "/Users/hejiajiudeeyu/Documents/Projects/delegated-execution-dev/repos/client/apps/caller-skill-mcp-adapter/src/server.js"
-      ],
+      args: [MCP_ADAPTER_ENTRY],
       env: {
         ...process.env,
         CALLER_SKILL_BASE_URL: skillBaseUrl
