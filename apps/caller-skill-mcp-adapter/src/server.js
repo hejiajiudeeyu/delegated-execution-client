@@ -127,14 +127,17 @@ const toolShapeSchemas = {
 };
 
 function mapActionToToolName(actionName) {
-  return `caller_skill.${actionName}`;
+  return `caller_skill_${actionName}`;
 }
 
 function parseToolName(toolName) {
-  if (!toolName.startsWith("caller_skill.")) {
-    return null;
+  if (toolName.startsWith("caller_skill.")) {
+    return toolName.slice("caller_skill.".length);
   }
-  return toolName.slice("caller_skill.".length);
+  if (toolName.startsWith("caller_skill_")) {
+    return toolName.slice("caller_skill_".length);
+  }
+  return null;
 }
 
 function buildToolDefinitions(manifest) {

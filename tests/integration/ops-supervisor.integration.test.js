@@ -148,6 +148,104 @@ describe("ops supervisor integration", () => {
     }
   });
 
+  it("prefers local hotline catalog after switching caller registration from platform to local_only", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-local-catalog-"));
+    cleanupDirs.push(opsHome);
+    const [supervisorPort, relayPort, callerPort, responderPort, skillAdapterPort, mcpAdapterPort] = await reserveFreePorts(6);
+    process.env.OPS_PORT_SUPERVISOR = String(supervisorPort);
+    process.env.OPS_PORT_RELAY = String(relayPort);
+    process.env.OPS_PORT_CALLER = String(callerPort);
+    process.env.OPS_PORT_RESPONDER = String(responderPort);
+    process.env.OPS_PORT_SKILL_ADAPTER = String(skillAdapterPort);
+    process.env.OPS_PORT_MCP_ADAPTER = String(mcpAdapterPort);
+    process.env.DELEXEC_HOME = opsHome;
+
+    const platformState = createPlatformState();
+    const platformServer = createPlatformServer({ serviceName: "platform-local-catalog-test", state: platformState });
+    const platformUrl = await listenServer(platformServer);
+    process.env.PLATFORM_API_BASE_URL = platformUrl;
+
+    const supervisor = createOpsSupervisorServer();
+    supervisor.listen(0, "127.0.0.1");
+    await new Promise((resolve) => supervisor.once("listening", resolve));
+    const supervisorUrl = `http://127.0.0.1:${supervisor.address().port}`;
+    await jsonRequest(supervisorUrl, "/setup", { method: "POST", body: {} });
+    await supervisor.startManagedServices();
+
+    try {
+      await waitFor(async () => {
+        const status = await jsonRequest(supervisorUrl, "/status");
+        if (!status.body?.runtime?.skill_adapter?.running || status.body.runtime.skill_adapter.health?.status !== 200) {
+          throw new Error("skill_adapter_not_ready");
+        }
+        return status;
+      });
+
+      const platformRegistered = await jsonRequest(supervisorUrl, "/auth/register-caller", {
+        method: "POST",
+        body: { contact_email: "ops-local-catalog@test.local", mode: "platform" }
+      });
+      expect(platformRegistered.status).toBe(201);
+
+      const localRegistered = await jsonRequest(supervisorUrl, "/auth/register-caller", {
+        method: "POST",
+        body: { contact_email: "ops-local-catalog@test.local", mode: "local_only" }
+      });
+      expect(localRegistered.status).toBe(201);
+      expect(localRegistered.body.mode).toBe("local_only");
+
+      const enabled = await jsonRequest(supervisorUrl, "/responder/enable", {
+        method: "POST",
+        body: { responder_id: "responder_local_catalog" }
+      });
+      expect(enabled.status).toBe(200);
+
+      const example = await jsonRequest(supervisorUrl, "/responder/hotlines/example", {
+        method: "POST",
+        body: {}
+      });
+      expect(example.status).toBe(201);
+
+      await supervisor.stopManagedServices();
+      await supervisor.startManagedServices();
+
+      await waitFor(async () => {
+        const status = await jsonRequest(supervisorUrl, "/status");
+        if (status.body.runtime.caller.health?.status !== 200 || status.body.runtime.skill_adapter.health?.status !== 200) {
+          throw new Error("runtime_not_ready_after_switch");
+        }
+        if (status.body.caller.registration_mode !== "local_only") {
+          throw new Error("caller_not_local_only");
+        }
+        return status;
+      });
+
+      const search = await jsonRequest(`http://127.0.0.1:${skillAdapterPort}`, "/skills/caller/search-hotlines-brief", {
+        method: "POST",
+        body: {
+          query: "workspace summary",
+          limit: 5
+        }
+      });
+      expect(search.status).toBe(200);
+      expect(search.body.items.some((item) => item.hotline_id === "local.delegated-execution.workspace-summary.v1")).toBe(
+        true
+      );
+    } finally {
+      await supervisor.stopManagedServices();
+      await closeServer(supervisor);
+      await closeServer(platformServer);
+      delete process.env.DELEXEC_HOME;
+      delete process.env.PLATFORM_API_BASE_URL;
+      delete process.env.OPS_PORT_SUPERVISOR;
+      delete process.env.OPS_PORT_RELAY;
+      delete process.env.OPS_PORT_CALLER;
+      delete process.env.OPS_PORT_RESPONDER;
+      delete process.env.OPS_PORT_SKILL_ADAPTER;
+      delete process.env.OPS_PORT_MCP_ADAPTER;
+    }
+  });
+
   it("starts relay from an external command instead of a direct package entry", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-external-relay-"));
     cleanupDirs.push(opsHome);

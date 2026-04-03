@@ -151,16 +151,16 @@ describe("caller skill mcp adapter integration", () => {
 
     const tools = await adapter.listTools();
     expect(tools).toHaveLength(6);
-    expect(tools[0].name).toBe("caller_skill.search_hotlines_brief");
+    expect(tools[0].name).toBe("caller_skill_search_hotlines_brief");
 
-    const brief = await adapter.callTool("caller_skill.search_hotlines_brief", {
+    const brief = await adapter.callTool("caller_skill_search_hotlines_brief", {
       query: "workspace summarize",
       limit: 5
     });
     expect(brief.isError).toBe(false);
     expect(brief.body.items[0].hotline_id).toBe("local.delegated-execution.workspace-summary.v1");
 
-    const prepared = await adapter.callTool("caller_skill.prepare_request", {
+    const prepared = await adapter.callTool("caller_skill_prepare_request", {
       hotline_id: "local.delegated-execution.workspace-summary.v1",
       input: {
         workspace_path: "/tmp/demo",
@@ -170,7 +170,7 @@ describe("caller skill mcp adapter integration", () => {
     expect(prepared.body.prepared_request_id).toBe("prep_mcp_1");
     expect(prepared.body.agent_session_id).toBe(adapter.adapterSessionId);
 
-    const sent = await adapter.callTool("caller_skill.send_request", {
+    const sent = await adapter.callTool("caller_skill_send_request", {
       prepared_request_id: "prep_mcp_1",
       wait: true
     });
@@ -182,7 +182,7 @@ describe("caller skill mcp adapter integration", () => {
       id: 7,
       method: "tools/call",
       params: {
-        name: "caller_skill.report_response",
+        name: "caller_skill_report_response",
         arguments: {
           request_id: "req_mcp_1"
         }
@@ -219,10 +219,10 @@ describe("caller skill mcp adapter integration", () => {
     try {
       await client.connect(transport);
       const listed = await client.listTools();
-      expect(listed.tools.some((tool) => tool.name === "caller_skill.prepare_request")).toBe(true);
+      expect(listed.tools.some((tool) => tool.name === "caller_skill_prepare_request")).toBe(true);
 
       const sent = await client.callTool({
-        name: "caller_skill.send_request",
+        name: "caller_skill_send_request",
         arguments: {
           prepared_request_id: "prep_mcp_1",
           wait: true
@@ -264,10 +264,10 @@ describe("caller skill mcp adapter integration", () => {
     try {
       await client.connect(transport);
       const listed = await client.listTools();
-      expect(listed.tools.some((tool) => tool.name === "caller_skill.read_hotline")).toBe(true);
+      expect(listed.tools.some((tool) => tool.name === "caller_skill_read_hotline")).toBe(true);
 
       const prepared = await client.callTool({
-        name: "caller_skill.prepare_request",
+        name: "caller_skill_prepare_request",
         arguments: {
           hotline_id: "local.delegated-execution.workspace-summary.v1",
           input: {

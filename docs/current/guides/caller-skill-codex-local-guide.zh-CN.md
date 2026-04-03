@@ -5,6 +5,10 @@
 
 本文档说明如何在本地模式下，通过 MCP adapter 把 Codex 接到 `caller-skill`。
 
+Codex 默认应优先使用 `streamable_http`。
+
+`stdio` 仅保留为本地调试兜底路径。
+
 ## 1. 目标
 
 完成后，Codex 应能看到并调用这些 MCP tools：
@@ -37,7 +41,49 @@ curl http://127.0.0.1:8091/healthz
 curl http://127.0.0.1:8091/skills/caller/manifest
 ```
 
-## 3. 启动 MCP adapter
+## 3. 启动本地 runtime
+
+在仓库根目录执行：
+
+```bash
+npm run ops -- start
+```
+
+然后读取 MCP 注册信息：
+
+```bash
+delexec-ops mcp spec
+```
+
+预期重点字段：
+
+- `preferred_transport = streamable_http`
+- `streamable_http.url`
+- `streamable_http.health_url`
+
+可先验证：
+
+```bash
+curl http://127.0.0.1:8092/healthz
+```
+
+## 4. 在 Codex 里注册
+
+注册前，先移除旧的 `caller_skill` stdio 配置：
+
+```bash
+codex mcp remove caller_skill
+```
+
+然后用 `streamable_http` URL 注册：
+
+```bash
+codex mcp add caller_skill --url http://127.0.0.1:8092/mcp
+```
+
+若端口不同，以 `delexec-ops mcp spec` 返回的 `streamable_http.url` 为准。
+
+## 5. 可选的 stdio 兜底路径
 
 在仓库根目录执行：
 
@@ -51,9 +97,7 @@ npm run caller-skill:mcp
 CALLER_SKILL_BASE_URL=http://127.0.0.1:9191 npm run caller-skill:mcp
 ```
 
-## 4. 在 Codex 里注册
-
-把这个 MCP server 注册成一个 stdio 命令：
+只有在 `streamable_http` 不可用时，才把它注册成 stdio 命令：
 
 ```bash
 node /absolute/path/to/repos/client/apps/caller-skill-mcp-adapter/src/server.js
@@ -63,7 +107,7 @@ node /absolute/path/to/repos/client/apps/caller-skill-mcp-adapter/src/server.js
 
 - `CALLER_SKILL_BASE_URL=http://127.0.0.1:8091`
 
-## 5. 预期工具行为
+## 6. 预期工具行为
 
 Codex 应该能看到 6 个 tools。
 
@@ -85,7 +129,7 @@ Codex 应该能看到 6 个 tools。
 
 轮询应留在 adapter / caller-skill 层，不应让模型自己做。
 
-## 6. 第一条验证任务
+## 7. 第一条验证任务
 
 可先用本地 example hotline：
 
@@ -99,7 +143,7 @@ Codex 应该能看到 6 个 tools。
 4. 发送 prepared request
 5. 收到终态结果
 
-## 7. 当前范围
+## 8. 当前范围
 
 本文档只覆盖：
 

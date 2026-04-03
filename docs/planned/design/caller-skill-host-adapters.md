@@ -161,7 +161,7 @@ This is a fallback adapter family, not the preferred first target if MCP is avai
 
 Preferred transport:
 
-- MCP
+- MCP via `streamable_http`
 
 Reason:
 
@@ -172,13 +172,14 @@ Reason:
 Recommendation:
 
 - build a `caller-skill` MCP adapter
+- prefer `streamable_http` registration over stdio for real Codex validation
 - register the six actions as MCP tools
 
 ## 5.2 Cursor
 
 Preferred transport:
 
-- MCP
+- MCP via `streamable_http`
 
 Reason:
 
@@ -189,6 +190,7 @@ Recommendation:
 
 - do not build a Cursor-specific business bridge
 - reuse the same MCP adapter and define only a Cursor host profile
+- use the same `streamable_http` registration path as Codex by default
 
 ## 5.3 Claude Code
 

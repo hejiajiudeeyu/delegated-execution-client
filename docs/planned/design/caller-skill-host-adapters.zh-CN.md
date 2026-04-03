@@ -164,7 +164,7 @@
 
 首选传输：
 
-- MCP
+- 通过 `streamable_http` 的 MCP
 
 原因：
 
@@ -174,19 +174,21 @@
 建议：
 
 - 做一个 `caller-skill` MCP adapter
+- 真实 Codex 验收时优先使用 `streamable_http`，不要默认走 stdio
 - 把 6 个动作注册成 MCP tools
 
 ## 5.2 Cursor
 
 首选传输：
 
-- MCP
+- 通过 `streamable_http` 的 MCP
 
 建议：
 
 - 不做 Cursor 专有业务桥
 - 复用 Codex 同一套 MCP adapter
 - 只补 Cursor 的 host profile
+- 默认沿用与 Codex 相同的 `streamable_http` 注册路径
 
 ## 5.3 Claude Code
 

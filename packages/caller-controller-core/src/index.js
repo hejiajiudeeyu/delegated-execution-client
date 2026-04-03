@@ -82,6 +82,10 @@ function normalizePemString(value) {
   return trimmed.replace(/\\n/g, "\n");
 }
 
+function isLocalOnlyRegistrationMode(value) {
+  return typeof value === "string" && value.trim().toLowerCase() === "local_only";
+}
+
 function sendUpstreamError(res, error, fallbackCode, fallbackMessage = "upstream service error") {
   if (error?.response) {
     sendJson(res, error.response.status, error.response.body || { error: { code: fallbackCode, message: fallbackMessage, retryable: true } });
@@ -1119,6 +1123,9 @@ export function createCallerControllerServer({
   }
 
   function resolvePlatformClient(req) {
+    if (isLocalOnlyRegistrationMode(process.env.CALLER_REGISTRATION_MODE) && localFallbackClient) {
+      return localFallbackClient;
+    }
     const resolved = resolvePlatformConfig(req);
     if (!resolved?.baseUrl) {
       return localFallbackClient;

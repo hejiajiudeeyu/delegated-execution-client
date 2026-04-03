@@ -1147,6 +1147,7 @@ export function createOpsSupervisorServer() {
       CALLER_PLATFORM_API_KEY: resolvedSecrets.caller_api_key || "",
       PLATFORM_API_KEY: resolvedSecrets.caller_api_key || "",
       CALLER_CONTACT_EMAIL: state.config.caller.contact_email || "",
+      CALLER_REGISTRATION_MODE: state.config.caller.registration_mode || "",
       RESPONDER_ID: state.config.responder.responder_id || "",
       RESPONDER_SIGNING_PUBLIC_KEY_PEM: state.env.RESPONDER_SIGNING_PUBLIC_KEY_PEM || "",
       RESPONDER_SIGNING_PRIVATE_KEY_PEM: state.env.RESPONDER_SIGNING_PRIVATE_KEY_PEM || "",

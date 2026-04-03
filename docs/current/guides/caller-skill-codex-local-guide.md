@@ -5,6 +5,10 @@ Updated: 2026-04-02
 
 This guide describes the local-only path for connecting Codex to `caller-skill` through the MCP adapter.
 
+Use `streamable_http` as the default Codex transport.
+
+Keep `stdio` only as a fallback for local debugging.
+
 ## 1. Goal
 
 After completing this setup, Codex should be able to call these MCP tools:
@@ -37,7 +41,49 @@ curl http://127.0.0.1:8091/healthz
 curl http://127.0.0.1:8091/skills/caller/manifest
 ```
 
-## 3. Start the MCP adapter
+## 3. Start the local runtime
+
+From the repository root:
+
+```bash
+npm run ops -- start
+```
+
+Then fetch the MCP registration spec:
+
+```bash
+delexec-ops mcp spec
+```
+
+Expected result highlights:
+
+- `preferred_transport = streamable_http`
+- `streamable_http.url`
+- `streamable_http.health_url`
+
+Verify:
+
+```bash
+curl http://127.0.0.1:8092/healthz
+```
+
+## 4. Register it in Codex
+
+Before registering the new server, remove any old `caller_skill` stdio configuration:
+
+```bash
+codex mcp remove caller_skill
+```
+
+Then register the `streamable_http` MCP endpoint:
+
+```bash
+codex mcp add caller_skill --url http://127.0.0.1:8092/mcp
+```
+
+Use the exact URL returned by `delexec-ops mcp spec` if your ports differ.
+
+## 5. Optional stdio fallback
 
 From the repository root:
 
@@ -51,9 +97,7 @@ If your local caller-skill server is on a non-default port:
 CALLER_SKILL_BASE_URL=http://127.0.0.1:9191 npm run caller-skill:mcp
 ```
 
-## 4. Register it in Codex
-
-Register the MCP server as a stdio command that runs:
+Register the MCP server as a stdio command only when `streamable_http` is unavailable:
 
 ```bash
 node /absolute/path/to/repos/client/apps/caller-skill-mcp-adapter/src/server.js
@@ -63,7 +107,7 @@ Recommended environment:
 
 - `CALLER_SKILL_BASE_URL=http://127.0.0.1:8091`
 
-## 5. Expected tool behavior
+## 6. Expected tool behavior
 
 Codex should see six tools.
 
@@ -85,7 +129,7 @@ Execution phase is strict.
 
 Polling should stay inside the adapter / caller-skill layer, not in the model.
 
-## 6. First validation task
+## 7. First validation task
 
 Use a local example hotline such as:
 
@@ -99,7 +143,7 @@ Validate that Codex can:
 4. send the prepared request
 5. receive a terminal result
 
-## 7. Current scope
+## 8. Current scope
 
 This guide only covers:
 
