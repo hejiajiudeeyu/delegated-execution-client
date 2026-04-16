@@ -365,6 +365,14 @@ async function introspectTaskToken(task, platform) {
     return { active: true, skipped: true };
   }
 
+  if (String(task.task_token).startsWith("local_task_")) {
+    return {
+      active: true,
+      skipped: true,
+      local_issued: true
+    };
+  }
+
   const response = await postJson(platform.baseUrl, "/v1/tokens/introspect", {
     headers: {
       Authorization: `Bearer ${platform.apiKey}`

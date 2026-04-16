@@ -340,7 +340,13 @@ export function createDefaultOpsConfig(env = {}) {
       hotlines: []
     },
     preferences: {
-      task_types: {}
+      task_types: {},
+      caller_policy: {
+        mode: "manual",
+        responderWhitelist: [],
+        hotlineWhitelist: [],
+        blocklist: []
+      }
     },
     runtime: {
       ports,
@@ -416,8 +422,26 @@ export function ensureOpsState() {
     display_name: "Local Responder",
     hotlines: []
   };
-  config.preferences ||= { task_types: {} };
+  config.preferences ||= {
+    task_types: {},
+    caller_policy: {
+      mode: "manual",
+      responderWhitelist: [],
+      hotlineWhitelist: [],
+      blocklist: []
+    }
+  };
   config.preferences.task_types ||= {};
+  config.preferences.caller_policy ||= {
+    mode: "manual",
+    responderWhitelist: [],
+    hotlineWhitelist: [],
+    blocklist: []
+  };
+  config.preferences.caller_policy.mode ||= "manual";
+  config.preferences.caller_policy.responderWhitelist ||= [];
+  config.preferences.caller_policy.hotlineWhitelist ||= [];
+  config.preferences.caller_policy.blocklist ||= [];
   const defaultPorts = resolveDefaultPorts();
   config.runtime ||= { ports: defaultPorts, external_relay: null, transport: defaultTransportConfig() };
   config.runtime.ports ||= defaultPorts;
@@ -774,6 +798,11 @@ function buildDefaultContractProfile(definition = {}) {
     taskTypes.includes("text_summarize") ||
     capabilities.includes("text.summarize") ||
     hotlineId.includes("summary");
+  const pdfParse =
+    taskTypes.includes("document_parse") ||
+    capabilities.includes("document.parse.pdf") ||
+    hotlineId.includes("pdf.parse") ||
+    hotlineId.includes("mineru");
 
   if (textSummarize) {
     return {
@@ -827,6 +856,65 @@ function buildDefaultContractProfile(definition = {}) {
       ],
       input_summary: "Paste the text you want summarized. Optionally add an instruction describing what to emphasize, such as blockers, next steps, or risks.",
       output_summary: "You will receive a concise summary suitable for status updates, review notes, or quick progress reports."
+    };
+  }
+
+  if (pdfParse) {
+    return {
+      profile_key: "document_parse_pdf",
+      description: `Use ${displayName} when you need to parse a local PDF on this machine and produce markdown output.`,
+      summary: "Provide an absolute local PDF path. The hotline will run the configured local parser and return the generated markdown artifact.",
+      template_ref: `docs/templates/hotlines/${hotlineId}/`,
+      input_schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["pdf_path"],
+        properties: {
+          pdf_path: {
+            type: "string",
+            description: "Absolute path to a readable local PDF file on this machine."
+          },
+          parse_method: {
+            type: "string",
+            description: "Optional parse mode. Use a parser-supported value such as auto, txt, or ocr."
+          },
+          instruction: {
+            type: "string",
+            description: "Optional parsing guidance or downstream emphasis for the generated markdown."
+          }
+        }
+      },
+      output_schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["markdown_file"],
+        properties: {
+          markdown_file: {
+            type: "string",
+            description: "Absolute path to the generated markdown file."
+          }
+        }
+      },
+      input_examples: [
+        {
+          title: "Parse a local PDF",
+          input: {
+            pdf_path: "/absolute/path/to/document.pdf",
+            parse_method: "auto",
+            instruction: "Keep headings and tables when possible."
+          }
+        }
+      ],
+      output_examples: [
+        {
+          title: "Markdown parse result",
+          output: {
+            markdown_file: "/tmp/delexec-parse-xxxx/document.md"
+          }
+        }
+      ],
+      input_summary: "Provide an absolute local pdf_path. Optionally include parse_method and an instruction.",
+      output_summary: "Returns the generated markdown file path and a markdown artifact payload."
     };
   }
 

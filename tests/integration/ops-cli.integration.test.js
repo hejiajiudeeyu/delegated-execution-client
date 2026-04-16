@@ -78,6 +78,8 @@ describe("ops cli integration", () => {
   it("initializes ops config idempotently and adds process/http hotlines", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-home-"));
     cleanupDirs.push(opsHome);
+    const workerCwd = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-worker-cwd-"));
+    cleanupDirs.push(workerCwd);
 
     const env = {
       ...process.env,
@@ -100,6 +102,12 @@ describe("ops cli integration", () => {
             "cli.process.v1",
             "--cmd",
             "node worker.js",
+            "--cwd",
+            workerCwd,
+            "--env",
+            "PROCESS_MODE=worker",
+            "--env",
+            "PROCESS_PROFILE=mineru_like",
             "--task-type",
             "summarize",
             "--capability",
@@ -149,7 +157,62 @@ describe("ops cli integration", () => {
     expect(fs.existsSync(processHookFile)).toBe(true);
     expect(fs.existsSync(httpIntegrationFile)).toBe(true);
     expect(JSON.parse(fs.readFileSync(processIntegrationFile, "utf8")).adapter.cmd).toBe("node worker.js");
+    expect(JSON.parse(fs.readFileSync(processIntegrationFile, "utf8")).adapter.cwd).toBe(workerCwd);
+    expect(JSON.parse(fs.readFileSync(processIntegrationFile, "utf8")).adapter.env).toEqual({
+      PROCESS_MODE: "worker",
+      PROCESS_PROFILE: "mineru_like"
+    });
     expect(JSON.parse(fs.readFileSync(httpIntegrationFile, "utf8")).adapter.url).toBe("http://127.0.0.1:9191/invoke");
+  });
+
+  it("generates a pdf-parse draft profile for local document parse hotlines", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-pdf-parse-"));
+    cleanupDirs.push(opsHome);
+
+    const env = {
+      ...process.env,
+      DELEXEC_HOME: opsHome
+    };
+
+    const added = JSON.parse(
+      (
+        await execFileAsync(
+          process.execPath,
+          [
+            CLI_PATH,
+            "add-hotline",
+            "--type",
+            "process",
+            "--hotline-id",
+            "local.mineru.pdf.parse.v1",
+            "--display-name",
+            "MinerU Local PDF Parse",
+            "--cmd",
+            "node mineru-worker.js",
+            "--task-type",
+            "document_parse",
+            "--capability",
+            "document.parse.pdf",
+            "--tag",
+            "local",
+            "--tag",
+            "mineru",
+            "--tag",
+            "pdf",
+            "--tag",
+            "parse"
+          ],
+          { env }
+        )
+      ).stdout
+    );
+
+    const draft = JSON.parse(fs.readFileSync(added.registration_draft_file, "utf8"));
+    expect(draft.draft_meta.generated_profile).toBe("document_parse_pdf");
+    expect(draft.input_schema.required).toEqual(["pdf_path"]);
+    expect(draft.input_schema.properties.pdf_path.description).toContain("Absolute path");
+    expect(draft.output_schema.required).toEqual(["markdown_file"]);
+    expect(draft.output_summary).toContain("markdown");
   });
 
   it("submits pending hotlines explicitly and persists responder api key", async () => {

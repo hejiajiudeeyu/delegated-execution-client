@@ -94,6 +94,24 @@ npx @delexec/ops add-hotline \
   --capability text.summarize
 ```
 
+机器本地 CLI 型 adapter 也应支持显式传入工作目录和环境变量：
+
+```bash
+npx @delexec/ops add-hotline \
+  --type process \
+  --hotline-id local.mineru.pdf.parse.v1 \
+  --display-name "MinerU Local PDF Parse" \
+  --cmd "\"/opt/homebrew/Cellar/node@22/22.22.0_1/bin/node\" \"$HOME/.delexec/local-hotline-workers/mineru/local-mineru-worker.js\"" \
+  --cwd /Users/me/Projects/MinerU \
+  --env MINERU_ROOT=/Users/me/Projects/MinerU \
+  --env MINERU_BIN=/Users/me/Projects/MinerU/.venv/bin/mineru \
+  --env MINERU_BACKEND=pipeline \
+  --env MINERU_MODEL_SOURCE=local \
+  --task-type document_parse \
+  --capability document.parse.pdf \
+  --tag local --tag mineru --tag pdf --tag parse
+```
+
 运行契约：
 
 - runtime 向 stdin 发送单个 JSON

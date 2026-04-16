@@ -451,6 +451,62 @@ describe("responder-controller integration", () => {
     }
   });
 
+  it("accepts local-issued task tokens without platform introspection even when platform credentials exist", async () => {
+    const platformState = createPlatformState();
+    const platformServer = createPlatformServer({ serviceName: "platform-local-token-test", state: platformState });
+    const platformUrl = await listenServer(platformServer);
+    const hub = createLocalTransportHub();
+    const responder = platformState.bootstrap.responders[0];
+    const transport = createLocalTransportAdapter({ hub, receiver: responder.responder_id });
+    const callerTransport = createLocalTransportAdapter({ hub, receiver: "caller-controller" });
+    const responderServer = createResponderControllerServer({
+      serviceName: "responder-controller-local-token-test",
+      transport,
+      platform: {
+        baseUrl: platformUrl,
+        apiKey: responder.api_key,
+        responderId: responder.responder_id
+      }
+    });
+    const responderUrl = await listenServer(responderServer);
+
+    try {
+      const requestId = "req_responder_local_token_1";
+      await transport.send({
+        message_id: "msg_task_local_1",
+        from: "caller-controller",
+        to: responder.responder_id,
+        request_id: requestId,
+        responder_id: responder.responder_id,
+        hotline_id: responder.hotline_id,
+        task_token: `local_task_${requestId}`,
+        simulate: "success",
+        delay_ms: 20
+      });
+
+      const pulled = await jsonRequest(responderUrl, "/controller/inbox/pull", {
+        method: "POST",
+        body: {}
+      });
+      expect(pulled.status).toBe(200);
+      expect(pulled.body.accepted.length).toBe(1);
+
+      const callerQueue = await waitFor(async () => {
+        const queue = await callerTransport.peek();
+        if (queue.items.length === 0) {
+          throw new Error("local_token_result_not_ready");
+        }
+        return queue;
+      });
+
+      expect(callerQueue.items[0].result_package.status).toBe("ok");
+      expect(callerQueue.items[0].result_package.request_id).toBe(requestId);
+    } finally {
+      await closeServer(responderServer);
+      await closeServer(platformServer);
+    }
+  });
+
   it("reports FAILED event to platform when execution returns error", async () => {
     const platformState = createPlatformState();
     const platformServer = createPlatformServer({ serviceName: "platform-failed-event-test", state: platformState });

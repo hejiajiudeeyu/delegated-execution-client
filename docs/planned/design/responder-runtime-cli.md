@@ -200,6 +200,24 @@ npx @delexec/ops add-hotline \
   --capability text.summarize
 ```
 
+Machine-local CLI adapters may also carry a working directory plus explicit environment values:
+
+```bash
+npx @delexec/ops add-hotline \
+  --type process \
+  --hotline-id local.mineru.pdf.parse.v1 \
+  --display-name "MinerU Local PDF Parse" \
+  --cmd "\"/opt/homebrew/Cellar/node@22/22.22.0_1/bin/node\" \"$HOME/.delexec/local-hotline-workers/mineru/local-mineru-worker.js\"" \
+  --cwd /Users/me/Projects/MinerU \
+  --env MINERU_ROOT=/Users/me/Projects/MinerU \
+  --env MINERU_BIN=/Users/me/Projects/MinerU/.venv/bin/mineru \
+  --env MINERU_BACKEND=pipeline \
+  --env MINERU_MODEL_SOURCE=local \
+  --task-type document_parse \
+  --capability document.parse.pdf \
+  --tag local --tag mineru --tag pdf --tag parse
+```
+
 Runtime contract:
 
 - responder runtime sends a single JSON payload to stdin

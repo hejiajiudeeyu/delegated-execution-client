@@ -43,8 +43,8 @@ function usage() {
   delexec-ops mcp spec
   delexec-ops auth register --email <email> [--local] [--platform <url>]
   delexec-ops enable-responder [--responder-id <id>] [--display-name <name>]
-  delexec-ops add-hotline --type <process|http> --hotline-id <id> [options]
-  delexec-ops attach-project --project-path <path> [--project-name <name>] [--project-description <text>] [--hotline-id <id>] [--cmd <command> | --url <url>] [--task-type <type>] [--capability <capability>]
+  delexec-ops add-hotline --type <process|http> --hotline-id <id> [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE]
+  delexec-ops attach-project --project-path <path> [--project-name <name>] [--project-description <text>] [--hotline-id <id>] [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE] [--task-type <type>] [--capability <capability>]
   delexec-ops add-example-hotline
   delexec-ops remove-hotline --hotline-id <id>
   delexec-ops enable-hotline --hotline-id <id>
@@ -115,6 +115,25 @@ function getValues(value) {
     return [];
   }
   return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+function parseEnvAssignments(value) {
+  const entries = getValues(value);
+  const env = {};
+  for (const entry of entries) {
+    const normalized = String(entry || "").trim();
+    const separatorIndex = normalized.indexOf("=");
+    if (separatorIndex <= 0) {
+      throw new Error(`invalid_env_assignment:${normalized}`);
+    }
+    const key = normalized.slice(0, separatorIndex).trim();
+    const envValue = normalized.slice(separatorIndex + 1);
+    if (!key) {
+      throw new Error(`invalid_env_assignment:${normalized}`);
+    }
+    env[key] = envValue;
+  }
+  return env;
 }
 
 function sanitizeIdSegment(value) {
@@ -474,7 +493,7 @@ function parseHotlineDefinition(args) {
   definition.adapter = {
     cmd,
     cwd: args.cwd ? String(args.cwd) : undefined,
-    env: {}
+    env: parseEnvAssignments(args.env)
   };
   return definition;
 }
@@ -540,7 +559,7 @@ function buildProjectHotlineDefinition(args) {
   definition.adapter = {
     cmd,
     cwd: args.cwd ? String(args.cwd) : projectPath,
-    env: {}
+    env: parseEnvAssignments(args.env)
   };
   return definition;
 }

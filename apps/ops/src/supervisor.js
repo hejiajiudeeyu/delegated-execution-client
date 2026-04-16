@@ -450,9 +450,40 @@ function buildExampleVisibilityError(example) {
 }
 
 function ensurePreferenceState(state) {
-  state.config.preferences ||= { task_types: {} };
+  state.config.preferences ||= {
+    task_types: {},
+    caller_policy: {
+      mode: "manual",
+      responderWhitelist: [],
+      hotlineWhitelist: [],
+      blocklist: []
+    }
+  };
   state.config.preferences.task_types ||= {};
   return state.config.preferences.task_types;
+}
+
+function ensureCallerPolicyState(state) {
+  state.config.preferences ||= {
+    task_types: {},
+    caller_policy: {
+      mode: "manual",
+      responderWhitelist: [],
+      hotlineWhitelist: [],
+      blocklist: []
+    }
+  };
+  state.config.preferences.caller_policy ||= {
+    mode: "manual",
+    responderWhitelist: [],
+    hotlineWhitelist: [],
+    blocklist: []
+  };
+  state.config.preferences.caller_policy.mode ||= "manual";
+  state.config.preferences.caller_policy.responderWhitelist ||= [];
+  state.config.preferences.caller_policy.hotlineWhitelist ||= [];
+  state.config.preferences.caller_policy.blocklist ||= [];
+  return state.config.preferences.caller_policy;
 }
 
 function normalizeTaskTypeKey(taskType) {
@@ -1264,7 +1295,7 @@ export function createOpsSupervisorServer() {
     };
   }
 
-  function captureLog(processInfo, chunk) {
+  function captureLog(processInfo, stream, chunk) {
     const ts = new Date().toTimeString().slice(0, 8); // HH:mm:ss
     const lines = chunk.toString("utf8").split(/\r?\n/);
     for (const raw of lines) {
@@ -1274,6 +1305,12 @@ export function createOpsSupervisorServer() {
       processInfo.logs.push(stamped);
       if (processInfo.logs.length > 200) processInfo.logs.shift();
       appendServiceLog(processInfo.name, `${stamped}\n`);
+      const mirrored = `[${processInfo.name}] ${stamped}\n`;
+      if (stream === "stderr") {
+        process.stderr.write(mirrored);
+      } else {
+        process.stdout.write(mirrored);
+      }
     }
   }
 
@@ -1328,8 +1365,8 @@ export function createOpsSupervisorServer() {
       exitCode: null,
       lastError: null
     };
-    child.stdout.on("data", (chunk) => captureLog(processInfo, chunk.toString("utf8")));
-    child.stderr.on("data", (chunk) => captureLog(processInfo, chunk.toString("utf8")));
+    child.stdout.on("data", (chunk) => captureLog(processInfo, "stdout", chunk.toString("utf8")));
+    child.stderr.on("data", (chunk) => captureLog(processInfo, "stderr", chunk.toString("utf8")));
     child.on("error", (error) => {
       processInfo.lastError = error instanceof Error ? error.message : "unknown_error";
       appendSupervisorEvent({
@@ -2441,17 +2478,34 @@ function buildResponderRegisterHeaders() {
         return;
       }
 
-      // ------------------------------------------------------------------
-      // /caller/global-policy proxy → Skill Adapter
-      // ------------------------------------------------------------------
       if (pathname === "/caller/global-policy") {
-        const skillAdapterBase = processBaseUrl(state.config.runtime.ports.skill_adapter);
-        const body = ["POST", "PUT", "PATCH"].includes(method) ? await parseJsonBody(req) : undefined;
-        const response = await requestJson(skillAdapterBase, `/skills/remote-hotline/global-policy`, {
-          method,
-          body
-        });
-        sendJson(res, response.status, response.body);
+        if (method === "GET") {
+          sendJson(res, 200, ensureCallerPolicyState(state));
+          return;
+        }
+        if (["PUT", "PATCH"].includes(method)) {
+          const body = await parseJsonBody(req);
+          const current = ensureCallerPolicyState(state);
+          const next = {
+            ...current,
+            ...(method === "PATCH" ? body : {}),
+            ...(method === "PUT" ? {
+              mode: normalizedString(body.mode) || "manual",
+              responderWhitelist: Array.isArray(body.responderWhitelist) ? body.responderWhitelist.map((item) => String(item)) : [],
+              hotlineWhitelist: Array.isArray(body.hotlineWhitelist) ? body.hotlineWhitelist.map((item) => String(item)) : [],
+              blocklist: Array.isArray(body.blocklist) ? body.blocklist.map((item) => String(item)) : [],
+            } : {}),
+          };
+          next.mode = ["manual", "allow_listed", "allow_all"].includes(next.mode) ? next.mode : "manual";
+          next.responderWhitelist = Array.isArray(next.responderWhitelist) ? next.responderWhitelist.filter(Boolean) : [];
+          next.hotlineWhitelist = Array.isArray(next.hotlineWhitelist) ? next.hotlineWhitelist.filter(Boolean) : [];
+          next.blocklist = Array.isArray(next.blocklist) ? next.blocklist.filter(Boolean) : [];
+          state.config.preferences.caller_policy = next;
+          state.env = saveOpsState(state);
+          sendJson(res, 200, next);
+          return;
+        }
+        sendError(res, 405, "method_not_allowed", "method not allowed");
         return;
       }
       if (method === "POST" && pathname === "/calls/prepare") {
