@@ -23,6 +23,14 @@ export default defineConfig({
       '/requests': 'http://127.0.0.1:8079',
       '/responder': 'http://127.0.0.1:8079',
       '/preferences': 'http://127.0.0.1:8079',
+      '/caller': {
+        target: 'http://127.0.0.1:8079',
+        // Skip proxy for browser page navigations (Accept: text/html);
+        // let Vite serve index.html so React Router handles the route.
+        bypass(req) {
+          if (req.headers.accept?.includes('text/html')) return '/index.html'
+        },
+      },
       '/debug': 'http://127.0.0.1:8079',
     },
   },

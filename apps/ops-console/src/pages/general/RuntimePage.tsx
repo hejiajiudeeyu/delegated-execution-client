@@ -27,6 +27,16 @@ interface ServiceAlerts {
   alerts: Array<{ ts?: string; type?: string; message?: string; line?: string }>
 }
 
+interface StatusResponse {
+  runtime?: Partial<Record<Service, {
+    pid?: number | null
+    running?: boolean
+    exit_code?: number | null
+    last_error?: string | null
+    health?: { status?: number; body?: { ok?: boolean | null } | null } | null
+  }>>
+}
+
 type LogLevel = "error" | "warn" | "info" | "debug" | "all"
 
 // A log entry is a real line or a timestamp separator
@@ -143,6 +153,7 @@ export function RuntimePage() {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [alerts, setAlerts] = useState<ServiceAlerts["alerts"]>([])
   const [logFile, setLogFile] = useState("")
+  const [serviceHealth, setServiceHealth] = useState<StatusResponse["runtime"]>({})
   const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null)
   const [snapshotOpen, setSnapshotOpen] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -155,9 +166,10 @@ export function RuntimePage() {
     if (!silent) setLoading(true)
     else setRefreshing(true)
     const loadedAt = new Date().toLocaleTimeString()
-    const [logsRes, alertsRes] = await Promise.all([
+    const [logsRes, alertsRes, statusRes] = await Promise.all([
       requestJson<ServiceLogs>(`/runtime/logs?service=${service}&max_lines=500`),
       requestJson<ServiceAlerts>(`/runtime/alerts?service=${service}&max_items=20`),
+      requestJson<StatusResponse>("/status"),
     ])
     if (logsRes.status === 200 && logsRes.body) {
       const newLines: LogEntry[] = (logsRes.body.logs ?? []).map((text) => ({ kind: "line" as const, text }))
@@ -166,6 +178,9 @@ export function RuntimePage() {
       setLogFile(logsRes.body.file ?? "")
     }
     if (alertsRes.status === 200 && alertsRes.body) setAlerts(alertsRes.body.alerts ?? [])
+    if (statusRes.status === 200 && statusRes.body?.runtime) {
+      setServiceHealth(statusRes.body.runtime)
+    }
     if (!silent) setLoading(false)
     else setRefreshing(false)
   }
@@ -221,6 +236,21 @@ export function RuntimePage() {
     { id: "debug", label: "调试" },
   ]
 
+  const runtimeCards = SERVICES.map(({ id, label }) => {
+    const item = serviceHealth?.[id]
+    const healthy = item?.health?.status === 200 && item?.health?.body?.ok !== false
+    const running = item?.running === true
+    return {
+      id,
+      label,
+      healthy,
+      running,
+      pid: item?.pid ?? null,
+      exitCode: item?.exit_code ?? null,
+      lastError: item?.last_error ?? null,
+    }
+  })
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -251,13 +281,44 @@ export function RuntimePage() {
         ))}
       </div>
 
+      <div className="grid gap-3 md:grid-cols-3">
+        {runtimeCards.map((item) => (
+          <Card key={item.id}>
+            <CardContent className="p-4 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold">{item.label}</p>
+                <Badge
+                  tone={item.healthy ? "caller" : item.running ? "neutral" : "destructive"}
+                  className="text-[10px]"
+                >
+                  {item.healthy ? "健康" : item.running ? "运行中" : "未就绪"}
+                </Badge>
+              </div>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <p>进程状态：{item.running ? "已启动" : "未运行"}</p>
+                {item.pid ? <p className="font-mono">PID: {item.pid}</p> : null}
+                {item.exitCode != null ? <p>退出码：{item.exitCode}</p> : null}
+                {item.lastError ? <p className="text-red-600 break-all">最近错误：{item.lastError}</p> : null}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardContent className="pt-4 text-xs text-muted-foreground space-y-1.5">
+          <p>当前 Runtime 页展示的是三类信息：服务健康状态、服务 stdout/stderr 日志尾部、以及 supervisor 结构化告警。</p>
+          <p>浏览器页面自身的前端异常不会自动进入这里；如果需要排查前端崩溃，仍要看浏览器控制台。</p>
+        </CardContent>
+      </Card>
+
       {dedupedAlerts.length > 0 && (
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-orange-600 flex items-center gap-1.5">
                 告警
-                <Badge variant="destructive" className="text-xs">
+                <Badge tone="destructive" className="text-xs">
                   {alerts.length > dedupedAlerts.length
                     ? `${dedupedAlerts.length} 类 / ${alerts.length} 条`
                     : alerts.length}
@@ -364,7 +425,7 @@ export function RuntimePage() {
                 dedupedFilteredLogs.map(({ line, count }, i) => <LogLine key={i} line={line} count={count} />)
               )
             ) : (
-              entries.length === 0 ? (
+              rawLines.length === 0 ? (
                 <p className="text-muted-foreground text-xs">暂无日志</p>
               ) : (
                 renderEntriesWithSeparators(entries)

@@ -124,10 +124,11 @@ export function ConsoleSidebar({ currentTab }: { currentTab: TabCtx }) {
 
   const callerNav: NavItem[] = [
     { label: "概览", path: "/caller", icon: LayoutDashboard },
-    { label: "Catalog", path: "/caller/catalog", icon: BookOpen },
-    { label: "Call 请求", path: "/caller/calls", icon: Zap },
-    { label: "待审批", path: "/caller/calls?filter=pending-approval", icon: ShieldCheck, badge: pendingApprovals },
+    { label: "热线目录", path: "/caller/catalog", icon: BookOpen },
+    { label: "调用记录", path: "/caller/calls", icon: Zap },
+    { label: "审批中心", path: "/caller/approvals", icon: ShieldCheck, badge: pendingApprovals },
     { label: "偏好设置", path: "/caller/preferences", icon: Settings },
+    { label: "名单管理", path: "/caller/lists", icon: FileCheck },
   ]
 
   const labels: Record<TabCtx, string> = {

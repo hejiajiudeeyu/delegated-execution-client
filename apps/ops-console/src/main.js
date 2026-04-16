@@ -611,8 +611,8 @@ function buildTransportPayload() {
 function setHotlineForm(definition = null) {
   if (!definition) {
     state.editingHotlineId = null;
-    hotlineIdInput.value = "local.summary.v1";
-    displayNameInput.value = "Local Summary Example";
+    hotlineIdInput.value = "local.delegated-execution.workspace-summary.v1";
+    displayNameInput.value = "Delegated Execution Workspace Summary";
     taskTypesInput.value = "text_summarize";
     capabilitiesInput.value = "text.summarize";
     tagsInput.value = "local,example,demo";
@@ -1049,7 +1049,7 @@ async function addExampleHotline() {
     });
     responderOutput.textContent = JSON.stringify(response, null, 2);
     await refreshStatus();
-    const example = state.status?.config?.responder?.hotlines?.find((item) => item.hotline_id === "local.summary.v1");
+    const example = state.status?.config?.responder?.hotlines?.find((item) => item.hotline_id === "local.delegated-execution.workspace-summary.v1");
     if (example) {
       setHotlineForm(example);
     }

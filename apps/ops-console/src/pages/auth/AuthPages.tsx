@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 import { Terminal, UserPlus, CheckCircle2, ChevronRight, SkipForward, LockKeyhole } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -113,6 +113,7 @@ function StepIndicator({ current }: { current: Step }) {
 export function SetupPage() {
   const { setup, refresh } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [step, setStep] = useState<Step>("passphrase")
 
   // Step 1 state
@@ -126,6 +127,9 @@ export function SetupPage() {
   const [registerLoading, setRegisterLoading] = useState(false)
   const [registerError, setRegisterError] = useState("")
   const [registerDone, setRegisterDone] = useState(false)
+  const next = typeof location.state === "object" && location.state && "next" in location.state
+    ? String((location.state as { next?: string }).next || "/general")
+    : "/general"
 
   const handlePassphraseSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -291,7 +295,7 @@ export function SetupPage() {
               <p>· 在 <span className="font-medium text-teal-600">Caller</span> Tab 发起你的第一个 Call</p>
               <p>· 在 <span className="font-medium text-orange-600">Responder</span> Tab 启用 Responder（可选）</p>
             </div>
-            <Button className="w-full" onClick={() => navigate("/general")}>
+            <Button className="w-full" onClick={() => navigate(next, { replace: true })}>
               开始使用
             </Button>
           </div>
@@ -304,9 +308,13 @@ export function SetupPage() {
 export function UnlockPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [passphrase, setPassphrase] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const next = typeof location.state === "object" && location.state && "next" in location.state
+    ? String((location.state as { next?: string }).next || "/general")
+    : "/general"
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -314,7 +322,7 @@ export function UnlockPage() {
     const result = await login(passphrase)
     setLoading(false)
     if (result.ok) {
-      navigate("/general")
+      navigate(next, { replace: true })
     } else {
       setError(result.error ?? "口令错误")
     }

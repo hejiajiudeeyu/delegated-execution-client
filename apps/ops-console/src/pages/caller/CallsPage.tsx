@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { requestJson } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,27 +11,18 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
-  CheckCircle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clock,
-  FileText,
   FlaskConical,
   Inbox,
-  Info,
-  Loader2,
   RefreshCw,
   Send,
-  ShieldAlert,
   ShieldCheck,
-  User,
   XCircle,
-  AlertTriangle,
-  Zap,
 } from "lucide-react"
 import { cn } from "@/components/ui/utils"
-import { toast } from "sonner"
 
 interface RequestItem {
   request_id: string
@@ -43,54 +34,8 @@ interface RequestItem {
   responder_id?: string
 }
 
-type ApprovalStatus = "pending" | "approved" | "rejected" | "expired"
-type ExecStatus = "running" | "succeeded" | "failed" | "timed_out" | "unknown"
-
-interface RiskFactor {
-  factor: string
-  description: string
-  severity: "high" | "medium" | "low" | "info"
-}
-
-interface OutputDisplayHints {
-  primary_field?: string
-  field_display_order?: string[]
-  field_labels?: Record<string, string>
-}
-
-interface ExecutionState {
-  requestId: string | null
-  status: ExecStatus
-  responder: { responderId: string; hotlineId: string } | null
-  result: Record<string, unknown> | null
-  humanSummary: string | null
-  usage: Record<string, unknown> | null
-  error: { code: string; message: string } | null
-  timing: { accepted_at?: string; finished_at?: string; elapsed_ms?: number } | null
-  startedAt: string | null
-  completedAt: string | null
-}
-
 interface ApprovalRecord {
-  id: string
-  hotlineId: string
-  purpose: string | null
-  agentSessionId: string | null
-  inputSummary: string | null
-  hotlineInfo: {
-    displayName: string
-    responderId: string
-    description: string | null
-    reviewStatus: string | null
-    outputDisplayHints?: OutputDisplayHints | null
-  } | null
-  riskFactors: RiskFactor[]
-  overallRisk: "high" | "medium" | "low" | "info"
-  status: ApprovalStatus
-  createdAt: string
-  expiresAt: string
-  decidedAt: string | null
-  execution: ExecutionState | null
+  status: "pending" | "approved" | "rejected" | "expired"
 }
 
 interface PreparedCandidate {
@@ -132,22 +77,6 @@ interface HotlineDetail {
   output_schema?: Record<string, unknown> | null
 }
 
-type FilterValue = "all" | "pending-approval" | "requests"
-
-const SEVERITY_COLORS: Record<string, string> = {
-  high: "text-red-600 bg-red-50 border-red-200",
-  medium: "text-amber-600 bg-amber-50 border-amber-200",
-  low: "text-blue-600 bg-blue-50 border-blue-200",
-  info: "text-slate-600 bg-slate-50 border-slate-200",
-}
-
-const RISK_ICONS: Record<string, React.ElementType> = {
-  high: ShieldAlert,
-  medium: ShieldAlert,
-  low: ShieldCheck,
-  info: Info,
-}
-
 function normalizeRequestStatus(status: string) {
   const normalized = String(status || "").toUpperCase()
   if (["SUCCEEDED", "COMPLETED"].includes(normalized)) return "completed"
@@ -164,184 +93,13 @@ function StatusIcon({ status }: { status: string }) {
 
 function RequestStatusBadge({ status }: { status: string }) {
   const normalized = normalizeRequestStatus(status)
-  const variant =
-    normalized === "completed"
-      ? "outline"
-      : normalized === "failed"
-        ? "destructive"
-        : "secondary"
-  return <Badge variant={variant} className="text-[10px]">{status}</Badge>
-}
-
-function ApprovalStatusBadge({ status }: { status: ApprovalStatus }) {
-  const map: Record<ApprovalStatus, { label: string; className: string }> = {
-    pending: { label: "待审批", className: "bg-amber-100 text-amber-700 border-amber-300" },
-    approved: { label: "已批准", className: "bg-green-100 text-green-700 border-green-300" },
-    rejected: { label: "已拒绝", className: "bg-red-100 text-red-700 border-red-300" },
-    expired: { label: "已过期", className: "bg-slate-100 text-slate-500 border-slate-300" },
+  if (normalized === "completed") {
+    return <Badge tone="caller" className="text-[10px]">{status}</Badge>
   }
-  const { label, className } = map[status] ?? map.expired
-  return <span className={cn("inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border", className)}>{label}</span>
-}
-
-function RiskBadge({ severity }: { severity: string }) {
-  const labels: Record<string, string> = {
-    high: "高风险",
-    medium: "中风险",
-    low: "低风险",
-    info: "提示",
+  if (normalized === "failed") {
+    return <Badge tone="destructive" className="text-[10px]">{status}</Badge>
   }
-  return (
-    <span className={cn("inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border", SEVERITY_COLORS[severity] ?? SEVERITY_COLORS.info)}>
-      {labels[severity] ?? severity}
-    </span>
-  )
-}
-
-function timeAgo(iso?: string | null): string {
-  if (!iso) return "未知"
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (diff < 60) return `${diff}s 前`
-  if (diff < 3600) return `${Math.floor(diff / 60)}min 前`
-  return `${Math.floor(diff / 3600)}h 前`
-}
-
-function expiresIn(iso: string): string {
-  const diff = Math.floor((new Date(iso).getTime() - Date.now()) / 1000)
-  if (diff <= 0) return "已过期"
-  if (diff < 60) return `${diff}s 后过期`
-  return `${Math.floor(diff / 60)}min 后过期`
-}
-
-interface ResultRow {
-  key: string
-  label: string
-  value: string
-  isPrimary: boolean
-}
-
-function buildResultRows(result: Record<string, unknown>, hints: OutputDisplayHints | null | undefined): ResultRow[] {
-  const primaryField = hints?.primary_field
-  const labels = hints?.field_labels ?? {}
-  const order = hints?.field_display_order
-  const flat: Record<string, unknown> = {}
-
-  for (const [k, v] of Object.entries(result)) {
-    if (v === null || v === undefined) continue
-    if (typeof v === "object" && !Array.isArray(v)) {
-      for (const [subK, subV] of Object.entries(v as Record<string, unknown>)) {
-        if (subV !== null && subV !== undefined) {
-          flat[`${k}.${subK}`] = subV
-        }
-      }
-    } else {
-      flat[k] = v
-    }
-  }
-
-  const allKeys = order
-    ? [...order.filter((k) => k in flat), ...Object.keys(flat).filter((k) => !order.includes(k))]
-    : Object.keys(flat)
-
-  return allKeys.map((key) => ({
-    key,
-    label: labels[key] ?? key,
-    value: Array.isArray(flat[key]) ? JSON.stringify(flat[key], null, 2) : String(flat[key]),
-    isPrimary: key === primaryField,
-  }))
-}
-
-function ExecutionBlock({ execution, hints }: { execution: ExecutionState; hints?: OutputDisplayHints | null }) {
-  const isRunning = execution.status === "running"
-  const isSucceeded = execution.status === "succeeded"
-  const isFailed = execution.status === "failed" || execution.status === "timed_out"
-  const resultRows = execution.result ? buildResultRows(execution.result, hints) : null
-
-  return (
-    <div className={cn(
-      "mt-2 rounded-md border p-3 space-y-2 text-xs",
-      isRunning && "border-blue-200 bg-blue-50/60",
-      isSucceeded && "border-green-200 bg-green-50/60",
-      isFailed && "border-red-200 bg-red-50/60",
-    )}>
-      <div className="flex items-center gap-1.5 font-medium">
-        {isRunning && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />}
-        {isSucceeded && <CheckCircle className="h-3.5 w-3.5 text-green-600" />}
-        {isFailed && <AlertTriangle className="h-3.5 w-3.5 text-red-500" />}
-        <span className={cn(
-          isRunning && "text-blue-700",
-          isSucceeded && "text-green-700",
-          isFailed && "text-red-700",
-        )}>
-          {isRunning && "Agent 正在执行调用…"}
-          {isSucceeded && "执行成功"}
-          {isFailed && (execution.status === "timed_out" ? "执行超时" : "执行失败")}
-        </span>
-        {execution.requestId && (
-          <span className="ml-auto font-mono text-muted-foreground opacity-60 select-all">
-            {execution.requestId.slice(0, 18)}…
-          </span>
-        )}
-      </div>
-
-      {execution.responder?.responderId && (
-        <div className="flex items-center gap-1 text-muted-foreground">
-          <User className="h-3 w-3" />
-          <span>由 <span className="font-mono text-foreground">{execution.responder.responderId}</span> 处理</span>
-        </div>
-      )}
-
-      {isSucceeded && execution.humanSummary && (
-        <p className="rounded px-2 py-1 font-medium bg-green-100/80 text-green-800">
-          {execution.humanSummary}
-        </p>
-      )}
-
-      {isSucceeded && resultRows && resultRows.length > 0 && (
-        <div className="space-y-1.5 border-t border-green-200 pt-2">
-          <div className="flex items-center gap-1 text-muted-foreground">
-            <FileText className="h-3 w-3" /> 返回结果
-          </div>
-          <dl className="space-y-2">
-            {resultRows.map(({ key, label, value, isPrimary }) => (
-              <div key={key}>
-                <dt className={cn(
-                  "text-muted-foreground",
-                  isPrimary ? "font-semibold text-foreground" : "font-mono opacity-70"
-                )}>
-                  {label}
-                </dt>
-                <dd className={cn(
-                  "leading-relaxed whitespace-pre-wrap break-words pl-2 border-l-2 mt-0.5",
-                  isPrimary ? "text-foreground font-medium border-green-400" : "text-foreground border-green-200"
-                )}>
-                  {value}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      )}
-
-      {isFailed && execution.error && (
-        <div className="border-t border-red-200 pt-2 space-y-0.5">
-          <p className="font-mono text-red-700 font-medium">{execution.error.code}</p>
-          <p className="text-red-600">{execution.error.message}</p>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground opacity-70 pt-0.5">
-        {execution.completedAt && <span>{timeAgo(execution.completedAt)} 完成</span>}
-        {execution.timing?.elapsed_ms != null && <span>· 耗时 {execution.timing.elapsed_ms} ms</span>}
-        {execution.usage && Object.keys(execution.usage).length > 0 && (
-          <span className="flex items-center gap-1">
-            <Zap className="h-2.5 w-2.5" />
-            {Object.entries(execution.usage).map(([k, v]) => `${k}: ${v}`).join("  ")}
-          </span>
-        )}
-      </div>
-    </div>
-  )
+  return <Badge variant="outline" className="text-[10px]">{status}</Badge>
 }
 
 function RequestDetail({ requestId, onClose }: { requestId: string; onClose: () => void }) {
@@ -675,7 +433,7 @@ function ManualCallForm({ onCreated }: { onCreated: (id: string) => void }) {
                       {candidate.match_reasons && candidate.match_reasons.length > 0 && (
                         <div className="flex gap-1 mt-2 flex-wrap">
                           {candidate.match_reasons.map((reason) => (
-                            <Badge key={reason} variant="secondary" className="text-[10px]">
+                            <Badge key={reason} variant="outline" className="text-[10px]">
                               {reason}
                             </Badge>
                           ))}
@@ -704,129 +462,6 @@ function ManualCallForm({ onCreated }: { onCreated: (id: string) => void }) {
   )
 }
 
-function ApprovalCard({
-  item,
-  onDecide,
-  onSelectRequest,
-}: {
-  item: ApprovalRecord
-  onDecide: (id: string, action: "approve" | "reject") => Promise<void>
-  onSelectRequest: (requestId: string) => void
-}) {
-  const [deciding, setDeciding] = useState<"approve" | "reject" | null>(null)
-  const RiskIcon = RISK_ICONS[item.overallRisk] ?? Info
-  const isPending = item.status === "pending"
-
-  async function handleDecide(action: "approve" | "reject") {
-    setDeciding(action)
-    await onDecide(item.id, action)
-    setDeciding(null)
-  }
-
-  return (
-    <Card className={cn("transition-all", isPending && "border-amber-300/60 shadow-sm")}>
-      <CardContent className="p-4 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <RiskIcon className={cn("h-4 w-4 shrink-0", item.overallRisk === "high" ? "text-red-500" : item.overallRisk === "medium" ? "text-amber-500" : "text-blue-400")} />
-            <div className="min-w-0">
-              <p className="text-sm font-semibold truncate">{item.hotlineInfo?.displayName ?? item.hotlineId}</p>
-              <p className="text-xs text-muted-foreground">{item.hotlineId}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <RiskBadge severity={item.overallRisk} />
-            <ApprovalStatusBadge status={item.status} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          {item.purpose && (
-            <div className="col-span-2">
-              <span className="font-medium text-foreground">调用目的：</span>{item.purpose}
-            </div>
-          )}
-          {item.agentSessionId && (
-            <div>
-              <span className="font-medium text-foreground">Agent Session：</span>
-              <span className="font-mono">{item.agentSessionId}</span>
-            </div>
-          )}
-          {item.inputSummary && (
-            <div className="col-span-2">
-              <span className="font-medium text-foreground">输入摘要：</span>{item.inputSummary}
-            </div>
-          )}
-          <div>
-            <span className="font-medium text-foreground">发起时间：</span>{timeAgo(item.createdAt)}
-          </div>
-          {isPending && (
-            <div>
-              <Clock className="inline h-3 w-3 mr-0.5 text-amber-500" />
-              {expiresIn(item.expiresAt)}
-            </div>
-          )}
-        </div>
-
-        {item.riskFactors.length > 0 && (
-          <div className="space-y-1">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">风险因素</p>
-            <div className="flex flex-wrap gap-1.5">
-              {item.riskFactors.map((f, i) => (
-                <span
-                  key={i}
-                  title={f.description}
-                  className={cn("inline-flex items-center px-2 py-0.5 rounded text-xs border", SEVERITY_COLORS[f.severity] ?? SEVERITY_COLORS.info)}
-                >
-                  {f.description}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isPending && (
-          <div className="flex items-center gap-2 pt-1 border-t border-border">
-            <Button
-              size="sm"
-              className="gap-1.5 bg-green-600 hover:bg-green-700 text-white"
-              disabled={deciding !== null}
-              onClick={() => handleDecide("approve")}
-            >
-              <CheckCircle className="h-3.5 w-3.5" />
-              {deciding === "approve" ? "批准中…" : "批准"}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5 border-red-300 text-red-600 hover:bg-red-50"
-              disabled={deciding !== null}
-              onClick={() => handleDecide("reject")}
-            >
-              <XCircle className="h-3.5 w-3.5" />
-              {deciding === "reject" ? "拒绝中…" : "拒绝"}
-            </Button>
-            <p className="ml-auto text-xs text-muted-foreground">批准后 Agent 可继续执行调用</p>
-          </div>
-        )}
-
-        {!isPending && item.execution && (
-          <div className="space-y-2">
-            <ExecutionBlock execution={item.execution} hints={item.hotlineInfo?.outputDisplayHints} />
-            {item.execution.requestId && (
-              <div className="flex justify-end">
-                <Button size="sm" variant="outline" onClick={() => onSelectRequest(item.execution!.requestId!)}>
-                  查看请求详情
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
 export function CallsPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -835,11 +470,7 @@ export function CallsPage() {
   const [loadingList, setLoadingList] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [testOpen, setTestOpen] = useState(window.location.pathname.endsWith("/new"))
-
-  const filter = (searchParams.get("filter") as FilterValue | null) ?? "all"
   const pendingApprovals = approvals.filter((item) => item.status === "pending")
-  const showApprovals = filter === "all" || filter === "pending-approval"
-  const showRequests = filter === "all" || filter === "requests"
 
   const loadData = useCallback(async () => {
     const [requestsRes, approvalsRes] = await Promise.all([
@@ -873,34 +504,21 @@ export function CallsPage() {
     navigate("/caller/calls")
   }
 
-  async function handleDecide(id: string, action: "approve" | "reject") {
-    const res = await requestJson(`/caller/approvals/${id}/${action}`, { method: "POST" })
-    if (res.status === 200) {
-      toast.success(action === "approve" ? "已批准，Agent 可继续执行" : "已拒绝调用请求")
-      await loadData()
-    } else {
-      toast.error("操作失败，请刷新后重试")
-    }
-  }
-
-  const filters: { value: FilterValue; label: string }[] = [
-    { value: "all", label: "全部" },
-    { value: "pending-approval", label: "待审批" },
-    { value: "requests", label: "请求记录" },
-  ]
-
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-base font-bold flex items-center gap-2">
-            <Inbox className="h-4 w-4" /> Call 工作台
+            <Inbox className="h-4 w-4" /> 调用记录
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            统一查看待审批请求、执行中的调用，以及所有 Hotline Call 历史
+            查看 Hotline 请求历史、状态变化和返回结果；新的审批请求请前往审批中心处理。
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate("/caller/approvals")}>
+            <ShieldCheck className="h-3.5 w-3.5 mr-1" /> 审批中心
+          </Button>
           <Button variant="outline" size="sm" onClick={() => { loadData() }}>
             <RefreshCw className="h-3.5 w-3.5 mr-1" /> 刷新
           </Button>
@@ -912,6 +530,12 @@ export function CallsPage() {
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">待审批</p>
             <p className="text-xl font-semibold">{pendingApprovals.length}</p>
+            <button
+              className="mt-2 text-xs font-medium text-cyan-600 hover:text-cyan-700"
+              onClick={() => navigate("/caller/approvals")}
+            >
+              去处理审批
+            </button>
           </CardContent>
         </Card>
         <Card>
@@ -930,59 +554,9 @@ export function CallsPage() {
         </Card>
       </div>
 
-      <div className="flex gap-1">
-        {filters.map((item) => (
-          <button
-            key={item.value}
-            onClick={() => navigate(item.value === "all" ? "/caller/calls" : `/caller/calls?filter=${item.value}`)}
-            className={cn(
-              "px-3 py-1 text-xs rounded-md font-medium transition-colors",
-              filter === item.value ? "bg-cyan-600 text-white" : "bg-muted text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
       {selectedId && <RequestDetail requestId={selectedId} onClose={() => setSelectedId(null)} />}
 
-      {showApprovals && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4" /> 待审批与审批后执行
-              {pendingApprovals.length > 0 && (
-                <Badge className="bg-amber-500 text-white text-[10px] px-1.5 py-0">
-                  {pendingApprovals.length}
-                </Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loadingList ? (
-              <div className="space-y-3">
-                {[1, 2].map((i) => <Skeleton key={i} className="h-40 w-full" />)}
-              </div>
-            ) : approvals.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-6 text-center">暂无审批记录</p>
-            ) : (
-              <div className="space-y-3">
-                {approvals.map((item) => (
-                  <ApprovalCard
-                    key={item.id}
-                    item={item}
-                    onDecide={handleDecide}
-                    onSelectRequest={(requestId) => setSelectedId(requestId)}
-                  />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {showRequests && (
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">请求列表</CardTitle>
@@ -1005,8 +579,15 @@ export function CallsPage() {
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <StatusIcon status={req.status} />
-                      <span className="font-mono text-xs truncate">{req.request_id.slice(0, 20)}…</span>
-                      {req.hotline_id && <Badge variant="outline" className="text-[10px] shrink-0">{req.hotline_id}</Badge>}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-mono text-xs truncate">{req.request_id.slice(0, 20)}…</span>
+                          {req.hotline_id && <Badge variant="outline" className="text-[10px] shrink-0">{req.hotline_id}</Badge>}
+                        </div>
+                        {req.responder_id && (
+                          <p className="text-[11px] text-muted-foreground font-mono truncate">{req.responder_id}</p>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {req.created_at && (
@@ -1022,35 +603,55 @@ export function CallsPage() {
             )}
           </CardContent>
         </Card>
-      )}
 
-      <Separator />
-
-      <Collapsible open={testOpen} onOpenChange={setTestOpen}>
-        <CollapsibleTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <FlaskConical className="h-3.5 w-3.5" />
-            手动发起测试 Call
-            <ChevronDown className={cn("h-3 w-3 transition-transform", testOpen && "rotate-180")} />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="pt-3">
+        <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm flex items-center gap-1.5">
-                <FlaskConical className="h-3.5 w-3.5 text-teal-500" /> 手动测试
+                <ShieldCheck className="h-3.5 w-3.5 text-cyan-600" />
+                审批提醒
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <ManualCallForm onCreated={handleCreated} />
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                待审批请求和批准后的执行结果，已经独立放到「审批中心」统一处理。
+              </p>
+              <div className="rounded-md border bg-muted/20 px-3 py-2">
+                <p className="text-xs text-muted-foreground">当前待审批</p>
+                <p className="text-lg font-semibold">{pendingApprovals.length}</p>
+              </div>
+              <Button size="sm" className="w-full" onClick={() => navigate("/caller/approvals")}>
+                前往审批中心
+              </Button>
             </CardContent>
           </Card>
-        </CollapsibleContent>
-      </Collapsible>
+
+          <Collapsible open={testOpen} onOpenChange={setTestOpen}>
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="text-sm flex items-center gap-1.5">
+                    <FlaskConical className="h-3.5 w-3.5 text-cyan-600" /> 手动发起测试 Call
+                  </CardTitle>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-1.5">
+                      {testOpen ? "收起" : "展开"}
+                      <ChevronDown className={cn("h-3 w-3 transition-transform", testOpen && "rotate-180")} />
+                    </Button>
+                  </CollapsibleTrigger>
+                </div>
+              </CardHeader>
+              <CollapsibleContent>
+                <CardContent className="pt-0">
+                  <ManualCallForm onCreated={handleCreated} />
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+        </div>
+      </div>
+
+      <Separator />
     </div>
   )
-}
-
-export function CallerApprovalsPage() {
-  return <Navigate to="/caller/calls?filter=pending-approval" replace />
 }

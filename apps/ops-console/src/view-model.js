@@ -43,7 +43,7 @@ export function renderSetupWizardMarkup(status) {
   const caller = config.caller || {};
   const callerRegistered = caller.api_key_configured === true;
   const hotlines = responder.hotlines || [];
-  const exampleConfigured = hotlines.some((item) => item.hotline_id === "local.summary.v1");
+  const exampleConfigured = hotlines.some((item) => item.hotline_id === "local.delegated-execution.workspace-summary.v1");
   const submittedCount = hotlines.filter((item) => item.submitted_for_review === true).length;
   const pendingReviewCount = hotlines.filter((item) => item.submitted_for_review !== true).length;
   const steps = [
@@ -65,7 +65,7 @@ export function renderSetupWizardMarkup(status) {
       title: "Add Local Example",
       done: exampleConfigured,
       detail: exampleConfigured
-        ? "Official local.summary.v1 demo hotline is configured."
+        ? "Official workspace summary demo hotline is configured."
         : "Install the official example hotline to learn the local responder shape.",
       action: "add-example-hotline",
       actionLabel: "Add Example"
@@ -154,7 +154,7 @@ export function renderCatalogItemsMarkup(items) {
           </div>
           <p class="meta">${item.responder_id} · ${(item.capabilities || []).join(", ") || "no capabilities"}</p>
           <p class="meta">${
-            item.hotline_id === "local.summary.v1" || (item.tags || []).includes("demo")
+            item.hotline_id === "local.delegated-execution.workspace-summary.v1" || (item.tags || []).includes("demo")
               ? "local demo responder"
               : "catalog / remote responder"
           }</p>
@@ -372,7 +372,7 @@ export function renderResponderHotlinesMarkup(items) {
           <p class="meta">Review: ${item.review_status || "local_only"} · ${item.submitted_for_review ? "submitted" : "local only"}</p>
           ${item.metadata?.project?.path ? `<p class="meta">Project: ${item.metadata.project.path}</p>` : ""}
           ${item.metadata?.project?.description ? `<p class="meta">Project Summary: ${item.metadata.project.description}</p>` : ""}
-          <p class="meta">${item.hotline_id === "local.summary.v1" ? "official local demo responder" : "custom local responder"}</p>
+          <p class="meta">${item.hotline_id === "local.delegated-execution.workspace-summary.v1" ? "official workspace summary demo responder" : "custom local responder"}</p>
           <div class="actions">
             <button data-hotline-action="edit" data-hotline-id="${item.hotline_id}">Edit</button>
             ${
