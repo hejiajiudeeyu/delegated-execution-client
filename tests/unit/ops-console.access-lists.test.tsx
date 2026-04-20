@@ -3,8 +3,17 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 import { AccessListsPage } from "../../apps/ops-console/src/pages/caller/AccessListsPage";
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <AccessListsPage />
+    </MemoryRouter>
+  );
+}
 
 interface PolicyShape {
   mode: "manual" | "allow_listed" | "allow_all";
@@ -88,14 +97,14 @@ describe("AccessListsPage", () => {
       blocklist: []
     });
 
-    render(<AccessListsPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.queryByText("名单管理")).toBeTruthy();
     });
 
-    expect(screen.queryByText("全部手动审批")).toBeTruthy();
-    expect(screen.queryByText(/当前审批模式不是/)).toBeTruthy();
+    expect(screen.queryByText(/审批模式：全部手动审批/)).toBeTruthy();
+    expect(screen.queryByText(/下方白名单已保存但当前不会自动放行/)).toBeTruthy();
     expect(screen.queryByText("暂无 Responder 白名单")).toBeTruthy();
   });
 
@@ -107,16 +116,16 @@ describe("AccessListsPage", () => {
       blocklist: []
     });
 
-    render(<AccessListsPage />);
+    renderPage();
     await waitFor(() => expect(screen.queryByText("名单管理")).toBeTruthy());
 
-    expect(screen.queryByText("白名单自动放行")).toBeTruthy();
-    expect(screen.queryByText(/当前审批模式不是/)).toBeFalsy();
+    expect(screen.queryByText(/审批模式：白名单自动放行/)).toBeTruthy();
+    expect(screen.queryByText(/全部手动审批/)).toBeFalsy();
 
-    const input = screen.getByPlaceholderText("my-company-bot") as HTMLInputElement;
+    const input = screen.getByPlaceholderText(/responder_id/) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "my-bot.v1" } });
 
-    const addButton = screen.getByText("加入 Responder").closest("button")!;
+    const addButton = screen.getAllByText("加入名单")[0].closest("button")!;
     await act(async () => {
       fireEvent.click(addButton);
       await flush();
@@ -132,7 +141,7 @@ describe("AccessListsPage", () => {
     expect(putCall).toBeTruthy();
     expect((putCall!.body as PolicyShape).responderWhitelist).toEqual(["my-bot.v1"]);
 
-    const inputAfter = screen.getByPlaceholderText("my-company-bot") as HTMLInputElement;
+    const inputAfter = screen.getByPlaceholderText(/responder_id/) as HTMLInputElement;
     expect(inputAfter.value).toBe("");
   });
 
@@ -144,10 +153,10 @@ describe("AccessListsPage", () => {
       blocklist: []
     });
 
-    render(<AccessListsPage />);
+    renderPage();
     await waitFor(() => expect(screen.queryByText("existing.bot")).toBeTruthy());
 
-    const input = screen.getByPlaceholderText("my-company-bot") as HTMLInputElement;
+    const input = screen.getByPlaceholderText(/responder_id/) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "existing.bot" } });
 
     await act(async () => {
@@ -190,7 +199,7 @@ describe("AccessListsPage", () => {
       })
     );
 
-    render(<AccessListsPage />);
+    renderPage();
     await waitFor(() => expect(screen.queryByText("bot-a")).toBeTruthy());
 
     const removeButton = screen.getByText("移除").closest("button")!;

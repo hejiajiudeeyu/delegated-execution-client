@@ -141,6 +141,11 @@ export function ConsoleSidebar({ currentTab }: { currentTab: TabCtx }) {
     caller: "text-cyan-600",
     responder: "text-orange-600",
   }
+  const sectionDots: Record<TabCtx, string> = {
+    general: "bg-blue-500",
+    caller: "bg-cyan-500",
+    responder: "bg-orange-500",
+  }
 
   const items =
     currentTab === "general"
@@ -154,9 +159,12 @@ export function ConsoleSidebar({ currentTab }: { currentTab: TabCtx }) {
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b border-border">
-        <p className={cn("text-xs font-bold uppercase tracking-widest", sectionColors[currentTab])}>
-          {labels[currentTab]}
-        </p>
+        <div className="flex items-center gap-2">
+          <span className={cn("h-1.5 w-1.5 rounded-full", sectionDots[currentTab])} />
+          <p className={cn("text-xs font-semibold", sectionColors[currentTab])}>
+            {labels[currentTab]}
+          </p>
+        </div>
         {currentTab === "caller" && !callerRegistered && (
           <p className="text-[11px] text-muted-foreground mt-1">未注册</p>
         )}
