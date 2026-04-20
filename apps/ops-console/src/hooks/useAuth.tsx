@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react"
-import { clearSessionToken, requestJson, restoreSessionToken, setSessionToken } from "@/lib/api"
+import { apiCall, clearSessionToken, restoreSessionToken, setSessionToken } from "@/lib/api"
 
 export interface AuthState {
   configured: boolean
@@ -49,17 +49,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
-    try {
-      if (!sessionStorage.getItem("rsp.ops.session")) {
-        await restoreSessionToken()
-      }
-      const res = await requestJson<StatusData>("/status")
-      if (res.body) setStatus(res.body)
-    } catch {
-      /* network error — keep previous state */
-    } finally {
-      setLoading(false)
+    if (!sessionStorage.getItem("rsp.ops.session")) {
+      await restoreSessionToken()
     }
+    const res = await apiCall<StatusData>("/status", { silent: true })
+    if (res.ok && res.data) setStatus(res.data)
+    setLoading(false)
   }, [])
 
   useEffect(() => {
@@ -75,39 +70,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh])
 
   const login = useCallback(async (passphrase: string) => {
-    const res = await requestJson<{ token?: string; error?: { message: string } }>(
+    const res = await apiCall<{ token?: string }>(
       "/auth/session/login",
-      { method: "POST", body: { passphrase } }
+      { method: "POST", body: { passphrase }, silent: true }
     )
-    if (res.status === 200 && res.body?.token) {
-      setSessionToken(res.body.token)
+    if (res.ok && res.data?.token) {
+      setSessionToken(res.data.token)
       await refresh()
       return { ok: true }
     }
-    return { ok: false, error: res.body?.error?.message ?? "认证失败" }
+    return { ok: false, error: res.ok ? "认证失败" : res.error.message }
   }, [refresh])
 
   const logout = useCallback(async () => {
-    await requestJson("/auth/session/logout", { method: "POST" })
+    await apiCall("/auth/session/logout", { method: "POST", silent: true })
     clearSessionToken()
     await refresh()
   }, [refresh])
 
   const setup = useCallback(async (passphrase: string) => {
-    const setupRes = await requestJson("/setup", { method: "POST" })
-    if (setupRes.status !== 200) {
-      return { ok: false, error: "Setup 失败" }
+    const setupRes = await apiCall("/setup", { method: "POST", silent: true })
+    if (!setupRes.ok) {
+      return { ok: false, error: setupRes.error.message }
     }
-    const keyRes = await requestJson<{ token?: string; error?: { message: string } }>(
+    const keyRes = await apiCall<{ token?: string }>(
       "/auth/session/setup",
-      { method: "POST", body: { passphrase } }
+      { method: "POST", body: { passphrase }, silent: true }
     )
-    if ((keyRes.status === 200 || keyRes.status === 201) && keyRes.body?.token) {
-      setSessionToken(keyRes.body.token)
+    if (keyRes.ok && keyRes.data?.token) {
+      setSessionToken(keyRes.data.token)
       await refresh()
       return { ok: true }
     }
-    return { ok: false, error: keyRes.body?.error?.message ?? "Setup 失败" }
+    return { ok: false, error: keyRes.ok ? "Setup 失败" : keyRes.error.message }
   }, [refresh])
 
   return (

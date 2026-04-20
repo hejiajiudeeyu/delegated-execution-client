@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useStatus } from "@/hooks/useStatus"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -119,43 +119,31 @@ export function DashboardPage() {
 
   async function handleRestart(service: string) {
     setRestarting((prev) => ({ ...prev, [service]: true }))
-    try {
-      const res = await requestJson(`/runtime/services/${service}/restart`, { method: "POST" })
-      if (res.status === 200) {
-        toast.success(`${service} 重启指令已发送`, { description: "正在等待服务恢复…" })
-        // 重启后快速连续刷新状态，让用户看到恢复结果
-        for (const delay of [1500, 3000, 5000]) {
-          setTimeout(refresh, delay)
-        }
-      } else {
-        toast.error(`${service} 重启失败`, { description: `服务器返回 ${res.status}` })
-      }
-    } catch {
-      toast.error(`${service} 重启请求失败`, { description: "请检查 ops supervisor 是否运行" })
-    } finally {
-      setRestarting((prev) => ({ ...prev, [service]: false }))
+    const res = await apiCall(`/runtime/services/${service}/restart`, { method: "POST", silent: true })
+    setRestarting((prev) => ({ ...prev, [service]: false }))
+    if (res.ok) {
+      toast.success(`${service} 重启指令已发送`, { description: "正在等待服务恢复…" })
+      for (const delay of [1500, 3000, 5000]) setTimeout(refresh, delay)
+    } else {
+      toast.error(`${service} 重启失败`, { description: res.error.message })
     }
   }
 
   async function handlePlatformToggle(nextEnabled: boolean) {
     setTogglingPlatform(true)
-    try {
-      const res = await requestJson("/platform/settings", {
-        method: "PUT",
-        body: { enabled: nextEnabled },
+    const res = await apiCall("/platform/settings", {
+      method: "PUT",
+      body: { enabled: nextEnabled },
+      silent: true,
+    })
+    setTogglingPlatform(false)
+    if (res.ok) {
+      toast.success(nextEnabled ? "已开启平台发布功能" : "已切换为本地模式", {
+        description: nextEnabled ? "Responder 与 Hotline 现在可以提交到平台审核。" : "本地 Hotline 仍可继续使用，但不再要求平台审核。",
       })
-      if (res.status === 200) {
-        toast.success(nextEnabled ? "已开启平台发布功能" : "已切换为本地模式", {
-          description: nextEnabled ? "Responder 与 Hotline 现在可以提交到平台审核。" : "本地 Hotline 仍可继续使用，但不再要求平台审核。",
-        })
-        await refresh()
-      } else {
-        toast.error("更新平台设置失败", { description: `服务器返回 ${res.status}` })
-      }
-    } catch {
-      toast.error("更新平台设置失败", { description: "请检查 ops supervisor 是否运行" })
-    } finally {
-      setTogglingPlatform(false)
+      await refresh()
+    } else {
+      toast.error("更新平台设置失败", { description: res.error.message })
     }
   }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
+import { usePoll } from "@/hooks/usePoll"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -424,54 +425,57 @@ export function CallerApprovalsPage() {
 
   const load = useCallback(async () => {
     const qs = filter !== "all" ? `?status=${filter}` : ""
-    const res = await requestJson<{ items: ApprovalRecord[] }>(`/caller/approvals${qs}`)
-    if (res.body?.items) setItems(res.body.items)
+    const res = await apiCall<{ items: ApprovalRecord[] }>(`/caller/approvals${qs}`, { silent: true })
+    if (res.ok && res.data?.items) setItems(res.data.items)
     setLoading(false)
   }, [filter])
 
   useEffect(() => {
     setLoading(true)
-    load()
-    // Poll faster (2s) when any approved record has a running execution
-    const hasRunning = items.some(
-      (i) => i.status === "approved" && i.execution?.status === "running"
-    )
-    const interval = hasRunning ? 2000 : 5000
-    const timer = setInterval(load, interval)
-    return () => clearInterval(timer)
-  }, [load, items.some((i) => i.execution?.status === "running")])
+    void load()
+  }, [load])
+
+  // Poll the list. Tighten to 2s while any approved record is mid-execution
+  // so the UI shows running -> succeeded transitions promptly.
+  usePoll(load, {
+    intervalMs: 5000,
+    fastIntervalMs: 2000,
+    fastWhen: () => items.some((i) => i.status === "approved" && i.execution?.status === "running"),
+    skipInitial: true,
+  })
 
   const pendingCount = items.filter((i) => i.status === "pending").length
 
   async function handleDecide(id: string, action: "approve" | "reject") {
-    const res = await requestJson(`/caller/approvals/${id}/${action}`, { method: "POST" })
-    if (res.status === 200) {
+    const res = await apiCall(`/caller/approvals/${id}/${action}`, { method: "POST", silent: true })
+    if (res.ok) {
       toast.success(action === "approve" ? "已批准，Agent 可继续执行" : "已拒绝调用请求")
       load()
     } else {
-      toast.error("操作失败，请刷新后重试")
+      toast.error("操作失败，请刷新后重试", { description: res.error.message })
     }
   }
 
   async function handleAllowHotline(item: ApprovalRecord) {
-    const policyRes = await requestJson<GlobalPolicy>("/caller/global-policy")
-    const policy = policyRes.status === 200 ? policyRes.body : null
-    if (!policy) {
-      toast.error("无法读取当前策略")
+    const policyRes = await apiCall<GlobalPolicy>("/caller/global-policy", { silent: true })
+    if (!policyRes.ok || !policyRes.data) {
+      toast.error("无法读取当前策略", { description: policyRes.ok ? undefined : policyRes.error.message })
       return
     }
+    const policy = policyRes.data
     if (policy.hotlineWhitelist.includes(item.hotlineId)) {
       toast.info("该 Hotline 已在白名单中")
       return
     }
-    const saveRes = await requestJson<GlobalPolicy>("/caller/global-policy", {
+    const saveRes = await apiCall<GlobalPolicy>("/caller/global-policy", {
       method: "PUT",
+      silent: true,
       body: {
         ...policy,
         hotlineWhitelist: [...policy.hotlineWhitelist, item.hotlineId],
       },
     })
-    if (saveRes.status === 200 && saveRes.body) {
+    if (saveRes.ok && saveRes.data) {
       toast.success(
         policy.mode === "allow_listed"
           ? "已加入 Hotline 白名单，后续可自动放行"
@@ -479,7 +483,7 @@ export function CallerApprovalsPage() {
       )
       return
     }
-    toast.error("加入白名单失败，请重试")
+    toast.error("加入白名单失败，请重试", { description: saveRes.ok ? undefined : saveRes.error.message })
   }
 
   const FILTERS: { value: ApprovalStatus | "all"; label: string }[] = [

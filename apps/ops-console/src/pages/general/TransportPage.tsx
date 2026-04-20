@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -26,10 +26,10 @@ export function TransportPage() {
   const [error, setError] = useState("")
 
   useEffect(() => {
-    requestJson<Transport>("/runtime/transport").then((res) => {
-      if (res.status === 200 && res.body) {
-        setTransport(res.body)
-        setEditing(res.body)
+    apiCall<Transport>("/runtime/transport", { silent: true }).then((res) => {
+      if (res.ok && res.data) {
+        setTransport(res.data)
+        setEditing(res.data)
       }
     })
   }, [])
@@ -38,25 +38,25 @@ export function TransportPage() {
     if (!editing) return
     setSaving(true)
     setError("")
-    const res = await requestJson("/runtime/transport", { method: "PUT", body: editing })
+    const res = await apiCall("/runtime/transport", { method: "PUT", body: editing, silent: true })
     setSaving(false)
-    if (res.status === 200) {
+    if (res.ok) {
       setTransport(editing)
-    } else if (res.status === 401) {
-      setError("会话已过期，正在跳转到登录页…")
     } else {
-      setError("保存失败")
+      setError(res.error.message)
     }
   }
 
   const handleTest = async () => {
     setTesting(true)
     setTestResult(null)
-    const res = await requestJson<{ ok: boolean; message?: string }>("/runtime/transport/test", {
+    const res = await apiCall<{ ok: boolean; message?: string }>("/runtime/transport/test", {
       method: "POST",
+      silent: true,
     })
     setTesting(false)
-    if (res.body) setTestResult(res.body)
+    if (res.ok && res.data) setTestResult(res.data)
+    else if (!res.ok) setTestResult({ ok: false, message: res.error.message })
   }
 
   if (!editing) {

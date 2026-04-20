@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import type { JSX } from "react"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -167,27 +167,27 @@ export function RuntimePage() {
     else setRefreshing(true)
     const loadedAt = new Date().toLocaleTimeString()
     const [logsRes, alertsRes, statusRes] = await Promise.all([
-      requestJson<ServiceLogs>(`/runtime/logs?service=${service}&max_lines=500`),
-      requestJson<ServiceAlerts>(`/runtime/alerts?service=${service}&max_items=20`),
-      requestJson<StatusResponse>("/status"),
+      apiCall<ServiceLogs>(`/runtime/logs?service=${service}&max_lines=500`, { silent: true }),
+      apiCall<ServiceAlerts>(`/runtime/alerts?service=${service}&max_items=20`, { silent: true }),
+      apiCall<StatusResponse>("/status", { silent: true }),
     ])
-    if (logsRes.status === 200 && logsRes.body) {
-      const newLines: LogEntry[] = (logsRes.body.logs ?? []).map((text) => ({ kind: "line" as const, text }))
+    if (logsRes.ok && logsRes.data) {
+      const newLines: LogEntry[] = (logsRes.data.logs ?? []).map((text) => ({ kind: "line" as const, text }))
       const separator: LogEntry = { kind: "separator", ts: `── 加载于 ${loadedAt} ──` }
       setEntries([...newLines, separator])
-      setLogFile(logsRes.body.file ?? "")
+      setLogFile(logsRes.data.file ?? "")
     }
-    if (alertsRes.status === 200 && alertsRes.body) setAlerts(alertsRes.body.alerts ?? [])
-    if (statusRes.status === 200 && statusRes.body?.runtime) {
-      setServiceHealth(statusRes.body.runtime)
+    if (alertsRes.ok && alertsRes.data) setAlerts(alertsRes.data.alerts ?? [])
+    if (statusRes.ok && statusRes.data?.runtime) {
+      setServiceHealth(statusRes.data.runtime)
     }
     if (!silent) setLoading(false)
     else setRefreshing(false)
   }
 
   const loadSnapshot = async () => {
-    const res = await requestJson<Record<string, unknown>>("/debug/snapshot")
-    if (res.status === 200 && res.body) setSnapshot(res.body)
+    const res = await apiCall<Record<string, unknown>>("/debug/snapshot", { silent: true })
+    if (res.ok && res.data) setSnapshot(res.data)
   }
 
   useEffect(() => {
@@ -222,7 +222,7 @@ export function RuntimePage() {
     alertMessages.some((m) => pattern.test(m))
   )
   const clearAlerts = async () => {
-    await requestJson("/runtime/alerts", { method: "DELETE" })
+    await apiCall("/runtime/alerts", { method: "DELETE" })
     setAlerts([])
   }
 
@@ -383,7 +383,7 @@ export function RuntimePage() {
                 className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
                 onClick={async () => {
                   setEntries([])
-                  await requestJson(`/runtime/logs?service=${activeService}`, { method: "DELETE" })
+                  await apiCall(`/runtime/logs?service=${activeService}`, { method: "DELETE" })
                 }}
               >
                 <Trash2 className="h-3 w-3 mr-1" />清除

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -63,9 +63,9 @@ export function CatalogPage() {
   const [detailLoading, setDetailLoading] = useState(false)
 
   useEffect(() => {
-    requestJson<{ items: HotlineItem[] }>("/catalog/hotlines").then((res) => {
-      if (res.body?.items) {
-        setItems(res.body.items)
+    apiCall<{ items: HotlineItem[] }>("/catalog/hotlines", { silent: true }).then((res) => {
+      if (res.ok && res.data?.items) {
+        setItems(res.data.items)
       }
       setLoading(false)
     })
@@ -102,8 +102,8 @@ export function CatalogPage() {
         return
       }
       setDetailLoading(true)
-      const res = await requestJson<HotlineDetail>(`/catalog/hotlines/${encodeURIComponent(selectedId)}`)
-      setDetail(res.body ?? null)
+      const res = await apiCall<HotlineDetail>(`/catalog/hotlines/${encodeURIComponent(selectedId)}`, { silent: true })
+      setDetail(res.ok ? res.data ?? null : null)
       setDetailLoading(false)
     }
     void loadDetail()

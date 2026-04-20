@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
+import { usePoll } from "@/hooks/usePoll"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -36,6 +37,7 @@ interface RequestItem {
 
 interface ApprovalRecord {
   status: "pending" | "approved" | "rejected" | "expired"
+  execution?: { status?: string }
 }
 
 interface PreparedCandidate {
@@ -107,29 +109,33 @@ function RequestDetail({ requestId, onClose }: { requestId: string; onClose: () 
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
   const [resultPending, setResultPending] = useState(false)
   const [loading, setLoading] = useState(true)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchDetail = useCallback(async () => {
     const [dRes, rRes] = await Promise.all([
-      requestJson<Record<string, unknown>>(`/requests/${requestId}`),
-      requestJson<Record<string, unknown>>(`/requests/${requestId}/result`),
+      apiCall<Record<string, unknown>>(`/requests/${requestId}`, { silent: true }),
+      apiCall<Record<string, unknown>>(`/requests/${requestId}/result`, { silent: true }),
     ])
-    if (dRes.body) setDetail(dRes.body)
-    const resultBody = rRes.body as { available?: boolean; status?: string; result_package?: Record<string, unknown> | null } | null
+    if (dRes.ok && dRes.data) setDetail(dRes.data)
+    const resultBody = rRes.ok
+      ? (rRes.data as { available?: boolean; status?: string; result_package?: Record<string, unknown> | null } | null)
+      : null
     const available = resultBody?.available === true
-    setResultPending(Boolean(rRes.status === 200 && resultBody && !available))
-    if (rRes.status === 200 && available && resultBody?.result_package) {
+    setResultPending(Boolean(rRes.ok && resultBody && !available))
+    if (rRes.ok && available && resultBody?.result_package) {
       setResult(resultBody.result_package)
-      if (pollRef.current) clearInterval(pollRef.current)
     }
     setLoading(false)
   }, [requestId])
 
-  useEffect(() => {
-    fetchDetail()
-    pollRef.current = setInterval(fetchDetail, 3000)
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [fetchDetail])
+  useEffect(() => { void fetchDetail() }, [fetchDetail])
+
+  // Stop polling once the result has materialized — otherwise keep refreshing
+  // every 3s while the executor is still working.
+  usePoll(fetchDetail, {
+    intervalMs: 3000,
+    enabled: result === null,
+    skipInitial: true,
+  })
 
   const status = (detail as { status?: string } | null)?.status ?? "pending"
 
@@ -215,15 +221,16 @@ function ManualCallForm({ onCreated }: { onCreated: (id: string) => void }) {
         return
       }
       setDetailLoading(true)
-      const res = await requestJson<HotlineDetail>(`/catalog/hotlines/${encodeURIComponent(hotlineId)}`)
+      const res = await apiCall<HotlineDetail>(`/catalog/hotlines/${encodeURIComponent(hotlineId)}`, { silent: true })
       setDetailLoading(false)
-      if (res.status === 200 && res.body) {
-        setHotlineDetail(res.body)
-        if (!responderId && res.body.responder_id) setResponderId(res.body.responder_id)
-        if (!taskType && res.body.task_types?.[0]) setTaskType(res.body.task_types[0])
+      if (res.ok && res.data) {
+        const detail = res.data
+        setHotlineDetail(detail)
+        if (!responderId && detail.responder_id) setResponderId(detail.responder_id)
+        if (!taskType && detail.task_types?.[0]) setTaskType(detail.task_types[0])
         setSchemaValues((current) => {
           const next: Record<string, string> = {}
-          for (const [field, definition] of Object.entries(res.body?.input_schema?.properties ?? {})) {
+          for (const [field, definition] of Object.entries(detail.input_schema?.properties ?? {})) {
             if (current[field] != null) next[field] = current[field]
             else if (typeof definition.default === "string") next[field] = definition.default
             else if (definition.enum?.length) next[field] = definition.enum[0]
@@ -247,8 +254,9 @@ function ManualCallForm({ onCreated }: { onCreated: (id: string) => void }) {
     if (!hotlineId) return
     setLoading(true)
     setError("")
-    const res = await requestJson<PreparedCall>("/calls/prepare", {
+    const res = await apiCall<PreparedCall>("/calls/prepare", {
       method: "POST",
+      silent: true,
       body: {
         hotline_id: hotlineId,
         responder_id: responderId || undefined,
@@ -257,15 +265,15 @@ function ManualCallForm({ onCreated }: { onCreated: (id: string) => void }) {
       },
     })
     setLoading(false)
-    if (res.status === 200 && res.body) {
-      setPrepared(res.body)
-      const nextSelected = res.body.selected_hotline
+    if (res.ok && res.data) {
+      const prep = res.data
+      setPrepared(prep)
+      const nextSelected = prep.selected_hotline
       setSelectedKey(nextSelected ? `${nextSelected.responder_id}:${nextSelected.hotline_id}` : "")
-      if (!taskType && res.body.task_type) setTaskType(res.body.task_type)
+      if (!taskType && prep.task_type) setTaskType(prep.task_type)
       if (!responderId && nextSelected?.responder_id) setResponderId(nextSelected.responder_id)
     } else {
-      const err = res.body as { error?: { message?: string } } | null
-      setError(err?.error?.message ?? "Prepare 失败")
+      setError(res.ok ? "Prepare 失败" : res.error.message)
     }
   }
 
@@ -284,12 +292,14 @@ function ManualCallForm({ onCreated }: { onCreated: (id: string) => void }) {
       : { text: textFallbackValue }
     setConfirming(true)
     const res = isOfficialExampleHotline
-      ? await requestJson<{ request_id: string }>("/requests/example", {
+      ? await apiCall<{ request_id: string }>("/requests/example", {
           method: "POST",
+          silent: true,
           body: {},
         })
-      : await requestJson<{ request_id: string }>("/calls/confirm", {
+      : await apiCall<{ request_id: string }>("/calls/confirm", {
           method: "POST",
+          silent: true,
           body: {
             responder_id: selectedHotline.responder_id,
             hotline_id: selectedHotline.hotline_id,
@@ -306,13 +316,12 @@ function ManualCallForm({ onCreated }: { onCreated: (id: string) => void }) {
           },
         })
     setConfirming(false)
-    if ((res.status === 200 || res.status === 201) && res.body?.request_id) {
-      onCreated(res.body.request_id)
+    if (res.ok && res.data?.request_id) {
+      onCreated(res.data.request_id)
       setPrepared(null)
       setSelectedKey("")
     } else {
-      const err = res.body as { error?: { message?: string } } | null
-      setError(err?.error?.message ?? "Confirm 失败")
+      setError(res.ok ? "Confirm 失败" : res.error.message)
     }
   }
 
@@ -474,28 +483,28 @@ export function CallsPage() {
 
   const loadData = useCallback(async () => {
     const [requestsRes, approvalsRes] = await Promise.all([
-      requestJson<{ items?: RequestItem[]; requests?: RequestItem[] }>("/requests"),
-      requestJson<{ items?: ApprovalRecord[] }>("/caller/approvals"),
+      apiCall<{ items?: RequestItem[]; requests?: RequestItem[] }>("/requests", { silent: true }),
+      apiCall<{ items?: ApprovalRecord[] }>("/caller/approvals", { silent: true }),
     ])
-    const requestItems = requestsRes.body?.items ?? requestsRes.body?.requests ?? []
-    const approvalItems = approvalsRes.body?.items ?? []
+    const requestItems = requestsRes.ok ? requestsRes.data?.items ?? requestsRes.data?.requests ?? [] : []
+    const approvalItems = approvalsRes.ok ? approvalsRes.data?.items ?? [] : []
     if (Array.isArray(requestItems)) setRequests(requestItems)
     if (Array.isArray(approvalItems)) setApprovals(approvalItems)
     setLoadingList(false)
   }, [])
 
   useEffect(() => {
-    loadData()
+    void loadData()
   }, [loadData])
 
-  useEffect(() => {
-    const hasRunningApprovalExecution = approvals.some(
-      (item) => item.status === "approved" && item.execution?.status === "running"
-    )
-    const interval = hasRunningApprovalExecution ? 2000 : 5000
-    const timer = setInterval(loadData, interval)
-    return () => clearInterval(timer)
-  }, [loadData, approvals])
+  // Tighten poll cadence while any approved request is still executing so the
+  // list flips to a terminal state quickly.
+  usePoll(loadData, {
+    intervalMs: 5000,
+    fastIntervalMs: 2000,
+    fastWhen: () => approvals.some((item) => item.status === "approved" && item.execution?.status === "running"),
+    skipInitial: true,
+  })
 
   const handleCreated = (id: string) => {
     setSelectedId(id)

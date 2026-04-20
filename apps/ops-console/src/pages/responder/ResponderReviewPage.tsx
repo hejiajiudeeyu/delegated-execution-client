@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -48,9 +48,11 @@ export function ResponderReviewPage() {
   const [lastVerification, setLastVerification] = useState<Record<string, VerificationSummary>>({})
 
   const load = async () => {
-    const res = await requestJson<{ items: Hotline[]; platform_enabled?: boolean }>("/responder/hotlines")
-    if (res.body?.items) setHotlines(res.body.items)
-    setPlatformEnabled(res.body?.platform_enabled === true)
+    const res = await apiCall<{ items: Hotline[]; platform_enabled?: boolean }>("/responder/hotlines")
+    if (res.ok && res.data) {
+      setHotlines(res.data.items ?? [])
+      setPlatformEnabled(res.data.platform_enabled === true)
+    }
     setLoading(false)
   }
 
@@ -58,12 +60,12 @@ export function ResponderReviewPage() {
 
   const handleSubmitReview = async () => {
     setSubmitting(true); setSubmitResult(null)
-    const res = await requestJson<SubmitResponse>("/responder/submit-review", { method: "POST" })
+    const res = await apiCall<SubmitResponse>("/responder/submit-review", { method: "POST", silent: true })
     setSubmitting(false)
-    if (res.status === 200 || res.status === 201) {
-      setSubmitResult({ ok: true, message: `已提交 ${res.body?.submitted ?? 0} 个 Hotline 审核` })
+    if (res.ok) {
+      setSubmitResult({ ok: true, message: `已提交 ${res.data?.submitted ?? 0} 个 Hotline 审核` })
       const nextVerification = Object.fromEntries(
-        (res.body?.results || [])
+        (res.data?.results || [])
           .filter((item) => item.hotline_id && item.verification)
           .map((item) => [item.hotline_id, item.verification as VerificationSummary])
       )
@@ -72,19 +74,19 @@ export function ResponderReviewPage() {
       }
       load()
     } else {
-      const err = res.body as { error?: { message?: string } } | null
-      setSubmitResult({ ok: false, message: err?.error?.message ?? "提交失败" })
+      setSubmitResult({ ok: false, message: res.error.message })
     }
   }
 
   const handleSubmitSingleDraft = async (hotlineId: string) => {
     setSubmittingHotlineId(hotlineId)
-    const res = await requestJson<SubmitResponse>(`/responder/hotlines/${encodeURIComponent(hotlineId)}/submit-review`, {
+    const res = await apiCall<SubmitResponse>(`/responder/hotlines/${encodeURIComponent(hotlineId)}/submit-review`, {
       method: "POST",
+      silent: true,
     })
     setSubmittingHotlineId(null)
-    if (res.status === 200 || res.status === 201) {
-      const result = res.body?.results?.[0]
+    if (res.ok) {
+      const result = res.data?.results?.[0]
       if (result?.verification) {
         setLastVerification((current) => ({ ...current, [hotlineId]: result.verification as VerificationSummary }))
       }
@@ -94,8 +96,7 @@ export function ResponderReviewPage() {
       load()
       return
     }
-    const err = res.body as { error?: { message?: string } } | null
-    toast.error("提交草稿失败", { description: err?.error?.message ?? "请稍后重试" })
+    toast.error("提交草稿失败", { description: res.error.message })
   }
 
   const pendingCount = hotlines.filter((h) => !h.submitted_for_review).length

@@ -15,7 +15,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/components/ui/utils"
 import { useAuth } from "@/hooks/useAuth"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { isCallerRegistered } from "@/lib/status"
 
 type TabCtx = "general" | "caller" | "responder"
@@ -112,9 +112,9 @@ export function ConsoleSidebar({ currentTab }: { currentTab: TabCtx }) {
     if (!callerRegistered) return
     let active = true
     async function fetchPending() {
-      const res = await requestJson<{ pendingCount: number }>("/caller/approvals?status=pending").catch(() => null)
-      if (active && res?.body?.pendingCount != null) {
-        setPendingApprovals(res.body.pendingCount)
+      const res = await apiCall<{ pendingCount: number }>("/caller/approvals?status=pending", { silent: true })
+      if (active && res.ok && res.data?.pendingCount != null) {
+        setPendingApprovals(res.data.pendingCount)
       }
     }
     fetchPending()

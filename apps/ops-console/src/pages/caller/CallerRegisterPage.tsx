@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,18 +52,18 @@ export function CallerRegisterPage() {
     if (!email) return
     setLoading(true)
     setError("")
-    const res = await requestJson("/auth/register-caller", {
+    const res = await apiCall("/auth/register-caller", {
       method: "POST",
       body: { contact_email: email, mode: "local_only" },
+      silent: true,
     })
     setLoading(false)
-    if (res.status === 201) {
+    if (res.ok) {
       setSuccess(true)
       await refresh()
       setTimeout(() => navigate("/caller/catalog"), 1500)
     } else {
-      const err = res.body as { error?: { message?: string } } | null
-      setError(err?.error?.message ?? "注册失败，请重试")
+      setError(res.error.message)
     }
   }
 

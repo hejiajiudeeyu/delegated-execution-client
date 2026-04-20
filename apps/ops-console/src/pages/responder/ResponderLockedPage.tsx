@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -50,17 +50,17 @@ export function ResponderLockedPage() {
     if (!responderId || !displayName) return
     setLoading(true)
     setError("")
-    const res = await requestJson("/responder/enable", {
+    const res = await apiCall("/responder/enable", {
       method: "POST",
       body: { responder_id: responderId, display_name: displayName },
+      silent: true,
     })
     setLoading(false)
-    if (res.status === 200) {
+    if (res.ok) {
       await refresh()
       navigate("/responder")
     } else {
-      const err = res.body as { error?: { message?: string } } | null
-      setError(err?.error?.message ?? "启用失败")
+      setError(res.error.message)
     }
   }
 

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert } from "@/components/ui/alert"
 import { useAuth } from "@/hooks/useAuth"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { cn } from "@/components/ui/utils"
 
 const BRAND_COLORS = ["#FACC15", "#8B5CF6", "#3B82F6", "#EC4899", "#A3E635", "#F97316", "#6366F1", "#EF4444", "#14B8A6"]
@@ -149,18 +149,18 @@ export function SetupPage() {
     if (!email) return
     setRegisterLoading(true)
     setRegisterError("")
-    const res = await requestJson("/auth/register-caller", {
+    const res = await apiCall("/auth/register-caller", {
       method: "POST",
       body: { contact_email: email, mode: "local_only" },
+      silent: true,
     })
     setRegisterLoading(false)
-    if (res.status === 201) {
+    if (res.ok) {
       await refresh()
       setRegisterDone(true)
       setTimeout(() => setStep("done"), 800)
     } else {
-      const err = res.body as { error?: { message?: string } } | null
-      setRegisterError(err?.error?.message ?? "注册失败，请检查本地运行状态")
+      setRegisterError(res.error.message)
     }
   }
 

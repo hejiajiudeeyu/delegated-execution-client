@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -190,8 +190,8 @@ export function AccessListsPage() {
   const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
-    const res = await requestJson<GlobalPolicy>("/caller/global-policy")
-    if (res.status === 200 && res.body) setPolicy(normalizePolicy(res.body))
+    const res = await apiCall<GlobalPolicy>("/caller/global-policy")
+    if (res.ok && res.data) setPolicy(normalizePolicy(res.data))
     setLoading(false)
   }, [])
 
@@ -210,17 +210,15 @@ export function AccessListsPage() {
 
   async function save(next: GlobalPolicy, successText: string) {
     setSaving(true)
-    const res = await requestJson<GlobalPolicy>("/caller/global-policy", {
+    const res = await apiCall<GlobalPolicy>("/caller/global-policy", {
       method: "PUT",
       body: next,
     })
     setSaving(false)
-    if (res.status === 200 && res.body) {
-      setPolicy(normalizePolicy(res.body))
+    if (res.ok && res.data) {
+      setPolicy(normalizePolicy(res.data))
       toast.success(successText)
-      return
     }
-    toast.error("保存失败，请重试")
   }
 
   async function addToList(key: ListKey, value: string) {

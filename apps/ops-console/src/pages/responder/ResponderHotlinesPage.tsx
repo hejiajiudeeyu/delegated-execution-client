@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -271,8 +271,9 @@ function AddHotlineDialog({
     if (!form.hotline_id) return
     setSaving(true); setError("")
     const adapter = form.adapter_type === "process" ? { cmd: form.cmd } : { url: form.url }
-    const res = await requestJson("/responder/hotlines", {
+    const res = await apiCall("/responder/hotlines", {
       method: "POST",
+      silent: true,
       body: {
         hotline_id: form.hotline_id,
         display_name: form.display_name || form.hotline_id,
@@ -289,12 +290,11 @@ function AddHotlineDialog({
       },
     })
     setSaving(false)
-    if (res.status === 201 || res.status === 200) {
+    if (res.ok) {
       onAdded(); onClose()
       setForm({ hotline_id: "", display_name: "", adapter_type: "process", cmd: "", url: "", task_types: "", capabilities: "", tags: "", soft_timeout_s: "60", hard_timeout_s: "180" })
     } else {
-      const err = res.body as { error?: { message?: string } } | null
-      setError(err?.error?.message ?? "添加失败")
+      setError(res.error.message)
     }
   }
 
@@ -375,41 +375,44 @@ export function ResponderHotlinesPage() {
   const [selectedDraft, setSelectedDraft] = useState<DraftResponse | null>(null)
 
   const load = async () => {
-    const res = await requestJson<{ items: Hotline[]; platform_enabled?: boolean }>("/responder/hotlines")
-    if (res.body?.items) setHotlines(res.body.items)
-    setPlatformEnabled(res.body?.platform_enabled === true)
+    const res = await apiCall<{ items: Hotline[]; platform_enabled?: boolean }>("/responder/hotlines")
+    if (res.ok && res.data) {
+      setHotlines(res.data.items ?? [])
+      setPlatformEnabled(res.data.platform_enabled === true)
+    }
     setLoading(false)
   }
 
   useEffect(() => { load() }, [])
 
   const handleToggle = async (id: string, enabled: boolean) => {
-    await requestJson(`/responder/hotlines/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`, { method: "POST" })
+    await apiCall(`/responder/hotlines/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`, { method: "POST" })
     load()
   }
 
   const handleDelete = async (id: string) => {
-    await requestJson(`/responder/hotlines/${encodeURIComponent(id)}`, { method: "DELETE" })
+    await apiCall(`/responder/hotlines/${encodeURIComponent(id)}`, { method: "DELETE" })
     load()
   }
 
   const handleAddExample = async () => {
-    await requestJson("/responder/hotlines/example", { method: "POST" })
+    await apiCall("/responder/hotlines/example", { method: "POST" })
     load()
   }
 
   const handleShowDraft = async (id: string) => {
     setDraftLoading(true)
     setDraftOpen(true)
-    const res = await requestJson<DraftResponse>(`/responder/hotlines/${encodeURIComponent(id)}/draft`)
+    const res = await apiCall<DraftResponse>(`/responder/hotlines/${encodeURIComponent(id)}/draft`, { silent: true })
     setDraftLoading(false)
-    if (res.status === 200 && res.body) {
-      setSelectedDraft(res.body)
+    if (res.ok && res.data) {
+      setSelectedDraft(res.data)
       return
     }
     setSelectedDraft(null)
-    const err = res.body as { error?: { message?: string } } | null
-    toast.error("读取草稿失败", { description: err?.error?.message ?? "请稍后重试" })
+    toast.error("读取草稿失败", {
+      description: res.ok ? "请稍后重试" : res.error.message,
+    })
   }
 
   const draftDoc = (selectedDraft?.draft ?? null) as DraftDocument | null

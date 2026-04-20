@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { requestJson } from "@/lib/api"
+import { apiCall } from "@/lib/api"
 import type { StatusData } from "./useAuth"
 
 export function useStatus(intervalMs = 10000) {
@@ -7,12 +7,8 @@ export function useStatus(intervalMs = 10000) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchStatus = async () => {
-    try {
-      const res = await requestJson<StatusData>("/status")
-      if (res.body) setData(res.body)
-    } catch {
-      /* ignore */
-    }
+    const res = await apiCall<StatusData>("/status", { silent: true })
+    if (res.ok && res.data) setData(res.data)
   }
 
   useEffect(() => {
