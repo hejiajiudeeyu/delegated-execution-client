@@ -23,8 +23,9 @@ interface BrandBackdropProps {
  *
  * - `auth`     full-strength: 9-cell color grid + brand-grid SVG + black/violet
  *              geometric shapes. The "wow on entry" surface for setup/unlock.
- * - `workspace` faint watermark: brand-grid SVG only, ~3.5% opacity. Sits
- *              behind the working console without competing with cards.
+ * - `workspace` light wash: 9-cell color grid at ~8% + brand-grid SVG at ~6%.
+ *              Sits behind console-mode chrome without competing with cards
+ *              (cards stay opaque white via `--card`).
  *
  * The SVG `<pattern>` id is variant-scoped so both can theoretically coexist
  * in the same DOM without collision.
@@ -35,15 +36,18 @@ export function BrandBackdrop({ variant }: BrandBackdropProps) {
 
   return (
     <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden="true">
-      {isAuth && (
-        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-40">
-          {BRAND_COLORS.map((color, index) => (
-            <div key={`${color}-${index}`} style={{ backgroundColor: color }} />
-          ))}
-        </div>
-      )}
+      <div
+        className={cn(
+          "absolute inset-0 grid grid-cols-3 grid-rows-3",
+          isAuth ? "opacity-40" : "opacity-[0.08]",
+        )}
+      >
+        {BRAND_COLORS.map((color, index) => (
+          <div key={`${color}-${index}`} style={{ backgroundColor: color }} />
+        ))}
+      </div>
 
-      <div className={cn("absolute inset-0", isAuth ? "opacity-20" : "opacity-[0.035]")}>
+      <div className={cn("absolute inset-0", isAuth ? "opacity-20" : "opacity-[0.06]")}>
         <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <pattern id={patternId} x="0" y="0" width="200" height="200" patternUnits="userSpaceOnUse">

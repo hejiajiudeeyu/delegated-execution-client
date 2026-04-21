@@ -19,6 +19,7 @@ import { ResponderLockedPage } from "@/pages/responder/ResponderLockedPage"
 import { ResponderOverviewPage } from "@/pages/responder/ResponderOverviewPage"
 import { ResponderHotlinesPage } from "@/pages/responder/ResponderHotlinesPage"
 import { ResponderReviewPage } from "@/pages/responder/ResponderReviewPage"
+import { HelpPage } from "@/pages/help/HelpPage"
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { status, loading } = useAuth()
@@ -88,6 +89,8 @@ function AppRoutes() {
           <Route path="hotlines" element={<ResponderHotlinesPage />} />
           <Route path="review" element={<ResponderReviewPage />} />
         </Route>
+
+        <Route path="help" element={<HelpPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
