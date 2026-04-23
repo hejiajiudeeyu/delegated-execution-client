@@ -1,10 +1,29 @@
 # delegated-execution-client
 
-Client-side runtime and local web console for delegated execution.
-
-Install once and use `delexec-ops` to act as a **Caller** (delegate tasks to remote Hotlines) or a **Responder** (expose local projects as Hotlines for others to call).
+> **Part of [CALL ANYTHING](https://callanything.xyz/)** — the open protocol that lets any AI agent dial any external capability.
+> This repository is the **end-user CLI and local runtime**: with a single `delexec-ops` install you can either delegate tasks to remote Hotlines (as a **Caller**) or publish a local project as a Hotline that any agent can dial (as a **Responder**).
+>
+> 📖 [Docs](https://callanything.xyz/docs/) · [Quick Start — Caller](https://callanything.xyz/docs/quick-start-caller/) · [Quick Start — Responder](https://callanything.xyz/docs/quick-start-responder/) · [Glossary](https://callanything.xyz/glossary/) · [Blog](https://callanything.xyz/blog/) · [Marketplace](https://callanything.xyz/marketplace/)
 
 > 中文版：[README.zh-CN.md](README.zh-CN.md)
+
+---
+
+## What is CALL ANYTHING?
+
+CALL ANYTHING is an open protocol for **delegated execution** between AI agents and external capability providers. The shape is small enough to learn in 60 seconds:
+
+- **Hotline** — one standardized contract that bundles identity, billing, approval, observability and routing into a single dial-able capability. A Hotline can be **exposed as** an MCP server, an OpenAPI endpoint, or a `SKILL.md` — those are interfaces; Hotline is the product form.
+- **Caller / Responder** — every call has two ends. A Caller is usually an AI agent (or agent team) inside Cursor / Claude Code / a custom runtime. A Responder is usually a **One-Person Company (OPC)** — an individual operator who packages private expertise into a 7×24 agent-callable, per-call-billable service.
+- **This client** is what runs on both ends. `delexec-ops` is the supervisor process that mounts your local Hotlines, forwards calls, records ops events, and exposes a local web console — for both Caller-side governance (approval policies, call logs, billing) and Responder-side operation (Hotline management, version rollouts, revenue).
+
+If you're an OPC who wants to turn your private knowledge / workflows into a callable, billable Hotline — **this repo is your starting point**. After local mode works, opt into the self-hosted platform ([delegated-execution-platform-selfhost](https://github.com/hejiajiudeeyu/delegated-execution-platform-selfhost)) for catalog publishing, or list on the public marketplace at [callanything.xyz/marketplace](https://callanything.xyz/marketplace/).
+
+Companion repositories:
+
+- 📐 **Protocol truth-source** — [delegated-execution-protocol](https://github.com/hejiajiudeeyu/delegated-execution-protocol) (publishes `@delexec/contracts`)
+- 🚀 **Self-hosted platform & operator console** — [delegated-execution-platform-selfhost](https://github.com/hejiajiudeeyu/delegated-execution-platform-selfhost)
+- 🌐 **Public marketplace, docs, brand site** — [callanything.xyz](https://callanything.xyz/)
 
 ---
 

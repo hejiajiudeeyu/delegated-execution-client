@@ -3,9 +3,28 @@
 > 英文版：[README.md](README.md)
 > 说明：中文文档为准。
 
-委托执行的客户端运行时与本地 Web 控制台。
+> **属于 [CALL ANYTHING](https://callanything.xyz/)** —— 让任意 AI Agent 调用任意外部能力的开放协议。
+> 本仓库是 **终端用户 CLI 与本地运行时**：装一次 `delexec-ops`，既可以作为 **Caller** 把任务委托给远端 Hotline，也可以作为 **Responder** 把本地项目发布成任何 Agent 都能拨通的 Hotline。
+>
+> 📖 [Docs](https://callanything.xyz/docs/) · [Caller 快速开始](https://callanything.xyz/docs/quick-start-caller/) · [Responder 快速开始](https://callanything.xyz/docs/quick-start-responder/) · [术语表](https://callanything.xyz/glossary/) · [Blog](https://callanything.xyz/blog/) · [Marketplace](https://callanything.xyz/marketplace/)
 
-安装 `delexec-ops` 后，可作为 **Caller**（将任务委托给远端 Hotline）或 **Responder**（将本地项目发布为 Hotline 供他人调用）。
+---
+
+## 关于 CALL ANYTHING
+
+CALL ANYTHING 是一套面向 **AI Agent 委托外部能力（delegated execution）** 的开放协议。模型很小，60 秒能学完：
+
+- **Hotline** —— 把身份、计费、审批、可观测、路由全部固化在协议里的标准化能力契约。一根 Hotline 可以**暴露成** MCP server、OpenAPI 端点或 `SKILL.md` —— 那些只是接入面，Hotline 才是产品形态。
+- **Caller / Responder** —— 每一通调用都有两端。Caller 通常是跑在 Cursor / Claude Code / 自定义 runtime 里的 AI Agent（或 Agent 团队）；Responder 通常是 **超级个体（OPC, One-Person Company）** —— 把私域专长包装成 7×24 在线、按次结算、Agent 可直接调用的服务实体的个人。
+- **本客户端**就是 Caller / Responder 两端都跑的那个进程。`delexec-ops` 是守护进程（supervisor），负责挂载本地 Hotline、转发调用、记录 ops 事件，并暴露一个本地 Web 控制台 —— Caller 侧管审批策略 / 调用日志 / 计费，Responder 侧管 Hotline 上下架 / 版本灰度 / 收入。
+
+如果你是 OPC，想把私有知识 / 工作流变成可调用、可结算的 Hotline，**这个 repo 是你的起点**。本地模式跑通后，可以接入 [delegated-execution-platform-selfhost](https://github.com/hejiajiudeeyu/delegated-execution-platform-selfhost) 自托管平台发布 catalog，或直接挂到公开 marketplace [callanything.xyz/marketplace](https://callanything.xyz/marketplace/) 上。
+
+兄弟仓库：
+
+- 📐 **协议真实来源** —— [delegated-execution-protocol](https://github.com/hejiajiudeeyu/delegated-execution-protocol)（发布 `@delexec/contracts`）
+- 🚀 **自托管平台与运维控制台** —— [delegated-execution-platform-selfhost](https://github.com/hejiajiudeeyu/delegated-execution-platform-selfhost)
+- 🌐 **公开 Marketplace、文档、品牌站** —— [callanything.xyz](https://callanything.xyz/)
 
 ---
 
