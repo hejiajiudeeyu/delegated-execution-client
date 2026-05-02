@@ -57,6 +57,15 @@ function clearOpsEnv() {
 
 clearOpsEnv();
 
+async function createIsolatedCliEnv(opsHome) {
+  const [supervisorPort] = await reserveFreePorts(1);
+  return {
+    ...process.env,
+    DELEXEC_HOME: opsHome,
+    OPS_PORT_SUPERVISOR: String(supervisorPort)
+  };
+}
+
 describe("ops cli integration", () => {
   const cleanupDirs = [];
   const cleanupPids = [];
@@ -223,10 +232,7 @@ describe("ops cli integration", () => {
     const platformUrl = await listenServer(platformServer);
 
     try {
-      const env = {
-        ...process.env,
-        DELEXEC_HOME: opsHome
-      };
+      const env = await createIsolatedCliEnv(opsHome);
 
       const auth = JSON.parse(
         (
@@ -327,8 +333,7 @@ describe("ops cli integration", () => {
 
     try {
       const env = {
-        ...process.env,
-        DELEXEC_HOME: opsHome,
+        ...(await createIsolatedCliEnv(opsHome)),
         PLATFORM_API_BASE_URL: platformUrl
       };
       await execFileAsync(process.execPath, [CLI_PATH, "responder", "init", "--responder-id", "responder_cli_draft"], { env });
@@ -586,10 +591,7 @@ describe("ops cli integration", () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-example-"));
     cleanupDirs.push(opsHome);
 
-    const env = {
-      ...process.env,
-      DELEXEC_HOME: opsHome
-    };
+    const env = await createIsolatedCliEnv(opsHome);
 
     const output = JSON.parse((await execFileAsync(process.execPath, [CLI_PATH, "add-example-hotline"], { env })).stdout);
     const config = JSON.parse(fs.readFileSync(path.join(opsHome, "ops.config.json"), "utf8"));
@@ -609,10 +611,7 @@ describe("ops cli integration", () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-local-register-"));
     cleanupDirs.push(opsHome);
 
-    const env = {
-      ...process.env,
-      DELEXEC_HOME: opsHome
-    };
+    const env = await createIsolatedCliEnv(opsHome);
 
     const output = JSON.parse(
       (await execFileAsync(process.execPath, [CLI_PATH, "auth", "register", "--local", "--email", "local-only@test.local"], { env }))
@@ -834,10 +833,7 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
       env: process.env
     });
 
-    const cleanRoomEnv = {
-      ...process.env,
-      DELEXEC_HOME: path.join(installDir, ".ops-home")
-    };
+    const cleanRoomEnv = await createIsolatedCliEnv(path.join(installDir, ".ops-home"));
     const cliPath = path.join(installDir, "node_modules/.bin/delexec-ops");
 
     await execFileAsync(cliPath, ["responder", "init", "--responder-id", "responder_cli_test"], {
