@@ -804,6 +804,45 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     }
   });
 
+  it("starts the bundled ops console workspace through the cli on the requested port", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-ui-workspace-"));
+    cleanupDirs.push(opsHome);
+
+    const [supervisorPort, relayPort, callerPort, responderPort, uiPort] = (await reserveFreePorts(5)).map(String);
+
+    const env = {
+      ...process.env,
+      DELEXEC_HOME: opsHome,
+      OPS_PORT_SUPERVISOR: supervisorPort,
+      OPS_PORT_RELAY: relayPort,
+      OPS_PORT_CALLER: callerPort,
+      OPS_PORT_RESPONDER: responderPort
+    };
+
+    const supervisor = createOpsSupervisorServer();
+    await new Promise((resolve) => supervisor.listen(Number(supervisorPort), "127.0.0.1", resolve));
+
+    try {
+      const output = JSON.parse(
+        (await execFileAsync(process.execPath, [CLI_PATH, "ui", "start", "--host", "127.0.0.1", "--port", uiPort, "--no-browser"], { env })).stdout
+      );
+
+      expect(output.ok).toBe(true);
+      expect(output.supervisor_url).toBe(`http://127.0.0.1:${supervisorPort}`);
+      expect(output.ui.url).toBe(`http://127.0.0.1:${uiPort}`);
+      expect(output.ui.started).toBe(true);
+      expect(output.ui.launch_mode).toBe("workspace_vite");
+      expect(typeof output.ui.pid).toBe("number");
+      cleanupPids.push(output.ui.pid);
+
+      const response = await fetch(output.ui.url);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("<div id=\"root\"></div>");
+    } finally {
+      await closeServer(supervisor);
+    }
+  });
+
   it("packs into a clean-room installable cli tarball", async () => {
     const packDir = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-pack-"));
     const installDir = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-clean-room-"));
