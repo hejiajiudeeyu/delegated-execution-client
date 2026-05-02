@@ -1,57 +1,66 @@
 # Tests
 
-本目录包含 MVP 阶段的测试骨架与联调能力。
+This directory documents the test surface that actually ships in the current `client` checkout.
 
-## 目录
+## Layout
 
-- `tests/unit`：纯逻辑单测
-- `tests/integration`：单服务集成测试（HTTP + 内存状态）
-- `tests/e2e`：三端联调场景（成功/超时/token 过期/结果不合规）
-- `tests/mocks`：联调 mock（平台、transport 总线、时钟）
-- `tests/helpers`：测试工具函数
-- `tests/reports`：测试运行产物（`latest.json`）
+- `tests/unit`: pure logic and component-level tests
+- `tests/integration`: HTTP/runtime integration tests for the local client services
+- `tests/helpers`: shared test helpers
+- `tests/config`: Vitest config files
 
-邮件 transport 相关补充：
+Current integration coverage includes:
 
-- `tests/integration/email-transport.integration.test.js`
-  - 内存邮件 transport 抽象测试
-- `tests/integration/emailengine-transport.integration.test.js`
-  - EmailEngine REST `API v1` adapter 测试
-- `tests/integration/gmail-transport.integration.test.js`
-  - Gmail `gmail/v1` adapter 测试
+- `ops` CLI and supervisor flows
+- caller controller request flow
+- caller-skill adapter and MCP adapter
+- responder controller registration/runtime flow
+- local, relay HTTP, EmailEngine, and Gmail transport adapters
 
-## 运行
+## Run From The Client Repository
 
-- `npm run test:unit`
-- `npm run test:integration`
+```bash
+npm run test
+npm run test:unit
+npm run test:integration
+npm run test:packages
+```
+
+## Important Scope Boundary
+
+This checkout does **not** currently ship these older layers or scripts:
+
+- `tests/e2e`
+- `tests/mocks`
+- `tests/reports/latest.json`
 - `npm run test:e2e`
-- `npm run test:e2e:ui`（Vitest Web UI）
-- `npm run test:deploy:config`
-- `npm run test:smoke:platform`
-- `npm run test:smoke:caller`
-- `npm run test:smoke:responder`
 - `npm run test:compose-smoke`
 - `npm run test:public-stack-smoke`
 - `npm run test:local-images-smoke`
 - `npm run test:published-images-smoke`
 
-`compose-smoke` 补充说明：
-- 默认会为每次运行生成独立的 `COMPOSE_PROJECT_NAME`，避免与本机其他 compose 栈互相污染。
-- 运行前会先做 `docker compose config` 预校验，并对同项目做一次 `down --remove-orphans -v` 预清理。
-- 对 `image_pull_failed` 会做有限次自动重试（默认 2 次，可用 `COMPOSE_IMAGE_PULL_RETRIES` 覆盖）。
-- 失败分类重点区分：`image_pull_failed`、`port_conflict`、`service_runtime_failed`、`health_check_timeout`、业务链路回归。
+Do not treat those paths as currently available unless the matching files and `package.json` scripts are added back in the same checkout.
 
-镜像型 smoke 区分：
+## Cross-Repo Certification
 
-- `test:local-images-smoke`
-  - 依赖本机构建好的 release-shaped 镜像
-  - 主要用于 CI 中验证 image-based compose path 本身
-- `test:published-images-smoke`
-  - 直接尝试从 `IMAGE_REGISTRY/IMAGE_TAG` 拉取镜像
-  - 当前默认目标是 `ghcr.io/hejiajiudeeyu`
-  - 更适合 release 后或手动 workflow 验证
+Cross-repo compatibility for the pinned SHA set is validated from the fourth-repo workspace root, not from this `client` package alone:
 
-## 流程图反馈
+```bash
+corepack pnpm run check:submodules
+corepack pnpm run check:boundaries
+corepack pnpm run check:bundles
+corepack pnpm run test:contracts
+corepack pnpm run test:integration
+```
 
-`npm run test:e2e` 会写出 `tests/reports/latest.json`，可在
-`site/protocol-playground.html` 中加载并把问题映射到时序图步骤编号（如 `F1-F1`）。
+## Local Runtime Smoke
+
+For a fresh-home usability check of the current local-first path, use the source CLI directly from this repository:
+
+```bash
+node apps/ops/src/cli.js bootstrap --email you@example.com
+node apps/ops/src/cli.js status
+node apps/ops/src/cli.js ui start --no-browser
+```
+
+Use an isolated `DELEXEC_HOME` when you want a clean local smoke run.

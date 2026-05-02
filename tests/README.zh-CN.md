@@ -3,59 +3,67 @@
 > 英文版：README.md
 > 说明：中文文档为准。
 
-本目录包含 MVP 阶段的测试骨架与联调能力。
+本目录只描述当前 `client` checkout 里真实存在、真实可运行的测试面。
 
 ## 目录
 
-- `tests/unit`：纯逻辑单测
-- `tests/integration`：单服务集成测试（HTTP + 内存状态）
-- `tests/e2e`：三端联调场景（成功/超时/token 过期/结果不合规）
-- `tests/mocks`：联调 mock（平台、transport 总线、时钟）
-- `tests/helpers`：测试工具函数
-- `tests/reports`：测试运行产物（`latest.json`）
+- `tests/unit`：纯逻辑与组件级测试
+- `tests/integration`：本地客户端服务的 HTTP / 运行时集成测试
+- `tests/helpers`：共享测试工具
+- `tests/config`：Vitest 配置
 
-邮件 transport 相关补充：
+当前集成覆盖包括：
 
-- `tests/integration/email-transport.integration.test.js`
-  - 内存邮件 transport 抽象测试
-- `tests/integration/emailengine-transport.integration.test.js`
-  - EmailEngine REST `API v1` adapter 测试
-- `tests/integration/gmail-transport.integration.test.js`
-  - Gmail `gmail/v1` adapter 测试
+- `ops` CLI 与 supervisor 流程
+- caller controller 请求链路
+- caller-skill adapter 与 MCP adapter
+- responder controller 注册 / 运行时流程
+- local、relay HTTP、EmailEngine、Gmail transport adapter
 
-## 运行
+## 在 client 仓库内运行
 
-- `npm run test:unit`
-- `npm run test:integration`
+```bash
+npm run test
+npm run test:unit
+npm run test:integration
+npm run test:packages
+```
+
+## 重要边界
+
+当前 checkout **并没有** 以下旧测试层或脚本：
+
+- `tests/e2e`
+- `tests/mocks`
+- `tests/reports/latest.json`
 - `npm run test:e2e`
-- `npm run test:e2e:ui`（Vitest Web UI）
-- `npm run test:deploy:config`
-- `npm run test:smoke:platform`
-- `npm run test:smoke:caller`
-- `npm run test:smoke:responder`
 - `npm run test:compose-smoke`
 - `npm run test:public-stack-smoke`
 - `npm run test:local-images-smoke`
 - `npm run test:published-images-smoke`
 
-`compose-smoke` 补充说明：
+除非对应文件和 `package.json` 脚本在同一个 checkout 里被重新加回，否则不要把这些路径当作当前可用入口。
 
-- 默认会为每次运行生成独立的 `COMPOSE_PROJECT_NAME`，避免与本机其他 compose 栈互相污染。
-- 运行前会先做 `docker compose config` 预校验，并对同项目做一次 `down --remove-orphans -v` 预清理。
-- 对 `image_pull_failed` 会做有限次自动重试（默认 2 次，可用 `COMPOSE_IMAGE_PULL_RETRIES` 覆盖）。
-- 失败分类重点区分：`image_pull_failed`、`port_conflict`、`service_runtime_failed`、`health_check_timeout`、业务链路回归。
+## 跨仓认证入口
 
-镜像型 smoke 区分：
+当前固定 SHA 组合的跨仓兼容性验证在第四仓工作区根目录执行，不由这个 `client` 包单独承担：
 
-- `test:local-images-smoke`
-  - 依赖本机构建好的 release-shaped 镜像
-  - 主要用于 CI 中验证 image-based compose path 本身
-- `test:published-images-smoke`
-  - 直接尝试从 `IMAGE_REGISTRY/IMAGE_TAG` 拉取镜像
-  - 当前默认目标是 `ghcr.io/hejiajiudeeyu`
-  - 更适合 release 后或手动 workflow 验证
+```bash
+corepack pnpm run check:submodules
+corepack pnpm run check:boundaries
+corepack pnpm run check:bundles
+corepack pnpm run test:contracts
+corepack pnpm run test:integration
+```
 
-## 流程图反馈
+## 本地运行态冒烟
 
-`npm run test:e2e` 会写出 `tests/reports/latest.json`，可在
-`site/protocol-playground.html` 中加载并把问题映射到时序图步骤编号（如 `F1-F1`）。
+如果要验证当前本地优先主路径，可直接在本仓库里运行源码 CLI：
+
+```bash
+node apps/ops/src/cli.js bootstrap --email you@example.com
+node apps/ops/src/cli.js status
+node apps/ops/src/cli.js ui start --no-browser
+```
+
+需要干净环境时，请使用隔离的 `DELEXEC_HOME`。

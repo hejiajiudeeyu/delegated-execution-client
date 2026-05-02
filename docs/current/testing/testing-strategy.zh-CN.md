@@ -1,81 +1,86 @@
-# 测试策略（MVP v0.1）
+# 测试策略（当前 client checkout）
 
 > 英文版：testing-strategy.md
 > 说明：中文文档为准。
 
-预拆分附加规则：
-
-- E2E 与 compatibility 测试优先使用独立进程边界，不直接 import 各服务的 server factory
-- 未来跨仓验收的启动约定见 [Cross-Repo Compatibility Testing](/Users/hejiajiudeeyu/Documents/Projects/remote-hotline-protocol/docs/current/testing/cross-repo-compatibility-testing.md)
+本文只记录当前 `client` 仓库 checkout 里真实存在的验证层。
 
 ## 1. 目标
 
-建立可持续测试体系，覆盖三端基础行为、核心失败分支，以及面向调试的双反馈面：
+让当前本地优先主路径在三层上都可验证：
 
-- TUI：终端实时结果（Vitest）
-- Web UI：流程图定位失败步骤（Flow Dashboard）
+- 逻辑与组件行为
+- client 仓内各服务之间的集成行为
+- 第四仓对固定 SHA 组合的跨仓认证
 
-## 2. 分层策略
+## 2. 当前验证分层
 
-- Unit：状态机、错误码、schema 约束等纯逻辑
-- Integration：单服务 HTTP 接口与内存状态行为
-- E2E：Platform + Caller Controller + Responder Controller 的端到端场景，按独立进程 / HTTP 边界运行
-- Compose Smoke：Docker 真实进程冒烟（`tests/smoke/compose-smoke.mjs`）
+- `Unit`：逻辑、schema 处理、运行时工具、UI 组件行为
+- `Integration`：`ops`、caller、responder、caller-skill adapter、MCP adapter、transport adapter 的真实 HTTP / 运行时测试
+- `Package checks`：client 包的发布 / 安装形态校验
+- `Workspace certification`：第四仓顶层对子模块、边界、contracts、source integration 的认证
 
-## 3. 场景来源
+## 3. 当前 checkout 真实存在的入口
 
-测试场景由两部分共同定义：
+`repos/client/package.json` 里当前可运行的命令是：
 
-- 流程图（步骤覆盖与编号锚点）：`../diagrams/user-remote-hotline-call-flow.md`
-- 规范文档（断言口径）：`../spec/architecture.md`、`../spec/platform-api-v0.1.md`、`../guides/integration-playbook.md`
+```bash
+npm run test
+npm run test:unit
+npm run test:integration
+npm run test:packages
+```
 
-## 4. Mock / Runtime 策略
+当前 checkout 里真实存在的测试目录：
 
-`tests/mocks/` 下存放以下替身定义（当前为预留，集成和 E2E 测试直接使用真实内存态服务实例）：
+- `tests/unit`
+- `tests/integration`
+- `tests/helpers`
+- `tests/config`
 
-- `MockPlatformApi`：注册、token、introspect 的轻量替身
-- `MockEmailBus`：模拟投递、轮询
-- `FakeClock`：超时测试中的可控时间源
+## 4. 当前 checkout 不存在的层
 
-当前默认联调以本地参考 transport 为主：
+下面这些历史层或规划层在当前 checkout 里并不存在，不应再被当作可运行真相：
 
-- Caller 通过 `dispatch` 把任务 envelope 写入本地 transport
-- Responder 通过 `inbox/pull` 拉取并 ACK 本地 transport 消息
-- Platform 继续只承担控制面职责
+- `tests/e2e`
+- `tests/mocks`
+- `tests/reports/latest.json`
+- `npm run test:e2e`
+- `npm run test:compose-smoke`
+- `npm run test:public-stack-smoke`
+- `npm run test:local-images-smoke`
+- `npm run test:published-images-smoke`
 
-Mock 仍用于单点接口与失败分支测试；真实邮件通道测试放在补充冒烟链路。
+如果这些层未来回归，应当和对应实现文件、`package.json` 脚本一起被重新记录。
 
-## 4.1 真实进程联调（Compose Smoke）
+## 5. 跨仓认证路径
 
-- 入口：`npm run test:compose-smoke`
-- 严格入口：`npm run test:compose-smoke:strict`
-- 行为：启动 `docker-compose.yml`，等待三端健康检查，执行最小成功链路，再自动 `down`
-- 目标：验证“真实进程 + 网络 + 端口映射 + 服务组合”无基础阻断
-- 严格模式语义：docker 不可用时直接失败，避免 CI 中出现“被动跳过”的假阳性
+当前跨仓兼容性认证从第四仓工作区根目录执行：
 
-## 5. 流程图问题定位
+```bash
+corepack pnpm run check:submodules
+corepack pnpm run check:boundaries
+corepack pnpm run check:bundles
+corepack pnpm run test:contracts
+corepack pnpm run test:integration
+```
 
-E2E 输出 `tests/reports/latest.json`，每条问题记录包含：
+当你要声明固定 `protocol + client + platform` SHA 组合兼容时，应以这条路径为准。
 
-- `case_id`
-- `flow_step_id`（如 `F1-F1`）
-- `error_code`
-- `severity`
-- `message`
+## 6. 本地冒烟与调试反馈面
 
-Web UI 加载该报告并在流程图中高亮对应步骤。
+如果要做当前产品主路径的本机可用性验证，请使用全新的 `DELEXEC_HOME` 并运行：
 
-## 6. MVP 首批验收
+```bash
+node apps/ops/src/cli.js bootstrap --email you@example.com
+node apps/ops/src/cli.js status
+node apps/ops/src/cli.js ui start --no-browser
+```
 
-- 成功：终态 `SUCCEEDED`
-- 超时：终态 `TIMED_OUT`
-- token 过期：`AUTH_TOKEN_EXPIRED`
-- 结果不合规：`RESULT_SCHEMA_INVALID` / `UNVERIFIED`
+当前最主要的运行态反馈面是：
 
-并覆盖“错误结果包可被 caller 验收并反馈”的路径。
-
-当前 E2E 额外已验证：
-
-- Responder 结果验签使用预绑定信任公钥，而非结果包自带公钥
-- `delivery-meta` 与 token claims 的 `request_id/responder_id/hotline_id/caller_id` 绑定
-- 平台 responder 侧接口的最小 RBAC 约束
+- `delexec-ops status`
+- `delexec-ops doctor`
+- `delexec-ops debug-snapshot`
+- `DELEXEC_HOME/logs/supervisor.events.jsonl`
+- `DELEXEC_HOME/logs/` 下的各服务日志

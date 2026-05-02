@@ -134,21 +134,23 @@ Current limitation:
 - `platform-console` frontend itself is not bundled into `public-stack` yet; this stack currently exposes the operator gateway API path and core backend services
 - the full operator bootstrap flow is documented in [public-stack-operator-guide.md](/Users/hejiajiudeeyu/Documents/Projects/remote-hotline-protocol/docs/current/guides/public-stack-operator-guide.md)
 
-Recommended smoke validation split:
+Current validation entry points:
 
-- source-build path: `npm run test:compose-smoke`
-- public ingress stack path: `npm run test:public-stack-smoke`
-- local release-shaped image path: `npm run test:local-images-smoke`
-- published-image GHCR path: `npm run test:published-images-smoke`
-- manual GHCR validation workflow: `.github/workflows/published-images-smoke.yml`
+- client package/runtime checks inside `repos/client`:
+  - `npm run test:packages`
+  - `npm run test:integration`
+- pinned-SHA cross-repo certification from the fourth-repo workspace root:
+  - `corepack pnpm run check:submodules`
+  - `corepack pnpm run check:boundaries`
+  - `corepack pnpm run check:bundles`
+  - `corepack pnpm run test:contracts`
+  - `corepack pnpm run test:integration`
+- fresh-home local usability smoke from the client source checkout:
+  - `node apps/ops/src/cli.js bootstrap --email you@example.com`
+  - `node apps/ops/src/cli.js status`
+  - `node apps/ops/src/cli.js ui start --no-browser`
 
-Current `compose-smoke` runner:
-- creates an isolated compose project name per run unless `COMPOSE_PROJECT_NAME` is explicitly set
-- validates `docker compose config` before startup
-- performs a same-project pre-cleanup so repeated local runs are less flaky
-- prewarms required images before `docker compose up`, separating cache hits from explicit pulls
-- retries transient `image_pull_failed` startup failures a small number of times (`COMPOSE_IMAGE_PULL_RETRIES`, default `2`)
-- emits distinct failure classes for registry auth, image pull, port conflicts, service runtime failure, health timeout, database boot, and business-path regressions
+This checkout does **not** currently ship `test:compose-smoke`, `test:public-stack-smoke`, `test:local-images-smoke`, or `test:published-images-smoke` scripts. If image-based smoke paths return later, document them only together with the matching scripts and runner files in the same checkout.
 
 ## Relay
 

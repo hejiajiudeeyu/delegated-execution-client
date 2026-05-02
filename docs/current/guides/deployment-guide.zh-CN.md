@@ -138,22 +138,23 @@ Profile 意图：
 - `platform-console` 前端尚未打包进 `public-stack`；当前栈主要暴露 operator gateway API 与核心后端服务
 - 完整运维 bootstrap 流程见 [public-stack-operator-guide.md](/Users/hejiajiudeeyu/Documents/Projects/remote-hotline-protocol/docs/current/guides/public-stack-operator-guide.md)
 
-推荐冒烟验证拆分：
+当前可用的验证入口：
 
-- 源码构建路径：`npm run test:compose-smoke`
-- 公网入口栈路径：`npm run test:public-stack-smoke`
-- 本地 release 形态镜像路径：`npm run test:local-images-smoke`
-- 已发布 GHCR 镜像路径：`npm run test:published-images-smoke`
-- 手动 GHCR 验证 workflow：`.github/workflows/published-images-smoke.yml`
+- `repos/client` 内的包 / 运行时校验：
+  - `npm run test:packages`
+  - `npm run test:integration`
+- 第四仓工作区根目录执行的固定 SHA 跨仓认证：
+  - `corepack pnpm run check:submodules`
+  - `corepack pnpm run check:boundaries`
+  - `corepack pnpm run check:bundles`
+  - `corepack pnpm run test:contracts`
+  - `corepack pnpm run test:integration`
+- client 源码 checkout 下的新 home 本地可用性冒烟：
+  - `node apps/ops/src/cli.js bootstrap --email you@example.com`
+  - `node apps/ops/src/cli.js status`
+  - `node apps/ops/src/cli.js ui start --no-browser`
 
-当前 `compose-smoke` runner：
-
-- 若未显式设置 `COMPOSE_PROJECT_NAME`，每次运行都会生成隔离项目名
-- 启动前先执行 `docker compose config` 校验
-- 对同项目做预清理，减少重复本地运行抖动
-- `up` 前预热所需镜像，区分缓存命中与显式拉取
-- 对临时 `image_pull_failed` 启动失败做有限次重试（`COMPOSE_IMAGE_PULL_RETRIES`，默认 `2`）
-- 区分 registry 鉴权、镜像拉取、端口冲突、服务运行失败、健康超时、数据库启动与业务链路回归等失败类别
+当前 checkout **并没有** `test:compose-smoke`、`test:public-stack-smoke`、`test:local-images-smoke`、`test:published-images-smoke` 这些脚本。如果以后要恢复镜像型 smoke 路径，应当和同 checkout 中对应的脚本与 runner 文件一起记录。
 
 ## Relay
 
