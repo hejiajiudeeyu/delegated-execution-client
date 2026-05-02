@@ -862,6 +862,7 @@ export function createOpsSupervisorServer() {
   });
   const runtime = {
     processes: new Map(),
+    starting: new Map(),
     relayQueues: new Map(),
     auth: {
       sessions: new Map(),
@@ -1319,6 +1320,11 @@ export function createOpsSupervisorServer() {
     if (current && !current.exited) {
       return current;
     }
+    const inflight = runtime.starting.get(name);
+    if (inflight) {
+      return inflight;
+    }
+    const startPromise = (async () => {
     if (name === "relay" && shouldUseEmbeddedRelay()) {
       return startEmbeddedRelay();
     }
@@ -1392,6 +1398,15 @@ export function createOpsSupervisorServer() {
       pid: child.pid
     });
     return processInfo;
+    })();
+    runtime.starting.set(name, startPromise);
+    try {
+      return await startPromise;
+    } finally {
+      if (runtime.starting.get(name) === startPromise) {
+        runtime.starting.delete(name);
+      }
+    }
   }
 
   async function waitForRelay(maxWaitMs = 8000) {

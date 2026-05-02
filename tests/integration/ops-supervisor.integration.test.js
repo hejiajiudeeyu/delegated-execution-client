@@ -148,6 +148,75 @@ describe("ops supervisor integration", () => {
     }
   });
 
+  it("does not launch duplicate managed services when startup is requested concurrently", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-concurrent-start-"));
+    cleanupDirs.push(opsHome);
+    const [supervisorPort, relayPort, callerPort, responderPort, skillAdapterPort, mcpAdapterPort] = await reserveFreePorts(6);
+    process.env.OPS_PORT_SUPERVISOR = String(supervisorPort);
+    process.env.OPS_PORT_RELAY = String(relayPort);
+    process.env.OPS_PORT_CALLER = String(callerPort);
+    process.env.OPS_PORT_RESPONDER = String(responderPort);
+    process.env.OPS_PORT_SKILL_ADAPTER = String(skillAdapterPort);
+    process.env.OPS_PORT_MCP_ADAPTER = String(mcpAdapterPort);
+    process.env.DELEXEC_HOME = opsHome;
+
+    const supervisor = createOpsSupervisorServer();
+    supervisor.listen(0, "127.0.0.1");
+    await new Promise((resolve) => supervisor.once("listening", resolve));
+    const supervisorUrl = `http://127.0.0.1:${supervisor.address().port}`;
+    await jsonRequest(supervisorUrl, "/setup", { method: "POST", body: {} });
+
+    try {
+      await Promise.all([supervisor.startManagedServices(), supervisor.startManagedServices()]);
+
+      const status = await waitFor(async () => {
+        const current = await jsonRequest(supervisorUrl, "/status");
+        if (
+          current.body?.runtime?.relay?.health?.status !== 200 ||
+          current.body?.runtime?.caller?.health?.status !== 200 ||
+          current.body?.runtime?.skill_adapter?.health?.status !== 200 ||
+          current.body?.runtime?.mcp_adapter?.health?.status !== 200
+        ) {
+          throw new Error("managed_services_not_ready");
+        }
+        return current;
+      });
+      expect(status.body.runtime.relay.running).toBe(true);
+      expect(status.body.runtime.caller.running).toBe(true);
+      expect(status.body.runtime.skill_adapter.running).toBe(true);
+      expect(status.body.runtime.mcp_adapter.running).toBe(true);
+
+      const eventsPath = path.join(opsHome, "logs", "supervisor.events.jsonl");
+      const events = fs
+        .readFileSync(eventsPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      const startedCounts = events
+        .filter((event) => event.type === "service_started")
+        .reduce((counts, event) => {
+          counts[event.service] = (counts[event.service] || 0) + 1;
+          return counts;
+        }, {});
+
+      expect(startedCounts.relay).toBe(1);
+      expect(startedCounts.caller).toBe(1);
+      expect(startedCounts["skill-adapter"]).toBe(1);
+      expect(startedCounts["mcp-adapter"]).toBe(1);
+    } finally {
+      await supervisor.stopManagedServices();
+      await closeServer(supervisor);
+      delete process.env.DELEXEC_HOME;
+      delete process.env.OPS_PORT_SUPERVISOR;
+      delete process.env.OPS_PORT_RELAY;
+      delete process.env.OPS_PORT_CALLER;
+      delete process.env.OPS_PORT_RESPONDER;
+      delete process.env.OPS_PORT_SKILL_ADAPTER;
+      delete process.env.OPS_PORT_MCP_ADAPTER;
+    }
+  });
+
   it("prefers local hotline catalog after switching caller registration from platform to local_only", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-local-catalog-"));
     cleanupDirs.push(opsHome);
