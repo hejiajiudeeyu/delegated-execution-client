@@ -436,7 +436,7 @@ function RejectedCTAs({
       <Button
         size="sm"
         onClick={() =>
-          navigate(`/caller/access-lists?from=approvals-add-whitelist&hotline_id=${encodeURIComponent(detail?.hotline_id ?? "")}`)
+          navigate(`/caller/lists?from=approvals-add-whitelist&hotline_id=${encodeURIComponent(detail?.hotline_id ?? "")}`)
         }
       >
         以后自动放行此 Hotline

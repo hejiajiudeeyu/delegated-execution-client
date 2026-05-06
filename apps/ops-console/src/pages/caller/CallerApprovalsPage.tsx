@@ -731,7 +731,7 @@ function ApprovalCard({ item, onDecide, onAllowHotline, globalMode }: ApprovalCa
                 }}
                 onNavigateAccessLists={() => {
                   setShowPopover(false)
-                  navigate("/caller/access-lists?from=approvals-add-whitelist")
+                  navigate("/caller/lists?from=approvals-add-whitelist")
                 }}
               />
             )}
