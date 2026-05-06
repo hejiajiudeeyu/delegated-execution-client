@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useStatus } from "@/hooks/useStatus"
+import { usePoll } from "@/hooks/usePoll"
 import { apiCall } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -8,6 +9,13 @@ import { Button } from "@/components/ui/button"
 import { Server, Wifi, Zap, Globe, RotateCcw, ArrowRight, UserPlus, CheckCircle2 } from "lucide-react"
 import { toast } from "sonner"
 import { isCallerRegistered } from "@/lib/status"
+import { PlatformValueDisclosure } from "@/components/dashboard/PlatformValueDisclosure"
+import { NextUpCard } from "@/components/dashboard/NextUpCard"
+
+interface RequestItem {
+  request_id: string
+  status?: string
+}
 
 function HealthDot({ ok }: { ok: boolean | undefined | null }) {
   if (ok === undefined || ok === null)
@@ -82,6 +90,25 @@ export function DashboardPage() {
   const [togglingPlatform, setTogglingPlatform] = useState(false)
   const firstHotlineReady = responderEnabled && (status?.responder?.hotline_count ?? 0) > 0
 
+  const [requestsCount, setRequestsCount] = useState<number | null>(null)
+  const [onboardingExpanded, setOnboardingExpanded] = useState(false)
+
+  const loadRequestsCount = useCallback(async () => {
+    if (!callerRegistered) {
+      setRequestsCount(0)
+      return
+    }
+    const res = await apiCall<{ items?: RequestItem[]; requests?: RequestItem[] }>("/requests", { silent: true })
+    if (res.ok) {
+      const items = res.data?.items ?? res.data?.requests ?? []
+      setRequestsCount(Array.isArray(items) ? items.length : 0)
+    }
+  }, [callerRegistered])
+
+  usePoll(loadRequestsCount, { intervalMs: 15000 })
+
+  const hasFirstCall = (requestsCount ?? 0) > 0
+
   const onboardingSteps = [
     {
       key: "caller",
@@ -89,7 +116,7 @@ export function DashboardPage() {
       description: "先获取 Caller 身份，解锁搜索和调用 Hotline 的能力。",
       done: callerRegistered,
       action: "前往注册",
-      onClick: () => navigate("/caller/register"),
+      onClick: () => navigate("/caller/register?from=dashboard-onboarding"),
     },
     {
       key: "responder",
@@ -97,7 +124,7 @@ export function DashboardPage() {
       description: "本地模式下先启用 Responder Runtime，再添加自己的 Hotline。",
       done: responderEnabled,
       action: "启用 Responder",
-      onClick: () => navigate("/responder/activate"),
+      onClick: () => navigate("/responder/activate?from=dashboard-onboarding"),
     },
     {
       key: "hotline",
@@ -105,7 +132,7 @@ export function DashboardPage() {
       description: "创建本地 Hotline，并生成可检查的配置草稿。",
       done: firstHotlineReady,
       action: "管理 Hotline",
-      onClick: () => navigate("/responder/hotlines"),
+      onClick: () => navigate("/responder/hotlines?from=dashboard-onboarding"),
     },
     {
       key: "draft",
@@ -113,9 +140,19 @@ export function DashboardPage() {
       description: "确认输入填写说明、输出结构和本地运行配置，再决定是否发布到平台。",
       done: firstHotlineReady,
       action: "查看草稿",
-      onClick: () => navigate("/responder/hotlines"),
+      onClick: () => navigate("/responder/hotlines?from=dashboard-onboarding"),
+    },
+    {
+      key: "first-call",
+      title: "试拨第一个 Hotline",
+      description: "打开 Catalog，挑一个带 official 标签的 Hotline 点「试拨」就能验证端到端跑通。",
+      done: hasFirstCall,
+      action: "打开 Catalog",
+      onClick: () => navigate("/caller/catalog?from=dashboard-onboarding"),
     },
   ]
+  const allOnboardingDone = onboardingSteps.every((step) => step.done)
+  const showOnboardingFolded = allOnboardingDone && !onboardingExpanded
 
   async function handleRestart(service: string) {
     setRestarting((prev) => ({ ...prev, [service]: true }))
@@ -191,6 +228,12 @@ export function DashboardPage() {
         </Card>
       )}
 
+      <NextUpCard
+        callerRegistered={callerRegistered}
+        platformEnabled={platformEnabled}
+        hotlineCount={status?.responder?.hotline_count ?? 0}
+      />
+
       <Card className={platformEnabled ? "border-violet-500/30 bg-violet-500/5" : "border-dashed bg-muted/30"}>
         <CardContent className="p-4">
           <div className="flex items-start justify-between gap-4">
@@ -220,6 +263,14 @@ export function DashboardPage() {
           </div>
         </CardContent>
       </Card>
+
+      {!platformEnabled && (
+        <PlatformValueDisclosure
+          onEnable={() => handlePlatformToggle(true)}
+          toggling={togglingPlatform}
+          platformUrl={platformUrl}
+        />
+      )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card>
@@ -298,41 +349,78 @@ export function DashboardPage() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>首次上手流程</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {onboardingSteps.map((step, index) => (
-            <div key={step.key} className="flex items-start justify-between gap-3 rounded-md border bg-muted/20 p-3">
-              <div className="flex min-w-0 items-start gap-3">
-                <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold ${
-                  step.done ? "border-green-500/40 bg-green-500/10 text-green-600" : "border-border bg-background text-muted-foreground"
-                }`}>
-                  {step.done ? <CheckCircle2 className="h-3.5 w-3.5" /> : index + 1}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">{step.title}</p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{step.description}</p>
-                </div>
-              </div>
-              <div className="shrink-0">
-                <Button size="sm" variant={step.done ? "outline" : "default"} onClick={step.onClick}>
-                  {step.done ? "继续查看" : step.action}
-                </Button>
-              </div>
+      {showOnboardingFolded ? (
+        <Card className="border-green-500/40 bg-green-500/5">
+          <CardContent className="flex items-center justify-between gap-3 p-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              <p className="text-sm font-semibold text-green-700 dark:text-green-300">
+                上手已完成 ✓ {onboardingSteps.length}/{onboardingSteps.length}
+              </p>
+              <span className="text-xs text-muted-foreground">需要时可以重新展开。</span>
             </div>
-          ))}
-          <div className={`rounded-md border p-3 text-xs leading-relaxed ${
-            platformEnabled ? "border-violet-500/20 bg-violet-500/5 text-muted-foreground" : "border-dashed bg-muted/20 text-muted-foreground"
-          }`}>
-            <span className="font-semibold text-foreground">{platformEnabled ? "可选后续：发布到平台" : "可选后续：开启平台发布"}</span>
-            {platformEnabled
-              ? " 现在可以把已经验证过的本地 Hotline 提交到平台 catalog，进入发布与审核流程。"
-              : " 当你准备让其他 Caller 从平台 Catalog 发现这些 Hotline 时，再开启平台发布功能即可。"}
-          </div>
-        </CardContent>
-      </Card>
+            <button
+              type="button"
+              onClick={() => setOnboardingExpanded(true)}
+              className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+            >
+              重新展开
+            </button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>首次上手流程</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                {onboardingSteps.filter((s) => s.done).length}/{onboardingSteps.length}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {onboardingSteps.map((step, index) => (
+              <div key={step.key} className="flex items-start justify-between gap-3 rounded-md border bg-muted/20 p-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold ${
+                    step.done ? "border-green-500/40 bg-green-500/10 text-green-600" : "border-border bg-background text-muted-foreground"
+                  }`}>
+                    {step.done ? <CheckCircle2 className="h-3.5 w-3.5" /> : index + 1}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">{step.title}</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{step.description}</p>
+                  </div>
+                </div>
+                <div className="shrink-0">
+                  <Button size="sm" variant={step.done ? "outline" : "default"} onClick={step.onClick}>
+                    {step.done ? "继续查看" : step.action}
+                  </Button>
+                </div>
+              </div>
+            ))}
+            <div className={`rounded-md border p-3 text-xs leading-relaxed ${
+              platformEnabled ? "border-violet-500/20 bg-violet-500/5 text-muted-foreground" : "border-dashed bg-muted/20 text-muted-foreground"
+            }`}>
+              <span className="font-semibold text-foreground">{platformEnabled ? "可选后续：发布到平台" : "可选后续：开启平台发布"}</span>
+              {platformEnabled
+                ? " 现在可以把已经验证过的本地 Hotline 提交到平台 catalog，进入发布与审核流程。"
+                : " 当你准备让其他 Caller 从平台 Catalog 发现这些 Hotline 时，再开启平台发布功能即可。"}
+            </div>
+            {allOnboardingDone && (
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => setOnboardingExpanded(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                >
+                  收起
+                </button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
