@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { apiCall } from "@/lib/api"
 import { usePoll } from "@/hooks/usePoll"
 import { Badge } from "@/components/ui/badge"
@@ -7,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   CheckCircle, XCircle, Clock, ShieldAlert, ShieldCheck, Info,
-  Loader2, AlertTriangle, FileText, User, Zap,
+  Loader2, AlertTriangle, FileText, User, Zap, X,
 } from "lucide-react"
 import { cn } from "@/components/ui/utils"
 import { toast } from "sonner"
@@ -284,14 +285,323 @@ function ExecutionBlock({
   )
 }
 
+// ───────────────── M6 · whitelist education popover ─────────────────
+
+const WHITELIST_POPOVER_COUNT_KEY = "whitelist-popover-shown-count"
+const WHITELIST_POPOVER_LIMIT = 3
+
+const APPROVAL_MODE_LABELS: Record<ApprovalMode, string> = {
+  manual: "全部手动审批",
+  allow_listed: "白名单自动放行",
+  allow_all: "全部自动放行",
+}
+
+function readPopoverShownCount(): number {
+  try {
+    return Number(window.sessionStorage.getItem(WHITELIST_POPOVER_COUNT_KEY) ?? "0") || 0
+  } catch {
+    return 0
+  }
+}
+
+function bumpPopoverShownCount(): number {
+  try {
+    const next = readPopoverShownCount() + 1
+    window.sessionStorage.setItem(WHITELIST_POPOVER_COUNT_KEY, String(next))
+    return next
+  } catch {
+    return 0
+  }
+}
+
+interface WhitelistPopoverProps {
+  hotlineDisplayName: string
+  mode: ApprovalMode
+  onClose: () => void
+  onNavigatePreferences: () => void
+  onNavigateAccessLists: () => void
+}
+
+function WhitelistEducationPopover({
+  hotlineDisplayName,
+  mode,
+  onClose,
+  onNavigatePreferences,
+  onNavigateAccessLists,
+}: WhitelistPopoverProps) {
+  // 8s auto-dismiss; mouse hover pauses the timer, leaving fully resets it
+  const [hovered, setHovered] = useState(false)
+  useEffect(() => {
+    if (hovered) return
+    const t = window.setTimeout(onClose, 8000)
+    return () => window.clearTimeout(t)
+  }, [hovered, onClose])
+
+  const isAllowListed = mode === "allow_listed"
+  const currentModeLabel = APPROVAL_MODE_LABELS[mode]
+
+  return (
+    <div
+      role="dialog"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={cn(
+        "absolute right-0 top-[calc(100%+6px)] z-20 w-[320px] rounded-md border bg-popover p-3 shadow-lg",
+        "text-xs",
+        isAllowListed
+          ? "border-green-300 bg-green-50/80"
+          : "border-amber-300 bg-amber-50/80",
+      )}
+    >
+      <button
+        type="button"
+        aria-label="关闭"
+        onClick={onClose}
+        className="absolute right-1.5 top-1.5 text-muted-foreground hover:text-foreground"
+      >
+        <X className="h-3 w-3" />
+      </button>
+      {isAllowListed ? (
+        <>
+          <p className="font-semibold text-green-800 mb-1">已加入白名单 ✓</p>
+          <p className="text-foreground leading-relaxed mb-2">
+            后续 <span className="font-medium">{hotlineDisplayName}</span> 的调用会自动放行，不再来打扰你。
+          </p>
+          <button
+            type="button"
+            onClick={onNavigateAccessLists}
+            className="text-cyan-700 hover:underline"
+          >
+            查看 / 管理白名单 →
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="font-semibold text-amber-800 mb-1">已加入白名单 ✓ · 但当前模式不会自动放行</p>
+          <p className="text-foreground leading-relaxed mb-2">
+            你现在是「{currentModeLabel}」模式 — 名单不生效。切到「白名单自动放行」才会按白名单走。
+          </p>
+          <div className="flex flex-col gap-1">
+            <Button
+              type="button"
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white h-7 text-xs"
+              onClick={onNavigatePreferences}
+            >
+              切换到白名单自动放行 →
+            </Button>
+            <button
+              type="button"
+              onClick={onNavigateAccessLists}
+              className="text-cyan-700 hover:underline self-start"
+            >
+              保留当前模式，先看名单 →
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ───────────────── M7 · approval-fatigue banner ─────────────────
+
+const TIRED_BANNER_DISMISS_KEY = "approvals.tired-banner.dismissed-at"
+const TIRED_BANNER_COOLDOWN_MS = 24 * 60 * 60 * 1000
+
+type TiredCondition =
+  | { kind: "hotline_high_freq"; hotlineId: string; displayName: string; count: number }
+  | { kind: "monthly_volume"; count: number }
+  | { kind: "queue_backlog"; count: number }
+
+function readBannerDismissedAt(): number {
+  try {
+    const raw = window.localStorage.getItem(TIRED_BANNER_DISMISS_KEY)
+    if (!raw) return 0
+    const t = new Date(raw).getTime()
+    return Number.isFinite(t) ? t : 0
+  } catch {
+    return 0
+  }
+}
+
+function persistBannerDismissedAt(): void {
+  try {
+    window.localStorage.setItem(TIRED_BANNER_DISMISS_KEY, new Date().toISOString())
+  } catch {
+    // ignore — best-effort persistence
+  }
+}
+
+// Pick the most actionable trigger first: per-hotline > monthly > backlog.
+function evaluateTiredCondition(
+  items: ApprovalRecord[],
+  mode: ApprovalMode | null,
+  now: number,
+): TiredCondition | null {
+  const sevenDays = now - 7 * 24 * 60 * 60 * 1000
+  const thirtyDays = now - 30 * 24 * 60 * 60 * 1000
+
+  const approvedManual = items.filter(
+    (i) => i.status === "approved" && i.decidedAt !== null,
+  )
+
+  // 1) Same hotline manually approved >= 5 times within 7 days
+  const perHotline = new Map<string, { count: number; displayName: string }>()
+  for (const item of approvedManual) {
+    if (!item.decidedAt) continue
+    const t = new Date(item.decidedAt).getTime()
+    if (!Number.isFinite(t) || t < sevenDays) continue
+    const cur = perHotline.get(item.hotlineId) ?? {
+      count: 0,
+      displayName: item.hotlineInfo?.displayName ?? item.hotlineId,
+    }
+    cur.count += 1
+    perHotline.set(item.hotlineId, cur)
+  }
+  let topHotline: { hotlineId: string; count: number; displayName: string } | null = null
+  for (const [hotlineId, info] of perHotline) {
+    if (info.count >= 5 && (!topHotline || info.count > topHotline.count)) {
+      topHotline = { hotlineId, count: info.count, displayName: info.displayName }
+    }
+  }
+  if (topHotline) {
+    return {
+      kind: "hotline_high_freq",
+      hotlineId: topHotline.hotlineId,
+      displayName: topHotline.displayName,
+      count: topHotline.count,
+    }
+  }
+
+  // 2) Manual mode + >=20 manual approvals in last 30 days
+  if (mode === "manual") {
+    const monthly = approvedManual.filter((i) => {
+      const t = new Date(i.decidedAt!).getTime()
+      return Number.isFinite(t) && t >= thirtyDays
+    }).length
+    if (monthly >= 20) {
+      return { kind: "monthly_volume", count: monthly }
+    }
+  }
+
+  // 3) Queue backlog: >=5 pending right now
+  const pending = items.filter((i) => i.status === "pending").length
+  if (pending >= 5) {
+    return { kind: "queue_backlog", count: pending }
+  }
+
+  return null
+}
+
+interface TiredBannerProps {
+  condition: TiredCondition
+  onDismiss: () => void
+  onAddHotlineToWhitelist: (hotlineId: string, displayName: string) => Promise<void>
+  onFocusBacklog: () => void
+}
+
+function TiredBanner({
+  condition,
+  onDismiss,
+  onAddHotlineToWhitelist,
+  onFocusBacklog,
+}: TiredBannerProps) {
+  const navigate = useNavigate()
+  const [acting, setActing] = useState(false)
+
+  let title = ""
+  let primary: { label: string; onClick: () => void | Promise<void> } | null = null
+  let secondary: { label: string; href: string } | null = null
+
+  switch (condition.kind) {
+    case "monthly_volume":
+      title = `过去 30 天你手动批准了 ${condition.count} 次 — 切换到「白名单自动放行」可以省下大部分手动操作。`
+      primary = {
+        label: "去切换模式 →",
+        onClick: () =>
+          navigate("/caller/preferences?from=approvals-tired-banner"),
+      }
+      secondary = { label: "了解三种模式 →", href: "/help#approvals" }
+      break
+    case "hotline_high_freq":
+      title = `你已经在 7 天内手动批准了 ${condition.count} 次 ${condition.displayName} — 加它到白名单后未来调用自动放行。`
+      primary = {
+        label: "加入 Hotline 白名单 →",
+        onClick: async () => {
+          setActing(true)
+          try {
+            await onAddHotlineToWhitelist(condition.hotlineId, condition.displayName)
+          } finally {
+            setActing(false)
+          }
+        },
+      }
+      secondary = { label: "了解白名单 →", href: "/help#approvals" }
+      break
+    case "queue_backlog":
+      title = `当前有 ${condition.count} 条待审批 — 一次性批准信任的 hotline 后，剩下的会显著少。`
+      primary = {
+        label: "批量批准信任的 →",
+        onClick: () => onFocusBacklog(),
+      }
+      secondary = { label: "了解审批策略 →", href: "/help#approvals" }
+      break
+  }
+
+  return (
+    <div
+      role="alert"
+      className="relative flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs"
+      style={{ borderLeftWidth: 3, borderLeftColor: "#f59e0b" }}
+    >
+      <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+      <div className="flex-1 min-w-0 space-y-1.5">
+        <p className="text-amber-900 leading-relaxed">{title}</p>
+        <div className="flex items-center gap-3">
+          {primary && (
+            <Button
+              size="sm"
+              className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white"
+              disabled={acting}
+              onClick={() => void primary!.onClick()}
+            >
+              {acting ? "处理中…" : primary.label}
+            </Button>
+          )}
+          {secondary && (
+            <a
+              href={secondary.href}
+              className="text-amber-800 hover:underline"
+            >
+              {secondary.label}
+            </a>
+          )}
+        </div>
+      </div>
+      <button
+        type="button"
+        aria-label="关闭"
+        onClick={onDismiss}
+        className="absolute right-1.5 top-1.5 text-amber-700/70 hover:text-amber-900"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )
+}
+
 interface ApprovalCardProps {
   item: ApprovalRecord
   onDecide: (id: string, action: "approve" | "reject") => Promise<void>
-  onAllowHotline: (item: ApprovalRecord) => Promise<void>
+  onAllowHotline: (item: ApprovalRecord) => Promise<{ added: boolean }>
+  globalMode: ApprovalMode | null
 }
 
-function ApprovalCard({ item, onDecide, onAllowHotline }: ApprovalCardProps) {
+function ApprovalCard({ item, onDecide, onAllowHotline, globalMode }: ApprovalCardProps) {
   const [deciding, setDeciding] = useState<"approve" | "reject" | "whitelist" | null>(null)
+  const [showPopover, setShowPopover] = useState(false)
+  const navigate = useNavigate()
   const RiskIcon = RISK_ICONS[item.overallRisk] ?? Info
   const isPending = item.status === "pending"
 
@@ -303,8 +613,14 @@ function ApprovalCard({ item, onDecide, onAllowHotline }: ApprovalCardProps) {
 
   async function handleAllowHotline() {
     setDeciding("whitelist")
-    await onAllowHotline(item)
+    const res = await onAllowHotline(item)
     setDeciding(null)
+    if (!res.added) return
+    // Up to WHITELIST_POPOVER_LIMIT popovers per session — afterwards
+    // the toast alone carries the receipt.
+    if (readPopoverShownCount() >= WHITELIST_POPOVER_LIMIT) return
+    bumpPopoverShownCount()
+    setShowPopover(true)
   }
 
   return (
@@ -374,7 +690,7 @@ function ApprovalCard({ item, onDecide, onAllowHotline }: ApprovalCardProps) {
 
         {/* Actions */}
         {isPending && (
-          <div className="flex items-center gap-2 pt-1 border-t border-border">
+          <div className="relative flex items-center gap-2 pt-1 border-t border-border">
             <Button
               size="sm"
               className="gap-1.5 bg-green-600 hover:bg-green-700 text-white"
@@ -403,6 +719,22 @@ function ApprovalCard({ item, onDecide, onAllowHotline }: ApprovalCardProps) {
               {deciding === "reject" ? "拒绝中…" : "拒绝"}
             </Button>
             <p className="ml-auto text-xs text-muted-foreground">批准后 Agent 可继续执行调用</p>
+
+            {showPopover && globalMode && (
+              <WhitelistEducationPopover
+                hotlineDisplayName={item.hotlineInfo?.displayName ?? item.hotlineId}
+                mode={globalMode}
+                onClose={() => setShowPopover(false)}
+                onNavigatePreferences={() => {
+                  setShowPopover(false)
+                  navigate("/caller/preferences?from=approvals-add-whitelist")
+                }}
+                onNavigateAccessLists={() => {
+                  setShowPopover(false)
+                  navigate("/caller/access-lists?from=approvals-add-whitelist")
+                }}
+              />
+            )}
           </div>
         )}
 
@@ -422,6 +754,14 @@ export function CallerApprovalsPage() {
   const [items, setItems] = useState<ApprovalRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<ApprovalStatus | "all">("pending")
+  // Mode is needed by the whitelist popover wording AND by the M7 banner trigger.
+  const [globalMode, setGlobalMode] = useState<ApprovalMode | null>(null)
+  const [bannerDismissedAt, setBannerDismissedAt] = useState<number>(() =>
+    readBannerDismissedAt(),
+  )
+  // M7 evaluates against the **full** approval set, not just the current tab,
+  // because per-hotline / 30-day stats span beyond `pending`.
+  const [allItemsForStats, setAllItemsForStats] = useState<ApprovalRecord[]>([])
 
   const load = useCallback(async () => {
     const qs = filter !== "all" ? `?status=${filter}` : ""
@@ -430,19 +770,41 @@ export function CallerApprovalsPage() {
     setLoading(false)
   }, [filter])
 
+  // Stats source — refreshed alongside `load` but isolates "all" from the active tab.
+  const loadStats = useCallback(async () => {
+    const res = await apiCall<{ items: ApprovalRecord[] }>("/caller/approvals", { silent: true })
+    if (res.ok && res.data?.items) setAllItemsForStats(res.data.items)
+  }, [])
+
+  const loadGlobalMode = useCallback(async () => {
+    const res = await apiCall<GlobalPolicy>("/caller/global-policy", { silent: true })
+    if (res.ok && res.data) setGlobalMode(res.data.mode)
+  }, [])
+
   useEffect(() => {
     setLoading(true)
     void load()
   }, [load])
 
+  useEffect(() => {
+    void loadStats()
+    void loadGlobalMode()
+  }, [loadStats, loadGlobalMode])
+
   // Poll the list. Tighten to 2s while any approved record is mid-execution
   // so the UI shows running -> succeeded transitions promptly.
-  usePoll(load, {
-    intervalMs: 5000,
-    fastIntervalMs: 2000,
-    fastWhen: () => items.some((i) => i.status === "approved" && i.execution?.status === "running"),
-    skipInitial: true,
-  })
+  usePoll(
+    useCallback(async () => {
+      await Promise.all([load(), loadStats()])
+    }, [load, loadStats]),
+    {
+      intervalMs: 5000,
+      fastIntervalMs: 2000,
+      fastWhen: () =>
+        items.some((i) => i.status === "approved" && i.execution?.status === "running"),
+      skipInitial: true,
+    },
+  )
 
   const pendingCount = items.filter((i) => i.status === "pending").length
 
@@ -451,39 +813,75 @@ export function CallerApprovalsPage() {
     if (res.ok) {
       toast.success(action === "approve" ? "已批准，Agent 可继续执行" : "已拒绝调用请求")
       load()
+      void loadStats()
     } else {
       toast.error("操作失败，请刷新后重试", { description: res.error.message })
     }
   }
 
-  async function handleAllowHotline(item: ApprovalRecord) {
-    const policyRes = await apiCall<GlobalPolicy>("/caller/global-policy", { silent: true })
-    if (!policyRes.ok || !policyRes.data) {
-      toast.error("无法读取当前策略", { description: policyRes.ok ? undefined : policyRes.error.message })
-      return
-    }
-    const policy = policyRes.data
-    if (policy.hotlineWhitelist.includes(item.hotlineId)) {
-      toast.info("该 Hotline 已在白名单中")
-      return
-    }
-    const saveRes = await apiCall<GlobalPolicy>("/caller/global-policy", {
-      method: "PUT",
-      silent: true,
-      body: {
-        ...policy,
-        hotlineWhitelist: [...policy.hotlineWhitelist, item.hotlineId],
-      },
-    })
-    if (saveRes.ok && saveRes.data) {
-      toast.success(
-        policy.mode === "allow_listed"
-          ? "已加入 Hotline 白名单，后续可自动放行"
-          : "已加入 Hotline 白名单；切换到白名单模式后才会自动放行"
-      )
-      return
-    }
-    toast.error("加入白名单失败，请重试", { description: saveRes.ok ? undefined : saveRes.error.message })
+  // Internal helper used by both the per-card whitelist button and the M7 banner
+  // shortcut. Returns whether the hotline was newly added so the popover can
+  // be triggered only on the actual write.
+  const addHotlineToWhitelist = useCallback(
+    async (hotlineId: string): Promise<{ added: boolean; mode: ApprovalMode | null }> => {
+      const policyRes = await apiCall<GlobalPolicy>("/caller/global-policy", { silent: true })
+      if (!policyRes.ok || !policyRes.data) {
+        toast.error("无法读取当前策略", {
+          description: policyRes.ok ? undefined : policyRes.error.message,
+        })
+        return { added: false, mode: null }
+      }
+      const policy = policyRes.data
+      if (policy.hotlineWhitelist.includes(hotlineId)) {
+        toast.info("该 Hotline 已在白名单中")
+        return { added: false, mode: policy.mode }
+      }
+      const saveRes = await apiCall<GlobalPolicy>("/caller/global-policy", {
+        method: "PUT",
+        silent: true,
+        body: {
+          ...policy,
+          hotlineWhitelist: [...policy.hotlineWhitelist, hotlineId],
+        },
+      })
+      if (saveRes.ok && saveRes.data) {
+        toast.success(
+          policy.mode === "allow_listed"
+            ? "已加入 Hotline 白名单，后续可自动放行"
+            : "已加入 Hotline 白名单；切换到白名单模式后才会自动放行",
+        )
+        setGlobalMode(saveRes.data.mode)
+        return { added: true, mode: saveRes.data.mode }
+      }
+      toast.error("加入白名单失败，请重试", {
+        description: saveRes.ok ? undefined : saveRes.error.message,
+      })
+      return { added: false, mode: policy.mode }
+    },
+    [],
+  )
+
+  async function handleAllowHotline(item: ApprovalRecord): Promise<{ added: boolean }> {
+    const { added } = await addHotlineToWhitelist(item.hotlineId)
+    return { added }
+  }
+
+  // ── M7 banner ──
+  const tiredCondition = useMemo(() => {
+    if (Date.now() - bannerDismissedAt < TIRED_BANNER_COOLDOWN_MS) return null
+    return evaluateTiredCondition(allItemsForStats, globalMode, Date.now())
+  }, [allItemsForStats, globalMode, bannerDismissedAt])
+
+  const pendingListRef = useRef<HTMLDivElement | null>(null)
+
+  function handleDismissBanner() {
+    persistBannerDismissedAt()
+    setBannerDismissedAt(Date.now())
+  }
+
+  function handleFocusBacklog() {
+    setFilter("pending")
+    pendingListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
   const FILTERS: { value: ApprovalStatus | "all"; label: string }[] = [
@@ -513,6 +911,18 @@ export function CallerApprovalsPage() {
         <Button size="sm" variant="outline" onClick={load}>刷新</Button>
       </div>
 
+      {/* M7 · approval-fatigue banner */}
+      {tiredCondition && (
+        <TiredBanner
+          condition={tiredCondition}
+          onDismiss={handleDismissBanner}
+          onAddHotlineToWhitelist={async (hotlineId) => {
+            await addHotlineToWhitelist(hotlineId)
+          }}
+          onFocusBacklog={handleFocusBacklog}
+        />
+      )}
+
       {/* Filter tabs */}
       <div className="flex gap-1">
         {FILTERS.map((f) => (
@@ -540,9 +950,15 @@ export function CallerApprovalsPage() {
           {filter === "pending" ? "暂无待审批请求" : "暂无记录"}
         </div>
       ) : (
-        <div className="space-y-3">
+        <div ref={pendingListRef} className="space-y-3">
           {items.map((item) => (
-            <ApprovalCard key={item.id} item={item} onDecide={handleDecide} onAllowHotline={handleAllowHotline} />
+            <ApprovalCard
+              key={item.id}
+              item={item}
+              onDecide={handleDecide}
+              onAllowHotline={handleAllowHotline}
+              globalMode={globalMode}
+            />
           ))}
         </div>
       )}

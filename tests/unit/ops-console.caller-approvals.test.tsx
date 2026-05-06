@@ -3,8 +3,17 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 import { CallerApprovalsPage } from "../../apps/ops-console/src/pages/caller/CallerApprovalsPage";
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <CallerApprovalsPage />
+    </MemoryRouter>
+  );
+}
 
 interface ToastCall {
   level: "success" | "error" | "info";
@@ -77,6 +86,13 @@ describe("CallerApprovalsPage", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     toastCalls.length = 0;
+    // M6/M7 persistence keys leak across tests if left untouched
+    try {
+      window.sessionStorage.clear();
+      window.localStorage.clear();
+    } catch {
+      // happy-dom edge cases — not test-critical
+    }
   });
 
   it("renders pending approvals with risk + expiry context and triggers approve", async () => {
@@ -101,7 +117,7 @@ describe("CallerApprovalsPage", () => {
       })
     );
 
-    render(<CallerApprovalsPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.queryByText("Foxlab Text Classifier")).toBeTruthy();
@@ -136,7 +152,7 @@ describe("CallerApprovalsPage", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    render(<CallerApprovalsPage />);
+    renderPage();
     await waitFor(() => expect(screen.queryByText("Foxlab Text Classifier")).toBeTruthy());
 
     await act(async () => {
@@ -186,7 +202,7 @@ describe("CallerApprovalsPage", () => {
       })
     );
 
-    render(<CallerApprovalsPage />);
+    renderPage();
     await waitFor(() => expect(screen.queryByText("Foxlab Text Classifier")).toBeTruthy());
 
     const allowButton = screen.getByText("加入白名单").closest("button")!;
