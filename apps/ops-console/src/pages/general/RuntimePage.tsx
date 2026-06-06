@@ -8,13 +8,20 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/components/ui/utils"
 import { RefreshCw, Trash2, ChevronDown, ChevronRight } from "lucide-react"
 
-type Service = "caller" | "responder" | "relay"
+type LogService = "caller" | "responder" | "relay"
+type RuntimeService = LogService | "skill_adapter" | "mcp_adapter"
 type DeployProfile = "platform" | "public-stack" | "all-in-one"
 
-const SERVICES: { id: Service; label: string }[] = [
+const LOG_SERVICES: { id: LogService; label: string }[] = [
   { id: "caller", label: "Caller" },
   { id: "responder", label: "Responder" },
   { id: "relay", label: "Relay" },
+]
+
+const RUNTIME_SERVICES: { id: RuntimeService; label: string }[] = [
+  ...LOG_SERVICES,
+  { id: "skill_adapter", label: "Skill Adapter" },
+  { id: "mcp_adapter", label: "MCP Adapter" },
 ]
 
 const DEPLOY_PROFILES: Array<{
@@ -63,7 +70,7 @@ interface ServiceAlerts {
 }
 
 interface StatusResponse {
-  runtime?: Partial<Record<Service, {
+  runtime?: Partial<Record<RuntimeService, {
     pid?: number | null
     running?: boolean
     exit_code?: number | null
@@ -229,7 +236,7 @@ function renderEntriesWithSeparators(entries: LogEntry[]): JSX.Element[] {
 }
 
 export function RuntimePage() {
-  const [activeService, setActiveService] = useState<Service>("caller")
+  const [activeService, setActiveService] = useState<LogService>("caller")
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [alerts, setAlerts] = useState<ServiceAlerts["alerts"]>([])
   const [logFile, setLogFile] = useState("")
@@ -242,7 +249,7 @@ export function RuntimePage() {
   const [levelFilter, setLevelFilter] = useState<LogLevel>("all")
   const logsEndRef = useRef<HTMLDivElement>(null)
 
-  const load = async (service: Service, { silent = false } = {}) => {
+  const load = async (service: LogService, { silent = false } = {}) => {
     if (!silent) setLoading(true)
     else setRefreshing(true)
     const loadedAt = new Date().toLocaleTimeString()
@@ -316,7 +323,7 @@ export function RuntimePage() {
     { id: "debug", label: "调试" },
   ]
 
-  const runtimeCards = SERVICES.map(({ id, label }) => {
+  const runtimeCards = RUNTIME_SERVICES.map(({ id, label }) => {
     const item = serviceHealth?.[id]
     const healthy = item?.health?.status === 200 && item?.health?.body?.ok !== false
     const running = item?.running === true
@@ -345,7 +352,7 @@ export function RuntimePage() {
       </div>
 
       <div className="flex gap-1.5">
-        {SERVICES.map((s) => (
+        {LOG_SERVICES.map((s) => (
           <button
             key={s.id}
             onClick={() => { setActiveService(s.id); setFilterText(""); setLevelFilter("all") }}
@@ -361,7 +368,7 @@ export function RuntimePage() {
         ))}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
         {runtimeCards.map((item) => (
           <Card key={item.id}>
             <CardContent className="p-4 space-y-2">

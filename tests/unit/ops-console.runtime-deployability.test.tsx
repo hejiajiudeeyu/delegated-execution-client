@@ -33,6 +33,8 @@ function installRuntimeFetch() {
           caller: { running: true, pid: 101, health: { status: 200, body: { ok: true } } },
           responder: { running: false, pid: null, health: { status: 503, body: { ok: false } } },
           relay: { running: true, pid: 303, health: { status: 200, body: { ok: true } } },
+          skill_adapter: { running: true, pid: 404, health: { status: 200, body: { ok: true } } },
+          mcp_adapter: { running: true, pid: 505, health: { status: 200, body: { ok: true } } },
         },
       })
     }
@@ -66,5 +68,18 @@ describe("RuntimePage deployability guidance", () => {
     expect(screen.getByText("selfhost:smoke")).toBeTruthy()
     expect(screen.getByText("selfhost:rotate-plan")).toBeTruthy()
     expect(screen.getByText(/不会显示 secret 值/)).toBeTruthy()
+  })
+
+  it("shows skill and MCP adapter runtime cards from supervisor status", async () => {
+    installRuntimeFetch()
+    render(<RuntimePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Skill Adapter")).toBeTruthy()
+      expect(screen.getByText("MCP Adapter")).toBeTruthy()
+    })
+
+    expect(screen.getByText("PID: 404")).toBeTruthy()
+    expect(screen.getByText("PID: 505")).toBeTruthy()
   })
 })
