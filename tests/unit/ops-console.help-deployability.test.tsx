@@ -39,6 +39,7 @@ describe("HelpPage deployability chapter", () => {
     expect(screen.getByText("public-stack")).toBeTruthy()
     expect(screen.getByText("all-in-one")).toBeTruthy()
     expect(screen.getAllByText("selfhost:init").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("selfhost:preflight").length).toBeGreaterThan(0)
     expect(screen.getAllByText("selfhost:smoke").length).toBeGreaterThan(0)
     expect(screen.getByText(/不会输出 secret 值/)).toBeTruthy()
   })

@@ -62,6 +62,7 @@ describe("RuntimePage deployability guidance", () => {
     expect(screen.getByText("public-stack")).toBeTruthy()
     expect(screen.getByText("all-in-one")).toBeTruthy()
     expect(screen.getByText("selfhost:init")).toBeTruthy()
+    expect(screen.getByText("selfhost:preflight")).toBeTruthy()
     expect(screen.getByText("selfhost:smoke")).toBeTruthy()
     expect(screen.getByText("selfhost:rotate-plan")).toBeTruthy()
     expect(screen.getByText(/不会显示 secret 值/)).toBeTruthy()

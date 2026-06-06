@@ -43,7 +43,13 @@ const DEPLOY_PROFILES: Array<{
   },
 ]
 
-const SELFHOST_COMMANDS = ["selfhost:init", "selfhost:status", "selfhost:smoke", "selfhost:rotate-plan"]
+const SELFHOST_COMMANDS = [
+  "selfhost:init",
+  "selfhost:preflight",
+  "selfhost:status",
+  "selfhost:smoke",
+  "selfhost:rotate-plan",
+]
 
 interface ServiceLogs {
   service: string

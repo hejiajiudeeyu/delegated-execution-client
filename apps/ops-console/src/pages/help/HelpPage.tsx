@@ -558,7 +558,7 @@ function Section6Deployability({ register }: SectionProps) {
       </P>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Callout tone="info" title="platform">
-          最小 self-host platform profile。适合私有网络或本机验证，先跑 <Code>selfhost:init</Code> 生成本地 `.env`，再跑 <Code>selfhost:smoke</Code> 检查 health。
+          最小 self-host platform profile。适合私有网络或本机验证，先跑 <Code>selfhost:init</Code> 生成本地 `.env`，再跑 <Code>selfhost:preflight</Code> 做启动前检查。
         </Callout>
         <Callout tone="warn" title="public-stack">
           面向公网入口的 profile。<Code>PUBLIC_SITE_ADDRESS</Code> 仍是 localhost 或 admin/bootstrap secrets 不安全时，smoke 不应该通过。
@@ -570,6 +570,7 @@ function Section6Deployability({ register }: SectionProps) {
       <P>常用命令顺序：</P>
       <ol className="list-decimal pl-5 space-y-1.5">
         <li><Code>selfhost:init</Code>：从示例 env 生成本地配置，并替换 unsafe placeholders。</li>
+        <li><Code>selfhost:preflight</Code>：在 <Code>up</Code> 前检查 secret hygiene、compose config 和 routes，不要求服务已经运行。</li>
         <li><Code>selfhost:status</Code>：查看 compose 服务、路由和 health endpoint 摘要。</li>
         <li><Code>selfhost:smoke</Code>：把 secret hygiene、compose config 和 health endpoint 作为启动前/启动后 gate。</li>
         <li><Code>selfhost:logs</Code>：按 service 和 tail 行数看日志，不需要手写 docker compose 路径。</li>
