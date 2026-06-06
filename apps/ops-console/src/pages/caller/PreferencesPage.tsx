@@ -164,6 +164,57 @@ function describeModeChange(from: ApprovalMode, to: ApprovalMode, policy: Global
   }
 }
 
+function DeployabilityPolicySummary({ policy }: { policy: GlobalPolicy }) {
+  const whitelistCount = policy.responderWhitelist.length + policy.hotlineWhitelist.length
+  const posture =
+    policy.mode === "manual"
+      ? "最安全，适合作为本地和公开部署的默认起点。"
+      : policy.mode === "allow_listed"
+        ? "适合日常使用：可信名单自动放行，其余请求仍保留人工审批。"
+        : "仅适合隔离调试；公开或团队部署前应切回 manual 或 allow_listed。"
+
+  return (
+    <div className="space-y-3 rounded-lg border bg-muted/20 px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold">部署策略摘要</p>
+        <Badge tone={policy.mode === "allow_all" ? "destructive" : policy.mode === "allow_listed" ? "caller" : "neutral"} className="text-[10px]">
+          当前模式
+        </Badge>
+      </div>
+
+      <div className="grid gap-2 text-[11px] sm:grid-cols-3">
+        <div className="rounded border bg-background px-2.5 py-2">
+          <p className="text-muted-foreground">当前模式</p>
+          <p className="mt-0.5 font-semibold">{MODE_LABEL[policy.mode]}</p>
+        </div>
+        <div className="rounded border bg-background px-2.5 py-2">
+          <p className="text-muted-foreground">可信名单</p>
+          <p className="mt-0.5 font-mono">
+            Responder 白名单：{policy.responderWhitelist.length} 项
+          </p>
+          <p className="font-mono">
+            Hotline 白名单：{policy.hotlineWhitelist.length} 项
+          </p>
+        </div>
+        <div className="rounded border bg-background px-2.5 py-2">
+          <p className="text-muted-foreground">强制拒绝</p>
+          <p className="mt-0.5 font-mono">Blocklist：{policy.blocklist.length} 项</p>
+        </div>
+      </div>
+
+      <div className="space-y-1 text-xs leading-relaxed">
+        <p>{posture}</p>
+        <p className="text-muted-foreground">
+          本地模式可以用 manual 或 allow_listed 逐步沉淀可信 Hotline；公开或团队部署前不要使用 allow_all 作为默认策略。
+        </p>
+        <p className="text-muted-foreground">
+          当前共有 {whitelistCount} 项白名单和 {policy.blocklist.length} 项 Blocklist；Blocklist 在所有模式下都会优先生效。
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function GlobalPolicyCard() {
   const [policy, setPolicy] = useState<GlobalPolicy | null>(null)
   const [saving, setSaving] = useState(false)
@@ -230,6 +281,8 @@ function GlobalPolicyCard() {
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
+          <DeployabilityPolicySummary policy={policy} />
+
           <div className="space-y-2">
             {MODE_OPTIONS.map((opt) => {
               const Icon = opt.icon
