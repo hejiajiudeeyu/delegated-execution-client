@@ -9,12 +9,41 @@ import { cn } from "@/components/ui/utils"
 import { RefreshCw, Trash2, ChevronDown, ChevronRight } from "lucide-react"
 
 type Service = "caller" | "responder" | "relay"
+type DeployProfile = "platform" | "public-stack" | "all-in-one"
 
 const SERVICES: { id: Service; label: string }[] = [
   { id: "caller", label: "Caller" },
   { id: "responder", label: "Responder" },
   { id: "relay", label: "Relay" },
 ]
+
+const DEPLOY_PROFILES: Array<{
+  id: DeployProfile
+  label: string
+  scope: string
+  check: string
+}> = [
+  {
+    id: "platform",
+    label: "Self-host Platform",
+    scope: "最小平台服务，适合本地或私有网络验证。",
+    check: "先跑 selfhost:init，再跑 selfhost:smoke。",
+  },
+  {
+    id: "public-stack",
+    label: "Public Stack",
+    scope: "公网入口、relay、gateway 和 console 的组合。",
+    check: "公网 origin 和 admin/bootstrap secrets 没就绪时不能标绿。",
+  },
+  {
+    id: "all-in-one",
+    label: "All-in-one Demo",
+    scope: "面向演示和试用的一体化启动路径。",
+    check: "适合快速理解，不等价于正式生产发布。",
+  },
+]
+
+const SELFHOST_COMMANDS = ["selfhost:init", "selfhost:status", "selfhost:smoke", "selfhost:rotate-plan"]
 
 interface ServiceLogs {
   service: string
@@ -108,6 +137,51 @@ function LogLine({ line, count }: { line: string; count: number }) {
         <span className="shrink-0 text-zinc-500 text-[10px] leading-5 ml-auto pl-2">×{count}</span>
       )}
     </div>
+  )
+}
+
+function DeployabilityReadinessPanel() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">部署与管理就绪度</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          {DEPLOY_PROFILES.map((profile) => (
+            <div key={profile.id} className="rounded border bg-muted/20 px-3 py-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-mono text-xs font-semibold">{profile.id}</p>
+                <Badge tone="neutral" className="text-[10px]">
+                  {profile.label}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">{profile.scope}</p>
+              <p className="text-xs leading-relaxed">{profile.check}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded border bg-background px-3 py-3">
+            <p className="text-xs font-semibold mb-2">推荐检查顺序</p>
+            <div className="flex flex-wrap gap-1.5">
+              {SELFHOST_COMMANDS.map((command) => (
+                <code key={command} className="rounded bg-muted px-2 py-1 text-[11px] font-mono">
+                  {command}
+                </code>
+              ))}
+            </div>
+          </div>
+          <div className="rounded border border-amber-500/30 bg-amber-50/70 px-3 py-3">
+            <p className="text-xs font-semibold text-amber-900">安全边界</p>
+            <p className="mt-1 text-xs text-amber-900/80 leading-relaxed">
+              status / smoke / logs 只暴露运行状态和路由提示，不会显示 secret 值；需要轮换时先用 selfhost:rotate-plan 看影响范围。
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -311,6 +385,8 @@ export function RuntimePage() {
           <p>浏览器页面自身的前端异常不会自动进入这里；如果需要排查前端崩溃，仍要看浏览器控制台。</p>
         </CardContent>
       </Card>
+
+      <DeployabilityReadinessPanel />
 
       {dedupedAlerts.length > 0 && (
         <Card>

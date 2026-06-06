@@ -134,7 +134,9 @@ describe("CatalogPage", () => {
     });
     // Title bar's "试拨当前 Hotline" button must be enabled now that a hotline is active
     const tryNowBtn = screen.getByText(/试拨当前 Hotline/).closest("button")!;
-    expect(tryNowBtn.hasAttribute("disabled")).toBe(false);
+    await waitFor(() => {
+      expect(tryNowBtn.hasAttribute("disabled")).toBe(false);
+    });
   });
 
   it("auto-opens the Try-Call drawer when arriving with ?hotline_id=", async () => {

@@ -36,9 +36,10 @@ const SECTIONS: Section[] = [
   { id: "what-is-hotline", number: 3, icon: Phone, title: "什么是 Hotline", blurb: "把 Hotline 类比成『REST API + Schema + 审批策略』的复合体。" },
   { id: "approvals", number: 4, icon: ShieldCheck, title: "审批与白名单", blurb: "三种模式 / 加白名单 / 加黑名单 / 模式切换的 trade-off。" },
   { id: "platform-mode", number: 5, icon: Globe, title: "本地模式 vs. 平台模式", blurb: "价值对比表 + 何时该开启 + 如何开启。" },
-  { id: "troubleshooting", number: 6, icon: Wrench, title: "常见故障排查", blurb: "Responder 连不上 / 调用失败 / 平台 API 不可达 / 审批不动了。" },
-  { id: "faq", number: 7, icon: HelpCircle, title: "FAQ", blurb: "10 条常见问答。" },
-  { id: "feedback", number: 8, icon: MessageSquareWarning, title: "反馈与报告问题", blurb: "diagnostic-bundle 流程 + GitHub issue 模板 + 邮件。" },
+  { id: "deployability", number: 6, icon: Wrench, title: "部署与管理", blurb: "profile 选择 / selfhost 命令 / secrets / smoke / logs。" },
+  { id: "troubleshooting", number: 7, icon: Wrench, title: "常见故障排查", blurb: "Responder 连不上 / 调用失败 / 平台 API 不可达 / 审批不动了。" },
+  { id: "faq", number: 8, icon: HelpCircle, title: "FAQ", blurb: "10 条常见问答。" },
+  { id: "feedback", number: 9, icon: MessageSquareWarning, title: "反馈与报告问题", blurb: "diagnostic-bundle 流程 + GitHub issue 模板 + 邮件。" },
 ]
 
 export function HelpPage() {
@@ -156,9 +157,10 @@ export function HelpPage() {
           <Section3 register={registerSection} />
           <Section4 register={registerSection} />
           <Section5 register={registerSection} />
-          <Section6 register={registerSection} />
+          <Section6Deployability register={registerSection} />
           <Section7 register={registerSection} />
           <Section8 register={registerSection} />
+          <Section9 register={registerSection} />
         </div>
       </div>
     </div>
@@ -538,13 +540,59 @@ function Section5({ register }: SectionProps) {
   )
 }
 
-// ─── chapter 6 · troubleshooting ─────────────────────────────────────
+// ─── chapter 6 · deployability ───────────────────────────────────────
 
-function Section6({ register }: SectionProps) {
+function Section6Deployability({ register }: SectionProps) {
+  return (
+    <SectionShell
+      id="deployability"
+      number={6}
+      title="部署与管理"
+      intro="如果你想把 CALL ANYTHING 当成一个像 Sub2API / CLIProxyAPI 那样可部署、可管理的系统，先从 profile、health、logs 和 secret hygiene 四件事理解。"
+      register={register}
+    >
+      <P>
+        当前推荐先用终端完成部署生命周期管理，再回到
+        <Link to="/general/runtime" className="text-cyan-700 underline underline-offset-2 mx-1">Runtime 监控</Link>
+        看服务状态、日志尾部和结构化告警。Console 不替代 Docker/Compose，但会把 operator 最常需要理解的状态摆在同一个地方。
+      </P>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Callout tone="info" title="platform">
+          最小 self-host platform profile。适合私有网络或本机验证，先跑 <Code>selfhost:init</Code> 生成本地 `.env`，再跑 <Code>selfhost:smoke</Code> 检查 health。
+        </Callout>
+        <Callout tone="warn" title="public-stack">
+          面向公网入口的 profile。<Code>PUBLIC_SITE_ADDRESS</Code> 仍是 localhost 或 admin/bootstrap secrets 不安全时，smoke 不应该通过。
+        </Callout>
+        <Callout tone="good" title="all-in-one">
+          面向演示和快速理解的一体化路径。它能帮你看懂角色关系，但不要把 demo 绿色状态理解成 production-ready。
+        </Callout>
+      </div>
+      <P>常用命令顺序：</P>
+      <ol className="list-decimal pl-5 space-y-1.5">
+        <li><Code>selfhost:init</Code>：从示例 env 生成本地配置，并替换 unsafe placeholders。</li>
+        <li><Code>selfhost:status</Code>：查看 compose 服务、路由和 health endpoint 摘要。</li>
+        <li><Code>selfhost:smoke</Code>：把 secret hygiene、compose config 和 health endpoint 作为启动前/启动后 gate。</li>
+        <li><Code>selfhost:logs</Code>：按 service 和 tail 行数看日志，不需要手写 docker compose 路径。</li>
+        <li><Code>selfhost:rotate-plan</Code>：先看 secret rotation 影响范围；真正轮换前要显式确认。</li>
+      </ol>
+      <Callout tone="warn" title="安全边界">
+        selfhost helper 和 Runtime 页面都只显示状态、路由、profile 和检查结果；不会输出 secret 值。public-stack 在暴露公网前，必须把 localhost origin、默认 secret、未轮换 bootstrap secret 当成阻断项看待。
+      </Callout>
+      <CtaRow>
+        <CtaPrimary to="/general/runtime">查看 Runtime 监控</CtaPrimary>
+        <CtaLink to="/general/transport">检查传输配置</CtaLink>
+      </CtaRow>
+    </SectionShell>
+  )
+}
+
+// ─── chapter 7 · troubleshooting ─────────────────────────────────────
+
+function Section7({ register }: SectionProps) {
   return (
     <SectionShell
       id="troubleshooting"
-      number={6}
+      number={7}
       title="常见故障排查"
       intro="按『症状 → 最常见原因 → 怎么自查』组织。看到一个症状先在这里查，再去 GitHub。"
       register={register}
@@ -638,13 +686,13 @@ function Trouble({ title, symptoms, likely, steps }: TroubleProps) {
   )
 }
 
-// ─── chapter 7 · FAQ ─────────────────────────────────────────────────
+// ─── chapter 8 · FAQ ─────────────────────────────────────────────────
 
-function Section7({ register }: SectionProps) {
+function Section8({ register }: SectionProps) {
   return (
     <SectionShell
       id="faq"
-      number={7}
+      number={8}
       title="FAQ"
       intro="只回答 console 里最常被问、又最容易在搜索引擎被错答的 10 条问题。"
       register={register}
@@ -680,13 +728,13 @@ function Q({ q, a }: { q: string; a: React.ReactNode }) {
   )
 }
 
-// ─── chapter 8 · feedback ────────────────────────────────────────────
+// ─── chapter 9 · feedback ────────────────────────────────────────────
 
-function Section8({ register }: SectionProps) {
+function Section9({ register }: SectionProps) {
   return (
     <SectionShell
       id="feedback"
-      number={8}
+      number={9}
       title="反馈与报告问题"
       intro="开源项目，反馈进来的 issue 会被处理。但请先把基本信息凑齐——你帮我们快定位 = 你早一点拿到修复。"
       register={register}
