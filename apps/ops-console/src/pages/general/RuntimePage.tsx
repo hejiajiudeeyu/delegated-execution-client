@@ -186,11 +186,24 @@ function DeployabilityReadinessPanel() {
               ))}
             </div>
           </div>
-          <div className="rounded border border-amber-500/30 bg-amber-50/70 px-3 py-3">
-            <p className="text-xs font-semibold text-amber-900">安全边界</p>
-            <p className="mt-1 text-xs text-amber-900/80 leading-relaxed">
-              status / smoke / logs 只暴露运行状态和路由提示，不会显示 secret 值；需要轮换时先用 selfhost:rotate-plan 看影响范围。
-            </p>
+          <div className="space-y-3">
+            <div className="rounded border border-amber-500/30 bg-amber-50/70 px-3 py-3">
+              <p className="text-xs font-semibold text-amber-900">安全边界</p>
+              <p className="mt-1 text-xs text-amber-900/80 leading-relaxed">
+                status / smoke / logs 只暴露运行状态和路由提示，不会显示 secret 值；需要轮换时先用 selfhost:rotate-plan 看影响范围。
+              </p>
+            </div>
+            <div className="rounded border border-cyan-500/30 bg-cyan-50/70 px-3 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-cyan-950">Billing readiness</p>
+                <Badge tone="neutral" className="text-[10px]">
+                  P-1 M1.1 基础
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs text-cyan-950/80 leading-relaxed">
+                已有 billing-store、tenant balance schema 和持久化测试，但这不等于生产默认可用；API、读模型、client-facing surface 完成前不能把 billing 标成 ready。
+              </p>
+            </div>
           </div>
         </div>
       </CardContent>

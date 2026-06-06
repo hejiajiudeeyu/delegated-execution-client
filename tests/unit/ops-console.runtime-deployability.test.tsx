@@ -70,6 +70,19 @@ describe("RuntimePage deployability guidance", () => {
     expect(screen.getByText(/不会显示 secret 值/)).toBeTruthy()
   })
 
+  it("makes billing readiness explicit instead of implied ready", async () => {
+    installRuntimeFetch()
+    render(<RuntimePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Billing readiness")).toBeTruthy()
+    })
+
+    expect(screen.getByText("P-1 M1.1 基础")).toBeTruthy()
+    expect(screen.getByText(/不等于生产默认可用/)).toBeTruthy()
+    expect(screen.getByText(/API、读模型、client-facing surface/)).toBeTruthy()
+  })
+
   it("shows skill and MCP adapter runtime cards from supervisor status", async () => {
     installRuntimeFetch()
     render(<RuntimePage />)
