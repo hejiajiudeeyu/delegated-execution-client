@@ -38,6 +38,8 @@ interface DraftResponse {
   hotline_id: string
   review_status?: string
   submitted_for_review?: boolean
+  draft_ready?: boolean
+  platform_enabled?: boolean
   draft_file: string
   draft: unknown
 }

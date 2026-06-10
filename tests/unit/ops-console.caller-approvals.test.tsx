@@ -15,18 +15,24 @@ function renderPage() {
   );
 }
 
-interface ToastCall {
-  level: "success" | "error" | "info";
-  message: string;
-}
-
-const toastCalls: ToastCall[] = [];
+const toastMock = vi.hoisted(() => {
+  const calls: Array<{ level: "success" | "error" | "info"; message: string }> = [];
+  return {
+    calls,
+    success: (message: string) => calls.push({ level: "success", message }),
+    error: (message: string) => calls.push({ level: "error", message }),
+    info: (message: string) => calls.push({ level: "info", message }),
+    clear: () => {
+      calls.length = 0;
+    }
+  };
+});
 
 vi.mock("sonner", () => ({
   toast: {
-    success: (message: string) => toastCalls.push({ level: "success", message }),
-    error: (message: string) => toastCalls.push({ level: "error", message }),
-    info: (message: string) => toastCalls.push({ level: "info", message })
+    success: toastMock.success,
+    error: toastMock.error,
+    info: toastMock.info
   }
 }));
 
@@ -85,7 +91,7 @@ describe("CallerApprovalsPage", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    toastCalls.length = 0;
+    toastMock.clear();
     // M6/M7 persistence keys leak across tests if left untouched
     try {
       window.sessionStorage.clear();
@@ -136,7 +142,7 @@ describe("CallerApprovalsPage", () => {
 
     expect(approveCalls).toBe(1);
     expect(
-      toastCalls.find((c) => c.message === "已批准，Agent 可继续执行")
+      toastMock.calls.find((c) => c.message === "已批准，Agent 可继续执行")
     ).toBeTruthy();
   });
 
@@ -213,7 +219,7 @@ describe("CallerApprovalsPage", () => {
 
     expect(putBody?.hotlineWhitelist).toEqual([item.hotlineId]);
     expect(
-      toastCalls.find((c) => c.message === "已加入 Hotline 白名单，后续可自动放行")
+      toastMock.calls.find((c) => c.message === "已加入 Hotline 白名单，后续可自动放行")
     ).toBeTruthy();
   });
 
@@ -352,7 +358,7 @@ describe("CallerApprovalsPage", () => {
 
     // Toast still fires
     expect(
-      toastCalls.find((c) => c.message === "已加入 Hotline 白名单，后续可自动放行")
+      toastMock.calls.find((c) => c.message === "已加入 Hotline 白名单，后续可自动放行")
     ).toBeTruthy();
     // But the popover doesn't appear at all
     expect(screen.queryByText("已加入白名单 ✓")).toBeNull();

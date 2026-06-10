@@ -12,6 +12,9 @@
     "ops": "node apps/ops/src/cli.js",
     "ops:start": "node apps/ops/src/cli.js start",
     "caller-skill:mcp": "node apps/caller-skill-mcp-adapter/src/server.js",
+    "check:ops-console-runtime-surface": "node scripts/check-ops-console-runtime-surface.mjs",
+    "check:ops-console-settings-surface": "node scripts/check-ops-console-settings-surface.mjs",
+    "check:ops-console-logs-surface": "node scripts/check-ops-console-logs-surface.mjs",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run --config tests/config/vitest.unit.config.mjs",
     "test:integration": "vitest run --config tests/config/vitest.integration.config.mjs",
@@ -22,8 +25,14 @@
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.2",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
     "@vitest/ui": "^3.2.4",
     "happy-dom": "^20.8.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.13.1",
+    "sonner": "2.0.3",
     "vitest": "^3.2.4"
   },
   "dependencies": {

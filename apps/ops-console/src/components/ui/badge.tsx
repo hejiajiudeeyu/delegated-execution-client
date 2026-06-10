@@ -9,8 +9,10 @@ const badgeVariants = cva(
     variants: {
       variant: {
         solid: "",
+        secondary: "border-border bg-muted text-foreground",
         outline: "bg-transparent text-black hover:bg-black hover:text-white",
         dark: "bg-black text-white",
+        destructive: "border-red-600 bg-red-600 text-white",
       },
       tone: {
         neutral: "bg-[#F7F2E8] text-black",
@@ -35,7 +37,8 @@ export interface BadgeProps
     VariantProps<typeof badgeVariants> {}
 
 function Badge({ className, variant, tone, ...props }: BadgeProps) {
-  const effectiveTone = variant === "outline" ? null : variant === "dark" ? null : tone;
+  const effectiveTone =
+    variant === "outline" || variant === "dark" || variant === "secondary" || variant === "destructive" ? null : tone;
   
   return (
     <div

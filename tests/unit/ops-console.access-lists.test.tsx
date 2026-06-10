@@ -28,18 +28,24 @@ interface FetchCall {
   body?: unknown;
 }
 
-interface ToastCall {
-  level: "success" | "error" | "info";
-  message: string;
-}
-
-const toastCalls: ToastCall[] = [];
+const toastMock = vi.hoisted(() => {
+  const calls: Array<{ level: "success" | "error" | "info"; message: string }> = [];
+  return {
+    calls,
+    success: (message: string) => calls.push({ level: "success", message }),
+    error: (message: string) => calls.push({ level: "error", message }),
+    info: (message: string) => calls.push({ level: "info", message }),
+    clear: () => {
+      calls.length = 0;
+    }
+  };
+});
 
 vi.mock("sonner", () => ({
   toast: {
-    success: (message: string) => toastCalls.push({ level: "success", message }),
-    error: (message: string) => toastCalls.push({ level: "error", message }),
-    info: (message: string) => toastCalls.push({ level: "info", message })
+    success: toastMock.success,
+    error: toastMock.error,
+    info: toastMock.info
   }
 }));
 
@@ -86,7 +92,7 @@ describe("AccessListsPage", () => {
     cleanup();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    toastCalls.length = 0;
+    toastMock.clear();
   });
 
   it("loads policy and renders the manual-mode banner with empty list panel", async () => {
@@ -135,7 +141,7 @@ describe("AccessListsPage", () => {
       expect(screen.queryByText("my-bot.v1")).toBeTruthy();
     });
     expect(getPolicy().responderWhitelist).toContain("my-bot.v1");
-    expect(toastCalls.find((c) => c.message === "名单已更新")).toBeTruthy();
+    expect(toastMock.calls.find((c) => c.message === "名单已更新")).toBeTruthy();
 
     const putCall = calls.find((c) => c.method === "PUT" && c.url === "/caller/global-policy");
     expect(putCall).toBeTruthy();
@@ -164,7 +170,7 @@ describe("AccessListsPage", () => {
       await flush();
     });
 
-    expect(toastCalls.find((c) => c.level === "info")).toBeTruthy();
+    expect(toastMock.calls.find((c) => c.level === "info")).toBeTruthy();
     expect(calls.filter((c) => c.method === "PUT").length).toBe(0);
   });
 
@@ -208,7 +214,7 @@ describe("AccessListsPage", () => {
       await flush();
     });
 
-    expect(toastCalls.find((c) => c.level === "error")).toBeTruthy();
+    expect(toastMock.calls.find((c) => c.level === "error")).toBeTruthy();
     expect(screen.queryByText("bot-a")).toBeTruthy(); // server failed, item still there
 
     await act(async () => {
