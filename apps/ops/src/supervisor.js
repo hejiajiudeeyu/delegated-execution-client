@@ -872,6 +872,11 @@ export function createOpsSupervisorServer() {
     }
   };
 
+  function refreshStateFromDisk() {
+    Object.assign(state, ensureOpsState());
+    return state;
+  }
+
   function getRuntimeStatus(name) {
     const processInfo = runtime.processes.get(name);
     if (!processInfo) {
@@ -2404,8 +2409,16 @@ function buildResponderRegisterHeaders() {
         return;
       }
       if (method === "POST" && pathname === "/setup") {
+        refreshStateFromDisk();
         ensureResponderIdentity(state);
         state.env = saveOpsState(state);
+        for (const svc of ["caller", "skill-adapter", "mcp-adapter", "responder"]) {
+          const existing = runtime.processes.get(svc);
+          if (existing && !existing.exited) {
+            await stopProcessInfo(existing);
+            await ensureService(svc);
+          }
+        }
         appendSupervisorEvent({ type: "setup_completed" });
         sendJson(res, 200, { ok: true, config: state.config });
         return;

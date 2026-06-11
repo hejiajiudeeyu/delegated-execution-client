@@ -1104,9 +1104,27 @@ async function commandRunExample(args) {
     method: "POST",
     body: { text }
   });
+  if (response.status !== 201 || !response.body?.request_id) {
+    emit({
+      ok: false,
+      ...response.body
+    });
+    return;
+  }
+  const requestId = response.body.request_id;
+  const final = await waitFor(async () => {
+    const current = await requestSupervisorJson(state, `/requests/${encodeURIComponent(requestId)}`);
+    if (!["SUCCEEDED", "FAILED", "UNVERIFIED", "TIMED_OUT"].includes(current.body?.status)) {
+      throw new Error("request_not_ready");
+    }
+    return current.body;
+  });
   emit({
-    ok: response.status === 201,
-    ...response.body
+    ok: final.status === "SUCCEEDED",
+    ...response.body,
+    status: final.status,
+    request: final,
+    result_package: final.result_package || null
   });
 }
 
@@ -1235,6 +1253,20 @@ async function commandBootstrap(args) {
     const supervisorUrl = supervisorUrlFromState(ensureOpsState());
     const supervisor = await ensureSupervisorAvailable(supervisorUrl, env);
     logBootstrapStep(steps, "supervisor_started", true, supervisor);
+    const supervisorSetup = await requestJson(supervisorUrl, "/setup", {
+      method: "POST",
+      body: {}
+    });
+    logBootstrapStep(steps, "supervisor_config_synced", supervisorSetup.status === 200);
+    if (supervisorSetup.status !== 200) {
+      emit({
+        ok: false,
+        stage: "supervisor_config_sync_failed",
+        steps,
+        response: supervisorSetup.body || supervisorSetup
+      });
+      return;
+    }
 
     const adminApiKey = process.env.PLATFORM_ADMIN_API_KEY || process.env.ADMIN_API_KEY || null;
     if (bootstrapUsesPlatform) {

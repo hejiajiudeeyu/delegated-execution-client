@@ -19,6 +19,8 @@ const OPS_ENV_KEYS = [
   "OPS_PORT_RELAY",
   "OPS_PORT_CALLER",
   "OPS_PORT_RESPONDER",
+  "OPS_PORT_SKILL_ADAPTER",
+  "OPS_PORT_MCP_ADAPTER",
   "OPS_RELAY_BIN",
   "OPS_RELAY_ARGS",
   "PLATFORM_API_BASE_URL",
@@ -645,7 +647,6 @@ describe("ops cli integration", () => {
     process.env.OPS_PORT_RELAY = relayPort;
     process.env.OPS_PORT_CALLER = callerPort;
     process.env.OPS_PORT_RESPONDER = responderPort;
-
     const supervisor = createOpsSupervisorServer();
     await new Promise((resolve) => supervisor.listen(Number(supervisorPort), "127.0.0.1", resolve));
     await jsonRequest(`http://127.0.0.1:${supervisorPort}`, "/setup", { method: "POST", body: {} });
@@ -746,6 +747,66 @@ describe("ops cli integration", () => {
       delete process.env.OPS_PORT_RESPONDER;
     }
   });
+
+  it("runs the local example through the cli and reports the final request status", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-run-example-"));
+    cleanupDirs.push(opsHome);
+
+    const [supervisorPort, relayPort, callerPort, responderPort, skillAdapterPort, mcpAdapterPort] = (await reserveFreePorts(6)).map(String);
+
+    process.env.DELEXEC_HOME = opsHome;
+    process.env.OPS_PORT_SUPERVISOR = supervisorPort;
+    process.env.OPS_PORT_RELAY = relayPort;
+    process.env.OPS_PORT_CALLER = callerPort;
+    process.env.OPS_PORT_RESPONDER = responderPort;
+    process.env.OPS_PORT_SKILL_ADAPTER = skillAdapterPort;
+    process.env.OPS_PORT_MCP_ADAPTER = mcpAdapterPort;
+
+    const env = {
+      ...process.env,
+      DELEXEC_HOME: opsHome,
+      OPS_PORT_SUPERVISOR: supervisorPort,
+      OPS_PORT_RELAY: relayPort,
+      OPS_PORT_CALLER: callerPort,
+      OPS_PORT_RESPONDER: responderPort,
+      OPS_PORT_SKILL_ADAPTER: skillAdapterPort,
+      OPS_PORT_MCP_ADAPTER: mcpAdapterPort
+    };
+
+    const supervisor = createOpsSupervisorServer();
+    await new Promise((resolve) => supervisor.listen(Number(supervisorPort), "127.0.0.1", resolve));
+    await jsonRequest(`http://127.0.0.1:${supervisorPort}`, "/setup", { method: "POST", body: {} });
+    await supervisor.startManagedServices();
+
+    try {
+      const bootstrapped = JSON.parse(
+        (
+          await execFileAsync(
+            process.execPath,
+            [CLI_PATH, "bootstrap", "--email", "run-example@test.local", "--text", "Summarize this bootstrap request."],
+            { env }
+          )
+        ).stdout
+      );
+      expect(bootstrapped.ok).toBe(true);
+
+      const output = JSON.parse(
+        (
+          await execFileAsync(process.execPath, [CLI_PATH, "run-example", "--text", "Summarize this follow-up request."], {
+            env
+          })
+        ).stdout
+      );
+
+      expect(output.ok).toBe(true);
+      expect(output.status).toBe("SUCCEEDED");
+      expect(output.request.status).toBe("SUCCEEDED");
+      expect(output.result_package?.status).toBe("ok");
+    } finally {
+      await supervisor.stopManagedServices();
+      await closeServer(supervisor);
+    }
+  }, 20000);
 
   it("starts the web ui through the cli and returns reopen commands", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-ui-"));
