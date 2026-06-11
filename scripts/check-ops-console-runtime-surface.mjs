@@ -9,7 +9,13 @@ const RUNTIME_PAGE_PATH = path.join(ROOT, "apps/ops-console/src/pages/general/Ru
 
 const REQUIRED_API_CALLS = ["/status", "/runtime/logs", "/runtime/alerts"];
 const REQUIRED_RUNTIME_SERVICES = ["caller", "responder", "relay", "skill_adapter", "mcp_adapter"];
-const REQUIRED_SAFETY_PATTERNS = [/secret/i, /不会显示 secret 值/i];
+const REQUIRED_LOCAL_DEBUG_PATTERNS = [
+  /本机调试路径/,
+  /delexec-ops run-example/,
+  /delexec-ops debug-snapshot/,
+  /公网或 self-host 是后续发布路径/,
+  /不把 self-host 当成本机闭环的前置步骤/
+];
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -62,8 +68,9 @@ function buildReport() {
     blockers.push(`RuntimePage is missing runtime service cards: ${missingRuntimeServices.join(", ")}`);
   }
 
-  if (!REQUIRED_SAFETY_PATTERNS.some((pattern) => pattern.test(runtimePage))) {
-    blockers.push("RuntimePage is missing secret-safety copy for deployability guidance");
+  const missingLocalDebugPatterns = REQUIRED_LOCAL_DEBUG_PATTERNS.filter((pattern) => !pattern.test(runtimePage));
+  if (missingLocalDebugPatterns.length) {
+    blockers.push("RuntimePage is missing local-first debug guidance");
   }
 
   return {
@@ -76,7 +83,8 @@ function buildReport() {
     required_runtime_services: REQUIRED_RUNTIME_SERVICES,
     safety_notes: [
       "Runtime surface reads status, log metadata, and structured alerts from the client-owned console API.",
-      "Runtime surface deployability copy says status, smoke, and logs must not expose secret values."
+      "Runtime surface starts with local debug commands before platform, public-stack, or self-host exposure.",
+      "Runtime surface evidence stays at route, service, status, and log-metadata level without printing secret values."
     ],
     files: [
       "apps/ops-console/src/App.tsx",

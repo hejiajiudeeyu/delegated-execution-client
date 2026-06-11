@@ -47,22 +47,19 @@ Profile intent:
 Recommended user path:
 
 1. `npm install`
-2. `npm run ops -- setup`
-3. `npm run ops -- auth register --email you@example.com`
-4. `npm run ops -- enable-responder`
-5. `npm run ops -- add-example-hotline`
-6. `npm run ops -- run-example --text "Summarize this request."`
-7. `npm run ops -- doctor` / `npm run ops -- debug-snapshot`
+2. `npm run ops -- bootstrap --email you@example.com --text "Summarize this bootstrap request."`
+3. `npm run ops -- status`
+4. `npm run ops -- run-example --text "Summarize this follow-up request."`
+5. `npm run ops -- doctor` / `npm run ops -- debug-snapshot`
 
-Manual fallback path:
+Manual fallback path for endpoint-level debugging:
 
 1. `npm install`
-2. `npm run ops -- setup`
-3. `npm run ops -- auth register --email you@example.com`
-4. `npm run ops -- enable-responder`
-5. `npm run ops -- add-example-hotline`
-6. `npm run ops -- start`
-7. `npm run ops -- run-example --text "Summarize this request."`
+2. `npm run ops -- start`
+3. use the manual API flow in `docs/current/guides/local-mode-onboarding.md`
+4. `npm run ops -- status`
+5. `npm run ops -- run-example --text "Summarize this follow-up request."`
+6. `npm run ops -- debug-snapshot`
 
 This path stores local ops state under `~/.delexec`, starts a local supervisor, and manages relay internally when the relay package is available in the current install shape.
 In the split-repository source integration shape, prefer `relay_http` pointed at a relay process started from `delegated-execution-platform-selfhost`. See `docs/current/guides/source-integration-runbook.md`.

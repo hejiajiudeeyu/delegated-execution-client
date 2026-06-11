@@ -50,22 +50,19 @@ Profile 意图：
 推荐用户路径：
 
 1. `npm install`
-2. `npm run ops -- setup`
-3. `npm run ops -- auth register --email you@example.com`
-4. `npm run ops -- enable-responder`
-5. `npm run ops -- add-example-hotline`
-6. `npm run ops -- run-example --text "Summarize this request."`
-7. `npm run ops -- doctor` / `npm run ops -- debug-snapshot`
+2. `npm run ops -- bootstrap --email you@example.com --text "Summarize this bootstrap request."`
+3. `npm run ops -- status`
+4. `npm run ops -- run-example --text "Summarize this follow-up request."`
+5. `npm run ops -- doctor` / `npm run ops -- debug-snapshot`
 
-手动兜底路径：
+endpoint 级调试的手动兜底路径：
 
 1. `npm install`
-2. `npm run ops -- setup`
-3. `npm run ops -- auth register --email you@example.com`
-4. `npm run ops -- enable-responder`
-5. `npm run ops -- add-example-hotline`
-6. `npm run ops -- start`
-7. `npm run ops -- run-example --text "Summarize this request."`
+2. `npm run ops -- start`
+3. 使用 `docs/current/guides/local-mode-onboarding.zh-CN.md` 中的手动 API 流程
+4. `npm run ops -- status`
+5. `npm run ops -- run-example --text "Summarize this follow-up request."`
+6. `npm run ops -- debug-snapshot`
 
 该路径会把本地 ops 状态写入 `~/.delexec`，启动本地 supervisor，并在当前安装形态可用时内部管理 relay。  
 在拆分仓库源码集成形态中，优先使用指向 `delegated-execution-platform-selfhost` 中 relay 进程的 `relay_http`。参见 `docs/current/guides/source-integration-runbook.md`。  

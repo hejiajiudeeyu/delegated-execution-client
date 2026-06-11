@@ -57,11 +57,14 @@ export OPS_PORT_CALLER=8181
 export OPS_PORT_RESPONDER=8182
 export OPS_PORT_RELAY=8190
 export OPS_PORT_SKILL_ADAPTER=8191
+export OPS_PORT_MCP_ADAPTER=8192
 ```
 
-如果你没有显式导出这些变量，本地运行时会回落到默认端口 `8079/8081/8082/8090/8091`。后续 `curl` 示例里的端口应和你实际启动时使用的端口保持一致。
+如果你没有显式导出这些变量，本地运行时会回落到默认端口 `8079/8081/8082/8090/8091/8092`。后续 `curl` 示例里的端口应和你实际启动时使用的端口保持一致。
 
-## 启动本地运行时
+## 推荐首次运行
+
+源码安装时，先用 bootstrap 跑完整本地闭环：
 
 ```bash
 DELEXEC_HOME="$DELEXEC_HOME" \
@@ -70,10 +73,42 @@ OPS_PORT_CALLER="$OPS_PORT_CALLER" \
 OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
 OPS_PORT_RELAY="$OPS_PORT_RELAY" \
 OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
-npm run ops -- start
+OPS_PORT_MCP_ADAPTER="$OPS_PORT_MCP_ADAPTER" \
+npm run ops -- bootstrap --email localtest@example.com --text "Summarize this bootstrap request."
+
+npm run ops -- status
+npm run ops -- run-example --text "Summarize this follow-up request."
+npm run ops -- debug-snapshot
 ```
 
-当 `TRANSPORT_TYPE=local` 时，`delexec-ops start` 会自动启用内置的 embedded local relay，不需要 `OPS_RELAY_BIN`、mock relay 或额外 relay 安装。
+使用全局安装包时，走同一条产品路径：
+
+```bash
+npm install -g @delexec/ops
+delexec-ops bootstrap --email you@example.com --text "Summarize this bootstrap request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
+delexec-ops debug-snapshot
+```
+
+`delexec-ops bootstrap` 会启动 embedded local relay，初始化本地 secret，注册本地 caller，启用本地 responder，添加官方示例 hotline，并发起示例调用。不需要 `OPS_RELAY_BIN`、mock relay 或额外 relay 安装。
+
+## 高级手动 API 验证
+
+只有在调试具体阶段时，才使用下面的手动 endpoint 流程。
+
+手动启动本地运行时：
+
+```bash
+DELEXEC_HOME="$DELEXEC_HOME" \
+OPS_PORT_SUPERVISOR="$OPS_PORT_SUPERVISOR" \
+OPS_PORT_CALLER="$OPS_PORT_CALLER" \
+OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
+OPS_PORT_RELAY="$OPS_PORT_RELAY" \
+OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
+OPS_PORT_MCP_ADAPTER="$OPS_PORT_MCP_ADAPTER" \
+npm run ops -- start
+```
 
 检查状态：
 

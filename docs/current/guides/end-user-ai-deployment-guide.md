@@ -33,22 +33,18 @@ npm install -g @delexec/ops
 The recommended AI flow is:
 
 1. install `@delexec/ops`
-2. initialize local setup and unlock
-3. register the caller
-4. enable the local responder runtime
-5. install the official example hotline
-6. inspect the generated local draft
-7. run the local example self-call
+2. run `bootstrap` to initialize local setup, local caller registration, local responder enablement, and the official example hotline
+3. inspect `status`
+4. run the local example self-call
+5. capture a debug snapshot if anything fails
 
 ## Recommended Local-First Commands
 
 ```bash
-delexec-ops setup
-delexec-ops auth login
-delexec-ops auth register --email you@example.com
-delexec-ops enable-responder
-delexec-ops add-example-hotline
-delexec-ops run-example --text "Summarize this request."
+delexec-ops bootstrap --email you@example.com --text "Summarize this bootstrap request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
+delexec-ops debug-snapshot
 ```
 
 ## Expected Outcomes
@@ -65,7 +61,8 @@ The AI should verify these local-mode outcomes:
 ## Useful Follow-Up Commands
 
 ```bash
-delexec-ops run-example --text "Summarize this request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
 delexec-ops doctor
 delexec-ops debug-snapshot
 ```

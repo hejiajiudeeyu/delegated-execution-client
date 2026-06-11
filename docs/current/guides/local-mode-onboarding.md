@@ -57,11 +57,14 @@ export OPS_PORT_CALLER=8181
 export OPS_PORT_RESPONDER=8182
 export OPS_PORT_RELAY=8190
 export OPS_PORT_SKILL_ADAPTER=8191
+export OPS_PORT_MCP_ADAPTER=8192
 ```
 
-If you do not export these variables, the local runtime falls back to the default ports `8079/8081/8082/8090/8091`. Keep the `curl` examples aligned with whichever port set you actually start with.
+If you do not export these variables, the local runtime falls back to the default ports `8079/8081/8082/8090/8091/8092`. Keep the `curl` examples aligned with whichever port set you actually start with.
 
-## Start the local runtime
+## Recommended first run
+
+For source installs, bootstrap the full local loop first:
 
 ```bash
 DELEXEC_HOME="$DELEXEC_HOME" \
@@ -70,10 +73,42 @@ OPS_PORT_CALLER="$OPS_PORT_CALLER" \
 OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
 OPS_PORT_RELAY="$OPS_PORT_RELAY" \
 OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
-npm run ops -- start
+OPS_PORT_MCP_ADAPTER="$OPS_PORT_MCP_ADAPTER" \
+npm run ops -- bootstrap --email localtest@example.com --text "Summarize this bootstrap request."
+
+npm run ops -- status
+npm run ops -- run-example --text "Summarize this follow-up request."
+npm run ops -- debug-snapshot
 ```
 
-`delexec-ops start` automatically uses the embedded local relay when `TRANSPORT_TYPE=local`. You do not need `OPS_RELAY_BIN`, a mock relay, or any extra relay install for this path.
+For installed-package usage, run the same product path through `delexec-ops`:
+
+```bash
+npm install -g @delexec/ops
+delexec-ops bootstrap --email you@example.com --text "Summarize this bootstrap request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
+delexec-ops debug-snapshot
+```
+
+`delexec-ops bootstrap` starts the embedded local relay, initializes local secrets, registers a local caller, enables the local responder, adds the official example hotline, and runs the example call. You do not need `OPS_RELAY_BIN`, a mock relay, or any extra relay install for this path.
+
+## Advanced manual API validation
+
+Use the manual endpoint flow below only when debugging a specific setup stage.
+
+Start the local runtime manually:
+
+```bash
+DELEXEC_HOME="$DELEXEC_HOME" \
+OPS_PORT_SUPERVISOR="$OPS_PORT_SUPERVISOR" \
+OPS_PORT_CALLER="$OPS_PORT_CALLER" \
+OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
+OPS_PORT_RELAY="$OPS_PORT_RELAY" \
+OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
+OPS_PORT_MCP_ADAPTER="$OPS_PORT_MCP_ADAPTER" \
+npm run ops -- start
+```
 
 Check status:
 

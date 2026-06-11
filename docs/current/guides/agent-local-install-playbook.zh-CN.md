@@ -59,11 +59,12 @@ export OPS_PORT_CALLER=8181
 export OPS_PORT_RESPONDER=8182
 export OPS_PORT_RELAY=8190
 export OPS_PORT_SKILL_ADAPTER=8191
+export OPS_PORT_MCP_ADAPTER=8192
 ```
 
-如果 agent 跳过这组导出，本地运行时会回落到默认端口 `8079/8081/8082/8090/8091`。后续所有 health check 和 `curl` 命令都必须与实际启动使用的端口保持一致。
+如果 agent 跳过这组导出，本地运行时会回落到默认端口 `8079/8081/8082/8090/8091/8092`。后续所有 health check 和 `curl` 命令都必须与实际启动使用的端口保持一致。
 
-## 安装与启动
+## 推荐安装与首次运行
 
 ```bash
 git clone git@github.com:hejiajiudeeyu/delegated-execution-client.git
@@ -76,10 +77,15 @@ OPS_PORT_CALLER="$OPS_PORT_CALLER" \
 OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
 OPS_PORT_RELAY="$OPS_PORT_RELAY" \
 OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
-npm run ops -- start
+OPS_PORT_MCP_ADAPTER="$OPS_PORT_MCP_ADAPTER" \
+npm run ops -- bootstrap --email agent-local@example.com --text "Summarize this bootstrap request."
+
+npm run ops -- status
+npm run ops -- run-example --text "Summarize this follow-up request."
+npm run ops -- debug-snapshot
 ```
 
-这条路径下，`delexec-ops start` 应自动拉起 embedded local relay。agent 不应注入 `OPS_RELAY_BIN`、自写 mock relay，也不应手工改 `ops.config.json`。
+这条路径下，`delexec-ops bootstrap` 应自动拉起 embedded local relay，并完成 setup、本地 caller 注册、本地 responder 启用、示例 hotline 创建和第一次示例自调用。agent 不应注入 `OPS_RELAY_BIN`、自写 mock relay，也不应手工改 `ops.config.json`。
 
 对于 clean-room 安装验证，优先使用仓库根目录的 `npm run ops -- ...` 入口，不要先走 `pnpm --filter @delexec/ops exec ...`。
 
@@ -92,7 +98,24 @@ npm run ops -- start
 
 不要把热线专用命令、URL、路径或 hook 文件写进 git 工作区。
 
-## 初始化本地模式
+## 高级手动 API 验证
+
+只有当 `bootstrap`、`status`、`run-example` 或 `debug-snapshot` 指向某个具体阶段需要 endpoint 级排查时，才使用本节。
+
+手动启动本地运行时：
+
+```bash
+DELEXEC_HOME="$DELEXEC_HOME" \
+OPS_PORT_SUPERVISOR="$OPS_PORT_SUPERVISOR" \
+OPS_PORT_CALLER="$OPS_PORT_CALLER" \
+OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
+OPS_PORT_RELAY="$OPS_PORT_RELAY" \
+OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
+OPS_PORT_MCP_ADAPTER="$OPS_PORT_MCP_ADAPTER" \
+npm run ops -- start
+```
+
+## 手动初始化本地模式
 
 ```bash
 curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/setup" \

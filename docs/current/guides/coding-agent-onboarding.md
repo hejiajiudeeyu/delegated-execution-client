@@ -25,12 +25,10 @@ Recommended commands:
 
 ```bash
 npm install -g @delexec/ops
-delexec-ops setup
-delexec-ops auth login
-delexec-ops auth register --email coding-agent@local.test
-delexec-ops enable-responder
-delexec-ops add-example-hotline
-delexec-ops run-example --text "Summarize this request."
+delexec-ops bootstrap --email coding-agent@local.test --text "Summarize this bootstrap request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
+delexec-ops debug-snapshot
 ```
 
 ## Success Criteria
@@ -47,8 +45,8 @@ The local path is complete when:
 ## Useful Follow-Up Commands
 
 ```bash
-delexec-ops add-example-hotline
-delexec-ops run-example --text "Summarize this request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
 delexec-ops doctor
 delexec-ops debug-snapshot
 ```

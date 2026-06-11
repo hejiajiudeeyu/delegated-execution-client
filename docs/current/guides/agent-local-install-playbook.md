@@ -59,11 +59,12 @@ export OPS_PORT_CALLER=8181
 export OPS_PORT_RESPONDER=8182
 export OPS_PORT_RELAY=8190
 export OPS_PORT_SKILL_ADAPTER=8191
+export OPS_PORT_MCP_ADAPTER=8192
 ```
 
-If the agent skips these exports, the runtime falls back to the default ports `8079/8081/8082/8090/8091`. Every follow-up health check and `curl` command must match the actual port set used for startup.
+If the agent skips these exports, the runtime falls back to the default ports `8079/8081/8082/8090/8091/8092`. Every follow-up health check and `curl` command must match the actual port set used for startup.
 
-## Install And Start
+## Recommended Install And First Run
 
 ```bash
 git clone git@github.com:hejiajiudeeyu/delegated-execution-client.git
@@ -76,10 +77,15 @@ OPS_PORT_CALLER="$OPS_PORT_CALLER" \
 OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
 OPS_PORT_RELAY="$OPS_PORT_RELAY" \
 OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
-npm run ops -- start
+OPS_PORT_MCP_ADAPTER="$OPS_PORT_MCP_ADAPTER" \
+npm run ops -- bootstrap --email agent-local@example.com --text "Summarize this bootstrap request."
+
+npm run ops -- status
+npm run ops -- run-example --text "Summarize this follow-up request."
+npm run ops -- debug-snapshot
 ```
 
-`delexec-ops start` should bring up the embedded local relay automatically. The agent must not inject `OPS_RELAY_BIN`, create a mock relay, or patch `ops.config.json` for this path.
+`delexec-ops bootstrap` should bring up the embedded local relay automatically and complete setup, local caller registration, local responder enablement, example hotline creation, and the first example self-call. The agent must not inject `OPS_RELAY_BIN`, create a mock relay, or patch `ops.config.json` for this path.
 
 For clean-room verification, prefer the root `npm run ops -- ...` entry over `pnpm --filter @delexec/ops exec ...`.
 
@@ -92,7 +98,24 @@ Local machine-specific hotline state should stay under `DELEXEC_HOME`:
 
 Do not create hotline-specific command, URL, path, or hook files inside the git worktree.
 
-## Initialize Local Mode
+## Advanced Manual API Validation
+
+Use this section only when `bootstrap`, `status`, `run-example`, or `debug-snapshot` points to a specific stage that needs endpoint-level inspection.
+
+Start the local runtime manually:
+
+```bash
+DELEXEC_HOME="$DELEXEC_HOME" \
+OPS_PORT_SUPERVISOR="$OPS_PORT_SUPERVISOR" \
+OPS_PORT_CALLER="$OPS_PORT_CALLER" \
+OPS_PORT_RESPONDER="$OPS_PORT_RESPONDER" \
+OPS_PORT_RELAY="$OPS_PORT_RELAY" \
+OPS_PORT_SKILL_ADAPTER="$OPS_PORT_SKILL_ADAPTER" \
+OPS_PORT_MCP_ADAPTER="$OPS_PORT_MCP_ADAPTER" \
+npm run ops -- start
+```
+
+## Initialize Local Mode Manually
 
 ```bash
 curl -X POST "http://127.0.0.1:${OPS_PORT_SUPERVISOR:-8079}/setup" \

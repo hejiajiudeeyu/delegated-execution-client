@@ -36,19 +36,26 @@ Use local mode when you want to validate the client-only flow on one machine wit
 See [Local Mode Onboarding](docs/current/guides/local-mode-onboarding.md).
 If you want another agent to perform the installation for you, start with [Agent Local Install Playbook](docs/current/guides/agent-local-install-playbook.md).
 
-The official local-only path now includes:
-
-- embedded local relay started by `delexec-ops start`
-- `delexec-ops auth register --local --email <email>`
-- local responder enablement
-- example hotline draft inspection
-- a local self-call to `SUCCEEDED`
+The official local-only path now starts with one bootstrap command, then verifies the local runtime with status, an example self-call, and a debug snapshot.
 
 For source installs, use the repository root with `npm install` and the root CLI entry:
 
 ```bash
 npm install
-npm run ops -- start
+npm run ops -- bootstrap --email localtest@example.com --text "Summarize this bootstrap request."
+npm run ops -- status
+npm run ops -- run-example --text "Summarize this follow-up request."
+npm run ops -- debug-snapshot
+```
+
+For installed-package usage:
+
+```bash
+npm install -g @delexec/ops
+delexec-ops bootstrap --email you@example.com --text "Summarize this bootstrap request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
+delexec-ops debug-snapshot
 ```
 
 Prefer this path over `pnpm --filter @delexec/ops exec ...` for clean-room local-mode verification.

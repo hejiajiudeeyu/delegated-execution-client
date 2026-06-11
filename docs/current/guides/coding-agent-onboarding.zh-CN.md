@@ -28,12 +28,10 @@ platform 发布和社区能力仍属于后续工作，不是这里的主要上�
 
 ```bash
 npm install -g @delexec/ops
-delexec-ops setup
-delexec-ops auth login
-delexec-ops auth register --email coding-agent@local.test
-delexec-ops enable-responder
-delexec-ops add-example-hotline
-delexec-ops run-example --text "Summarize this request."
+delexec-ops bootstrap --email coding-agent@local.test --text "Summarize this bootstrap request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
+delexec-ops debug-snapshot
 ```
 
 ## 成功判定
@@ -50,8 +48,8 @@ delexec-ops run-example --text "Summarize this request."
 ## 常用后续命令
 
 ```bash
-delexec-ops add-example-hotline
-delexec-ops run-example --text "Summarize this request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
 delexec-ops doctor
 delexec-ops debug-snapshot
 ```

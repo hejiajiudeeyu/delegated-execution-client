@@ -36,22 +36,18 @@ npm install -g @delexec/ops
 推荐的 AI 流程：
 
 1. 安装 `@delexec/ops`
-2. 完成本地初始化与解锁
-3. 注册 caller
-4. 启用本地 responder runtime
-5. 安装官方示例 hotline
-6. 检查生成的本地 draft
-7. 执行本地示例自调用
+2. 运行 `bootstrap` 完成本地初始化、本地 caller 注册、本地 responder 启用和官方示例 hotline 创建
+3. 检查 `status`
+4. 执行本地示例自调用
+5. 如果失败，采集 debug snapshot
 
 ## 推荐的本地优先命令
 
 ```bash
-delexec-ops setup
-delexec-ops auth login
-delexec-ops auth register --email you@example.com
-delexec-ops enable-responder
-delexec-ops add-example-hotline
-delexec-ops run-example --text "Summarize this request."
+delexec-ops bootstrap --email you@example.com --text "Summarize this bootstrap request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
+delexec-ops debug-snapshot
 ```
 
 ## 预期结果
@@ -68,7 +64,8 @@ AI 应确认以下本地模式结果：
 ## 常用后续命令
 
 ```bash
-delexec-ops run-example --text "Summarize this request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
 delexec-ops doctor
 delexec-ops debug-snapshot
 ```

@@ -12,10 +12,12 @@
     "ops": "node apps/ops/src/cli.js",
     "ops:start": "node apps/ops/src/cli.js start",
     "caller-skill:mcp": "node apps/caller-skill-mcp-adapter/src/server.js",
+    "check:onboarding-docs": "node scripts/check-onboarding-docs.mjs",
     "check:ops-console-runtime-surface": "node scripts/check-ops-console-runtime-surface.mjs",
     "check:ops-console-settings-surface": "node scripts/check-ops-console-settings-surface.mjs",
     "check:ops-console-logs-surface": "node scripts/check-ops-console-logs-surface.mjs",
-    "test": "npm run test:unit && npm run test:integration",
+    "test": "npm run test:docs && npm run test:unit && npm run test:integration",
+    "test:docs": "npm run check:onboarding-docs",
     "test:unit": "vitest run --config tests/config/vitest.unit.config.mjs",
     "test:integration": "vitest run --config tests/config/vitest.integration.config.mjs",
     "test:packages": "node scripts/check-client-packages.mjs"
