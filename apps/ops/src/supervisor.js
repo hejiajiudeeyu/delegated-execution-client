@@ -1249,17 +1249,25 @@ export function createOpsSupervisorServer() {
     };
   }
 
+  function resolveWorkspaceServiceEntry(sourceRelativePath, packageName) {
+    const sourceEntry = path.resolve(__dirname, sourceRelativePath);
+    if (fs.existsSync(sourceEntry)) {
+      return sourceEntry;
+    }
+    return require.resolve(packageName);
+  }
+
   function serviceEntry(name) {
     if (name === "caller") {
-      return require.resolve("@delexec/caller-controller");
+      return resolveWorkspaceServiceEntry("../../caller-controller/src/server.js", "@delexec/caller-controller");
     }
     if (name === "skill-adapter") {
-      return require.resolve("@delexec/caller-skill-adapter");
+      return resolveWorkspaceServiceEntry("../../caller-skill-adapter/src/server.js", "@delexec/caller-skill-adapter");
     }
     if (name === "mcp-adapter") {
       return path.resolve(__dirname, "../../caller-skill-mcp-adapter/src/server.js");
     }
-    return require.resolve("@delexec/responder-controller");
+    return resolveWorkspaceServiceEntry("../../responder-controller/src/server.js", "@delexec/responder-controller");
   }
 
   function buildMcpAdapterSpec() {
