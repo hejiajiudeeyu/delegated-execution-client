@@ -209,9 +209,9 @@ export function DashboardPage() {
                   <UserPlus className="h-4 w-4 text-teal-600" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-teal-800 dark:text-teal-300">注册 Caller，解锁 Hotline 调用能力</p>
+                  <p className="text-sm font-semibold text-teal-800 dark:text-teal-300">注册 Caller，解锁本机 Hotline 调用能力</p>
                   <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-                    你还没有注册 Caller 身份。注册后 Agent 可以搜索并调用平台上的 Remote Hotline。只需填写一个联系邮箱即可完成注册。
+                    你还没有本机 Caller 身份。注册后 Agent 可以搜索本地 Catalog 并调用本机 Hotline。只需填写一个联系邮箱即可完成注册。
                   </p>
                 </div>
               </div>

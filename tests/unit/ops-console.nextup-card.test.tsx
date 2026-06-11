@@ -132,7 +132,9 @@ describe("NextUpCard", () => {
     renderCard({ callerRegistered: true, platformEnabled: false, hotlineCount: 0 })
     await expectState("needs_first_hotline")
     expect(screen.getByText("你还没有任何 Hotline 可调")).toBeTruthy()
-    expect(screen.getByText("去 Catalog")).toBeTruthy()
+    expect(screen.getByText("添加本地示例")).toBeTruthy()
+    expect(screen.getByText(/自己添加 Hotline/)).toBeTruthy()
+    expect(screen.queryByText("开启平台模式")).toBeNull()
   })
 
   it("does NOT render needs_first_hotline when platform is enabled (community catalog available)", async () => {
@@ -147,6 +149,7 @@ describe("NextUpCard", () => {
     await expectState("needs_first_call")
     expect(screen.getByText("试拨一次跑通端到端")).toBeTruthy()
     expect(screen.getByText("打开 Catalog")).toBeTruthy()
+    expect(screen.getAllByText(/Runtime 日志/).length).toBeGreaterThanOrEqual(1)
   })
 
   it("renders all_normal with today count and last activity when nothing else applies", async () => {

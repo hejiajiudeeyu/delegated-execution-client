@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { apiCall } from "@/lib/api"
 import { usePoll } from "@/hooks/usePoll"
 import { Button } from "@/components/ui/button"
@@ -498,9 +498,9 @@ function SectionC_Outcome({
     body = (
       <div className="space-y-3 text-sm">
         {result?.error?.code && (
-          <p className="text-xs">
+          <div className="text-xs">
             <Badge variant="outline" className="text-[10px] font-mono">{result.error.code}</Badge>
-          </p>
+          </div>
         )}
         <p className="leading-relaxed">{result?.error?.message ?? "未提供错误描述"}</p>
         <FailedCTAs detail={detail} result={result} navigate={navigate} />
@@ -684,10 +684,12 @@ function CallSummaryRow({
 
 export function CallsPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const selectedFromUrl = searchParams.get("selected")
   const [requests, setRequests] = useState<RequestItem[]>([])
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([])
   const [loadingList, setLoadingList] = useState(true)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(selectedFromUrl)
 
   const pendingApprovals = approvals.filter((a) => a.status === "pending")
   const runningCount = requests.filter((r) => normalizeStatus(r) === "running").length
@@ -707,6 +709,10 @@ export function CallsPage() {
   useEffect(() => {
     void loadData()
   }, [loadData])
+
+  useEffect(() => {
+    if (selectedFromUrl) setSelectedId(selectedFromUrl)
+  }, [selectedFromUrl])
 
   usePoll(loadData, {
     intervalMs: 5000,

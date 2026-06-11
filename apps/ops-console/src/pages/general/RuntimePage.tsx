@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import type { JSX } from "react"
 import { apiCall } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,13 +11,15 @@ import { RefreshCw, Trash2, ChevronDown, ChevronRight } from "lucide-react"
 
 type LogService = "caller" | "responder" | "relay"
 type RuntimeService = LogService | "skill_adapter" | "mcp_adapter"
-type DeployProfile = "platform" | "public-stack" | "all-in-one"
-
 const LOG_SERVICES: { id: LogService; label: string }[] = [
   { id: "caller", label: "Caller" },
   { id: "responder", label: "Responder" },
   { id: "relay", label: "Relay" },
 ]
+
+function parseLogService(value: string | null): LogService {
+  return LOG_SERVICES.some((service) => service.id === value) ? (value as LogService) : "caller"
+}
 
 const RUNTIME_SERVICES: { id: RuntimeService; label: string }[] = [
   ...LOG_SERVICES,
@@ -24,38 +27,11 @@ const RUNTIME_SERVICES: { id: RuntimeService; label: string }[] = [
   { id: "mcp_adapter", label: "MCP Adapter" },
 ]
 
-const DEPLOY_PROFILES: Array<{
-  id: DeployProfile
-  label: string
-  scope: string
-  check: string
-}> = [
-  {
-    id: "platform",
-    label: "Self-host Platform",
-    scope: "最小平台服务，适合本地或私有网络验证。",
-    check: "先跑 selfhost:init，再跑 selfhost:smoke。",
-  },
-  {
-    id: "public-stack",
-    label: "Public Stack",
-    scope: "公网入口、relay、gateway 和 console 的组合。",
-    check: "公网 origin 和 admin/bootstrap secrets 没就绪时不能标绿。",
-  },
-  {
-    id: "all-in-one",
-    label: "All-in-one Demo",
-    scope: "面向演示和试用的一体化启动路径。",
-    check: "适合快速理解，不等价于正式生产发布。",
-  },
-]
-
-const SELFHOST_COMMANDS = [
-  "selfhost:init",
-  "selfhost:preflight",
-  "selfhost:status",
-  "selfhost:smoke",
-  "selfhost:rotate-plan",
+const LOCAL_DEBUG_COMMANDS = [
+  "delexec-ops bootstrap --open-ui",
+  "delexec-ops status",
+  "delexec-ops run-example",
+  "delexec-ops debug-snapshot",
 ]
 
 interface ServiceLogs {
@@ -126,7 +102,32 @@ const ALERT_HINTS: { pattern: RegExp; hint: string }[] = [
   },
 ]
 
-function LogLine({ line, count }: { line: string; count: number }) {
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function HighlightedLine({ line, highlightText }: { line: string; highlightText?: string }) {
+  const needle = highlightText?.trim()
+  if (!needle || !line.toLowerCase().includes(needle.toLowerCase())) {
+    return <>{line}</>
+  }
+  const pattern = new RegExp(`(${escapeRegExp(needle)})`, "ig")
+  return (
+    <>
+      {line.split(pattern).map((part, index) =>
+        part.toLowerCase() === needle.toLowerCase() ? (
+          <mark key={index} data-testid="log-filter-match" className="rounded bg-amber-300 px-0.5 text-zinc-950">
+            {part}
+          </mark>
+        ) : (
+          <Fragment key={index}>{part}</Fragment>
+        )
+      )}
+    </>
+  )
+}
+
+function LogLine({ line, count, highlightText }: { line: string; count: number; highlightText?: string }) {
   const level = getLevel(line)
   const colors: Record<LogLevel, string> = {
     error: "text-red-400",
@@ -145,7 +146,9 @@ function LogLine({ line, count }: { line: string; count: number }) {
   return (
     <div className={cn("text-xs leading-5 font-mono flex gap-2", colors[level])}>
       <span className="shrink-0 text-zinc-500 text-[10px] leading-5">{prefix[level]}</span>
-      <span className="break-all flex-1">{line}</span>
+      <span className="break-all flex-1">
+        <HighlightedLine line={line} highlightText={highlightText} />
+      </span>
       {count > 1 && (
         <span className="shrink-0 text-zinc-500 text-[10px] leading-5 ml-auto pl-2">×{count}</span>
       )}
@@ -153,55 +156,50 @@ function LogLine({ line, count }: { line: string; count: number }) {
   )
 }
 
-function DeployabilityReadinessPanel() {
+function LocalDebuggingPanel() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">部署与管理就绪度</CardTitle>
+        <CardTitle className="text-sm">本机调试路径</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-3">
-          {DEPLOY_PROFILES.map((profile) => (
-            <div key={profile.id} className="rounded border bg-muted/20 px-3 py-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-mono text-xs font-semibold">{profile.id}</p>
-                <Badge tone="neutral" className="text-[10px]">
-                  {profile.label}
-                </Badge>
-              </div>
-              <p className="text-xs text-muted-foreground leading-relaxed">{profile.scope}</p>
-              <p className="text-xs leading-relaxed">{profile.check}</p>
-            </div>
-          ))}
+        <div className="rounded border border-teal-500/30 bg-teal-50/70 px-3 py-3">
+          <p className="text-xs font-semibold text-teal-950">Local Agent Loop</p>
+          <p className="mt-1 text-xs text-teal-950/80 leading-relaxed">
+            先在本机跑通 Caller、Responder、Relay、示例 Hotline 和第一条调用记录。公网或 self-host 是后续发布路径，不是第一次调试的前置条件。
+          </p>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="grid gap-3 lg:grid-cols-[1fr_1fr]">
           <div className="rounded border bg-background px-3 py-3">
-            <p className="text-xs font-semibold mb-2">推荐检查顺序</p>
+            <p className="text-xs font-semibold mb-2">推荐本机命令</p>
             <div className="flex flex-wrap gap-1.5">
-              {SELFHOST_COMMANDS.map((command) => (
+              {LOCAL_DEBUG_COMMANDS.map((command) => (
                 <code key={command} className="rounded bg-muted px-2 py-1 text-[11px] font-mono">
                   {command}
                 </code>
               ))}
             </div>
+            <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+              `run-example` 会走本机示例 Hotline；失败时先看上方服务卡片，再按 Caller / Responder / Relay 切换日志。
+            </p>
           </div>
           <div className="space-y-3">
-            <div className="rounded border border-amber-500/30 bg-amber-50/70 px-3 py-3">
-              <p className="text-xs font-semibold text-amber-900">安全边界</p>
-              <p className="mt-1 text-xs text-amber-900/80 leading-relaxed">
-                status / smoke / logs 只暴露运行状态和路由提示，不会显示 secret 值；需要轮换时先用 selfhost:rotate-plan 看影响范围。
-              </p>
-            </div>
             <div className="rounded border border-cyan-500/30 bg-cyan-50/70 px-3 py-3">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-cyan-950">Billing readiness</p>
+                <p className="text-xs font-semibold text-cyan-950">调试顺序</p>
                 <Badge tone="neutral" className="text-[10px]">
-                  P-1 M1.1 基础
+                  local-first
                 </Badge>
               </div>
               <p className="mt-1 text-xs text-cyan-950/80 leading-relaxed">
-                已有 billing-store、tenant balance schema 和持久化测试，但这不等于生产默认可用；API、读模型、client-facing surface 完成前不能把 billing 标成 ready。
+                先确认服务健康，再看结构化告警，最后用日志过滤 request_id 或错误关键词。不要先排公网、域名或平台审核问题。
+              </p>
+            </div>
+            <div className="rounded border border-amber-500/30 bg-amber-50/70 px-3 py-3">
+              <p className="text-xs font-semibold text-amber-900">发布边界</p>
+              <p className="mt-1 text-xs text-amber-900/80 leading-relaxed">
+                本机调试通过后，才考虑平台发布、局域网访问或 public-stack gate。这里不把 self-host 当成本机闭环的前置步骤。
               </p>
             </div>
           </div>
@@ -249,7 +247,10 @@ function renderEntriesWithSeparators(entries: LogEntry[]): JSX.Element[] {
 }
 
 export function RuntimePage() {
-  const [activeService, setActiveService] = useState<LogService>("caller")
+  const [searchParams] = useSearchParams()
+  const serviceFromUrl = parseLogService(searchParams.get("service"))
+  const filterFromUrl = searchParams.get("filter") ?? ""
+  const [activeService, setActiveService] = useState<LogService>(serviceFromUrl)
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [alerts, setAlerts] = useState<ServiceAlerts["alerts"]>([])
   const [logFile, setLogFile] = useState("")
@@ -258,7 +259,7 @@ export function RuntimePage() {
   const [snapshotOpen, setSnapshotOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [filterText, setFilterText] = useState("")
+  const [filterText, setFilterText] = useState(filterFromUrl)
   const [levelFilter, setLevelFilter] = useState<LogLevel>("all")
   const logsEndRef = useRef<HTMLDivElement>(null)
 
@@ -294,6 +295,14 @@ export function RuntimePage() {
     load(activeService)
     loadSnapshot()
   }, [activeService])
+
+  useEffect(() => {
+    setActiveService(serviceFromUrl)
+  }, [serviceFromUrl])
+
+  useEffect(() => {
+    setFilterText(filterFromUrl)
+  }, [filterFromUrl])
 
   // Auto-refresh every 5 seconds (silent, no spinner)
   useEffect(() => {
@@ -412,7 +421,7 @@ export function RuntimePage() {
         </CardContent>
       </Card>
 
-      <DeployabilityReadinessPanel />
+      <LocalDebuggingPanel />
 
       {dedupedAlerts.length > 0 && (
         <Card>
@@ -524,7 +533,9 @@ export function RuntimePage() {
               dedupedFilteredLogs.length === 0 ? (
                 <p className="text-muted-foreground text-xs">无匹配结果</p>
               ) : (
-                dedupedFilteredLogs.map(({ line, count }, i) => <LogLine key={i} line={line} count={count} />)
+                dedupedFilteredLogs.map(({ line, count }, i) => (
+                  <LogLine key={i} line={line} count={count} highlightText={filterText} />
+                ))
               )
             ) : (
               rawLines.length === 0 ? (

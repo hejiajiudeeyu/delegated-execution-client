@@ -153,18 +153,18 @@ function buildView(
         icon: <PackageSearch className="h-4 w-4" />,
         rail: "var(--brand-teal, #14b8a6)",
         title: "你还没有任何 Hotline 可调",
-        body: "两条路：让你的 Responder 发布一个，或者开启平台模式浏览社区已发布的。",
-        cta: { label: "去 Catalog", to: "/caller/catalog?from=dashboard-nextup" },
-        secondary: { label: "开启平台模式", to: "/general" },
+        body: "先在本机添加一个示例 Hotline，跑通本机 Caller、Responder 和 Relay，再决定是否发布到平台。",
+        cta: { label: "添加本地示例", to: "/responder/hotlines?from=dashboard-nextup&action=add-example" },
+        secondary: { label: "自己添加 Hotline", to: "/responder/hotlines?from=dashboard-nextup" },
       }
     case "needs_first_call":
       return {
         icon: <Sparkles className="h-4 w-4" />,
         rail: "var(--brand-teal, #14b8a6)",
         title: "试拨一次跑通端到端",
-        body: "从 Catalog 选一个，5 秒内能看到第一条记录。",
+        body: "从 Catalog 选一个本地 Hotline 试拨；如果失败，Runtime 日志会告诉你是哪一段没起来。",
         cta: { label: "打开 Catalog", to: "/caller/catalog?from=dashboard-nextup" },
-        secondary: { label: "什么是 Hotline", to: "/help#what-is-hotline" },
+        secondary: { label: "Runtime 日志", to: "/general/runtime" },
       }
     case "all_normal": {
       const last = formatRelative(stats?.lastActivityIso ?? null)

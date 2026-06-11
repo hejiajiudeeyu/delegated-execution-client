@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { apiCall } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -368,7 +369,11 @@ function AddHotlineDialog({
 }
 
 export function ResponderHotlinesPage() {
+  const [searchParams] = useSearchParams()
+  const action = searchParams.get("action")
+  const autoAddExampleStarted = useRef(false)
   const [hotlines, setHotlines] = useState<Hotline[]>([])
+  const loadRequestId = useRef(0)
   const [platformEnabled, setPlatformEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
@@ -377,7 +382,10 @@ export function ResponderHotlinesPage() {
   const [selectedDraft, setSelectedDraft] = useState<DraftResponse | null>(null)
 
   const load = async () => {
+    const requestId = loadRequestId.current + 1
+    loadRequestId.current = requestId
     const res = await apiCall<{ items: Hotline[]; platform_enabled?: boolean }>("/responder/hotlines")
+    if (requestId !== loadRequestId.current) return
     if (res.ok && res.data) {
       setHotlines(res.data.items ?? [])
       setPlatformEnabled(res.data.platform_enabled === true)
@@ -401,6 +409,12 @@ export function ResponderHotlinesPage() {
     await apiCall("/responder/hotlines/example", { method: "POST" })
     load()
   }
+
+  useEffect(() => {
+    if (action !== "add-example" || autoAddExampleStarted.current) return
+    autoAddExampleStarted.current = true
+    void handleAddExample()
+  }, [action])
 
   const handleShowDraft = async (id: string) => {
     setDraftLoading(true)

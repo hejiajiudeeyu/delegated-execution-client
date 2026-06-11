@@ -203,9 +203,7 @@ function TryCallDrawer({
             <Zap className="h-4 w-4" />
             试拨 · {title}
           </SheetTitle>
-          {detail?.input_summary && (
-            <SheetDescription>{detail.input_summary}</SheetDescription>
-          )}
+          <SheetDescription>{detail?.input_summary ?? "填写输入内容并发送一次本机 Hotline 调用。"}</SheetDescription>
         </SheetHeader>
 
         <div className="px-4 pt-2 pb-4 space-y-4">
@@ -341,15 +339,15 @@ function EmptyCatalogState({ navigate }: { navigate: ReturnType<typeof useNaviga
         <PackageSearch className="h-10 w-10 mx-auto text-muted-foreground" />
         <p className="text-base font-semibold">你的 Catalog 是空的</p>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          没有任何 Hotline 可以调。两条路：让你的 Responder 发布一个，或者去 Dashboard 启用平台模式浏览社区已发布的。
+          先添加一个本地 Hotline。最短路径是插入官方示例，跑通本机 Caller、Responder、Relay 和第一条调用记录。
         </p>
         <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-          <Button size="sm" onClick={() => navigate("/responder/hotlines")}>
-            打开 Hotline 管理
+          <Button size="sm" onClick={() => navigate("/responder/hotlines?from=empty-catalog&action=add-example")}>
+            添加本地示例
             <ArrowRight className="h-3.5 w-3.5 ml-1" />
           </Button>
-          <Button size="sm" variant="outline" onClick={() => navigate("/")}>
-            去 Dashboard 启用平台模式
+          <Button size="sm" variant="outline" onClick={() => navigate("/responder/hotlines?from=empty-catalog")}>
+            自己添加 Hotline
           </Button>
         </div>
       </CardContent>
@@ -530,11 +528,19 @@ export function CatalogPage() {
                     {filtered.map((item) => {
                       const active = item.hotline_id === selectedId
                       return (
-                        <button
+                        <div
                           key={item.hotline_id}
-                          type="button"
+                          role="button"
+                          tabIndex={0}
                           onClick={() => setSelectedId(item.hotline_id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault()
+                              setSelectedId(item.hotline_id)
+                            }
+                          }}
                           className={[
+                            "cursor-pointer",
                             "w-full rounded-md border p-3 text-left transition-colors",
                             active ? "border-cyan-500 bg-cyan-500/5" : "hover:bg-muted/40",
                           ].join(" ")}
@@ -583,7 +589,7 @@ export function CatalogPage() {
                               试拨
                             </Button>
                           </div>
-                        </button>
+                        </div>
                       )
                     })}
                   </div>

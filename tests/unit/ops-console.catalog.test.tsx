@@ -73,6 +73,27 @@ function hotline(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function watchConsoleWarnings() {
+  const messages: string[] = [];
+  const capture = (...args: unknown[]) => {
+    messages.push(args.map((arg) => String(arg)).join(" "));
+  };
+  const errorSpy = vi.spyOn(console, "error").mockImplementation(capture);
+  const warnSpy = vi.spyOn(console, "warn").mockImplementation(capture);
+  return {
+    expectClean() {
+      const unexpected = messages.filter((message) =>
+        /validateDOMNesting|Function components cannot be given refs|Missing `Description`|aria-describedby/.test(message)
+      );
+      expect(unexpected).toEqual([]);
+    },
+    restore() {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    },
+  };
+}
+
 describe("CatalogPage", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -92,7 +113,7 @@ describe("CatalogPage", () => {
     }
   });
 
-  it("renders the M8 zero-hotlines double-CTA empty state when the catalog is empty", async () => {
+  it("renders a local-first zero-hotlines empty state when the catalog is empty", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -108,12 +129,14 @@ describe("CatalogPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("你的 Catalog 是空的")).toBeTruthy();
     });
-    expect(screen.queryByText(/打开 Hotline 管理/)).toBeTruthy();
-    // "去 Dashboard 启用平台模式" appears in both the description and the button label
-    expect(screen.queryAllByText(/去 Dashboard 启用平台模式/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/先添加一个本地 Hotline/)).toBeTruthy();
+    expect(screen.queryByText(/添加本地示例/)).toBeTruthy();
+    expect(screen.queryByText(/自己添加 Hotline/)).toBeTruthy();
+    expect(screen.queryByText(/启用平台模式/)).toBeNull();
   });
 
   it("auto-selects the first hotline and loads its detail", async () => {
+    const consoleWatch = watchConsoleWarnings();
     const item = hotline();
     vi.stubGlobal(
       "fetch",
@@ -137,9 +160,12 @@ describe("CatalogPage", () => {
     await waitFor(() => {
       expect(tryNowBtn.hasAttribute("disabled")).toBe(false);
     });
+    consoleWatch.expectClean();
+    consoleWatch.restore();
   });
 
   it("auto-opens the Try-Call drawer when arriving with ?hotline_id=", async () => {
+    const consoleWatch = watchConsoleWarnings();
     const item = hotline();
     vi.stubGlobal(
       "fetch",
@@ -160,5 +186,7 @@ describe("CatalogPage", () => {
     });
     // The drawer's submit button is the unique "发送调用" label
     expect(screen.queryByText("发送调用")).toBeTruthy();
+    consoleWatch.expectClean();
+    consoleWatch.restore();
   });
 });

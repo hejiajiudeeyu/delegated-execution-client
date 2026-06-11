@@ -180,7 +180,7 @@ export function SetupPage() {
           <div className="space-y-4">
             <div className="text-center mb-4">
               <p className="text-sm text-muted-foreground">
-                向平台注册以获取 API Key，解锁 Catalog 和 Call 功能
+                在本机注册 Caller 身份，解锁本地 Catalog 和 Call 功能
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 （可跳过，稍后在 Caller 控制台内注册）
@@ -245,9 +245,9 @@ export function SetupPage() {
             </div>
             <div className="rounded-lg border border-border bg-muted/40 p-3 text-left space-y-1.5 text-xs text-muted-foreground">
               <p className="font-semibold text-foreground text-[11px] uppercase tracking-wide mb-2">下一步</p>
-              <p>· 在 <span className="font-medium text-teal-600">Caller</span> Tab 浏览 Hotline Catalog</p>
-              <p>· 在 <span className="font-medium text-teal-600">Caller</span> Tab 发起你的第一个 Call</p>
-              <p>· 在 <span className="font-medium text-orange-600">Responder</span> Tab 启用 Responder（可选）</p>
+              <p>· 在 <span className="font-medium text-orange-600">Responder</span> Tab 启用本地 Responder</p>
+              <p>· 添加一个本地示例 Hotline</p>
+              <p>· 在 <span className="font-medium text-teal-600">Caller</span> Tab 发起第一个本地 Call</p>
             </div>
             <Button className="w-full" onClick={() => navigate(next, { replace: true })}>
               开始使用
