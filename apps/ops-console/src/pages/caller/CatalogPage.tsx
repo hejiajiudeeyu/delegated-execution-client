@@ -35,6 +35,9 @@ interface HotlineItem {
   description?: string
   tags?: string[]
   status?: string
+  review_status?: string
+  source?: string
+  availability_status?: string
   task_types?: string[]
 }
 
@@ -62,6 +65,73 @@ interface HotlineDetail extends HotlineItem {
 }
 
 const ONBOARDING_TIP_DISMISS_KEY = "catalog.first-call-tip.dismissed"
+const LOCAL_OFFICIAL_EXAMPLE_HOTLINE_ID = "local.delegated-execution.workspace-summary.v1"
+const LOCAL_OFFICIAL_EXAMPLE_DISPLAY_NAME = "Local Workspace Doctor"
+const LOCAL_OFFICIAL_EXAMPLE_DESCRIPTION =
+  "Read-only local delegated-execution workspace diagnostic for checking Caller, Responder, Relay, and Agent-facing adapters."
+
+function isLocalOfficialExample(item: HotlineItem) {
+  return item.hotline_id === LOCAL_OFFICIAL_EXAMPLE_HOTLINE_ID
+}
+
+function normalizeOfficialExample<T extends HotlineItem>(item: T): T {
+  if (!isLocalOfficialExample(item)) return item
+  return {
+    ...item,
+    display_name: LOCAL_OFFICIAL_EXAMPLE_DISPLAY_NAME,
+    description: LOCAL_OFFICIAL_EXAMPLE_DESCRIPTION,
+    summary:
+      "Run this first to verify that this machine's delegated-execution client runtime is ready for a real Agent call.",
+    review_status: item.review_status ?? "local_only",
+    task_types: ["workspace_diagnose"],
+    tags: ["local", "example", "diagnostic"],
+    input_summary: "Optional: add a short note about what you are trying to verify. The diagnostic itself is read-only.",
+    output_summary: "Returns service checks, useful console links, and next debug commands.",
+    input_schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        text: {
+          type: "string",
+          description: "Optional note for the diagnostic run."
+        }
+      }
+    },
+    output_schema: {
+      properties: {
+        summary: { type: "string", description: "Human-readable local readiness summary." },
+        checks: { type: "array", description: "Read-only local service and configuration checks." },
+        links: { type: "array", description: "Console links that help inspect the local run." },
+        next_steps: { type: "array", description: "Suggested local debug or follow-up commands." }
+      }
+    },
+    recommended_for: [
+      "First local run after bootstrap",
+      "Verifying the Agent-callable local environment",
+      "Checking where to look next when a trial call fails"
+    ],
+    limitations: [
+      "Read-only: it does not approve platform reviews or mutate admin settings.",
+      "Local-only: it reports this machine's client runtime, not public platform availability."
+    ]
+  } as T
+}
+
+function catalogPriority(item: HotlineItem) {
+  if (isLocalOfficialExample(item)) return 1000
+  if (item.source === "local" || item.review_status === "local_only" || (item.tags ?? []).includes("local")) return 100
+  return 0
+}
+
+function isCatalogItemCallable(item: HotlineItem) {
+  if (isLocalOfficialExample(item)) return true
+  if (item.source === "local" || item.review_status === "local_only" || (item.tags ?? []).includes("local")) return true
+  return item.availability_status !== "offline"
+}
+
+function prioritizeCatalogItems(items: HotlineItem[]) {
+  return [...items].sort((a, b) => catalogPriority(b) - catalogPriority(a))
+}
 
 function ReviewBadge({ status }: { status?: string }) {
   if (!status || status === "local_only") {
@@ -155,7 +225,7 @@ function TryCallDrawer({
     setSubmitting(true)
     setError("")
 
-    const isOfficialExample = hotline.hotline_id === "local.delegated-execution.workspace-summary.v1"
+    const isOfficialExample = isLocalOfficialExample(hotline)
     const taskType = detail?.task_types?.[0] ?? hotline.task_types?.[0] ?? ""
 
     const payload = hasSchema
@@ -300,7 +370,7 @@ function FirstCallTipBanner({ from }: { from: string | null }) {
 
   const text =
     from === "dashboard-nextup"
-      ? "Dashboard「下一步」推荐你试拨一次。选一个 Hotline 开始。"
+      ? "Dashboard「下一步」推荐你先试拨本机诊断示例，确认本机 Caller、Responder、Relay 和 Agent 入口都可用。"
       : "第一次试拨指南：选一个带 official 标签的 Hotline 点「试拨」即可。结果会自动跳到调用记录。"
 
   return (
@@ -379,7 +449,7 @@ export function CatalogPage() {
   useEffect(() => {
     apiCall<{ items: HotlineItem[] }>("/catalog/hotlines", { silent: true }).then((res) => {
       if (res.ok && res.data?.items) {
-        setItems(res.data.items)
+        setItems(res.data.items.map((item) => normalizeOfficialExample(item)))
       }
       setLoading(false)
     })
@@ -387,7 +457,8 @@ export function CatalogPage() {
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase()
-    return items.filter((item) => {
+    const matched = items.filter((item) => {
+      if (!isCatalogItemCallable(item)) return false
       return (
         !q ||
         item.hotline_id.toLowerCase().includes(q) ||
@@ -396,6 +467,7 @@ export function CatalogPage() {
         (item.task_types ?? []).some((value) => value.toLowerCase().includes(q))
       )
     })
+    return prioritizeCatalogItems(matched)
   }, [items, query])
 
   // Auto-select first filtered item, or honour deep-link hotline_id.
@@ -426,7 +498,7 @@ export function CatalogPage() {
         `/catalog/hotlines/${encodeURIComponent(selectedId)}`,
         { silent: true }
       )
-      setDetail(res.ok ? res.data ?? null : null)
+      setDetail(res.ok && res.data ? normalizeOfficialExample(res.data) : null)
       setDetailLoading(false)
     }
     void loadDetail()
@@ -522,7 +594,9 @@ export function CatalogPage() {
                     ))}
                   </div>
                 ) : isFilterEmpty ? (
-                  <div className="py-12 text-center text-sm text-muted-foreground">没有匹配的热线</div>
+                  <div className="py-12 text-center text-sm text-muted-foreground">
+                    {query.trim() ? "没有匹配的热线" : "没有可用的真实热线"}
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     {filtered.map((item) => {

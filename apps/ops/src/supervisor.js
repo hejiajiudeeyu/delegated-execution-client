@@ -33,6 +33,7 @@ import {
 import {
   buildExampleRequestBody,
   buildExampleHotlineDefinition,
+  isExampleHotlineDefinitionStale,
   LOCAL_EXAMPLE_DISPLAY_NAME,
   LOCAL_EXAMPLE_HOTLINE_ID
 } from "./example-hotline.js";
@@ -55,6 +56,11 @@ import {
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const PLATFORM_BOOTSTRAP_DEMO_HOTLINE_IDS = new Set([
+  "starlight.creative.studio.v1",
+  "atlas.knowledge.qa.v1",
+  "pixel.product.renderer.v1"
+]);
 function getOpsSessionStateFile() {
   return path.join(getOpsHomeDir(), "run", "session.json");
 }
@@ -618,7 +624,9 @@ async function fetchCatalogCandidates(state, runtime, filters = {}) {
 
 function buildLocalCatalogHotline(state, runtime, hotline) {
   const responderIdentity = ensureResponderIdentity(state);
-  const { draft } = loadHotlineRegistrationDraft(state, hotline);
+  const currentOfficialExample =
+    hotline.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID ? buildExampleHotlineDefinition(hotline) : null;
+  const { draft } = currentOfficialExample ? { draft: currentOfficialExample } : loadHotlineRegistrationDraft(state, hotline);
   const runtimeStatus = buildResponderRuntimeStatus(state, runtime, hotline.hotline_id);
   const source = draft || {};
   return {
@@ -678,6 +686,47 @@ function listLocalCatalogHotlines(state, runtime, filters = {}) {
       }
       return true;
     });
+}
+
+function isCallableCatalogItem(item) {
+  if (!item) {
+    return false;
+  }
+  if (item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID) {
+    return true;
+  }
+  if (isPlatformBootstrapDemoCatalogItem(item)) {
+    return false;
+  }
+  if (item.source === "local" || item.review_status === "local_only" || (item.tags || []).includes("local")) {
+    return true;
+  }
+  return item.availability_status !== "offline";
+}
+
+function isPlatformBootstrapDemoCatalogItem(item) {
+  if (!item || item.source === "local" || !PLATFORM_BOOTSTRAP_DEMO_HOTLINE_IDS.has(item.hotline_id)) {
+    return false;
+  }
+  return (
+    item.review_reason === "bootstrap" ||
+    item.reviewed_by === "system" ||
+    String(item.template_ref || "").startsWith(`docs/templates/hotlines/${item.hotline_id}/`)
+  );
+}
+
+function mergeCatalogItems(platformItems = [], localItems = []) {
+  const seen = new Set();
+  const merged = [];
+  for (const item of [...localItems, ...platformItems]) {
+    const key = `${item.responder_id || ""}:${item.hotline_id || ""}`;
+    if (seen.has(key) || !isCallableCatalogItem(item)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(item);
+  }
+  return merged;
 }
 
 
@@ -1265,14 +1314,14 @@ export function createOpsSupervisorServer() {
       return resolveWorkspaceServiceEntry("../../caller-skill-adapter/src/server.js", "@delexec/caller-skill-adapter");
     }
     if (name === "mcp-adapter") {
-      return path.resolve(__dirname, "../../caller-skill-mcp-adapter/src/server.js");
+      return resolveWorkspaceServiceEntry("../../caller-skill-mcp-adapter/src/server.js", "@delexec/caller-skill-mcp-adapter");
     }
     return resolveWorkspaceServiceEntry("../../responder-controller/src/server.js", "@delexec/responder-controller");
   }
 
   function buildMcpAdapterSpec() {
     const callerSkillBaseUrl = processBaseUrl(state.config.runtime.ports.skill_adapter || 8091);
-    const mcpEntry = path.resolve(__dirname, "../../caller-skill-mcp-adapter/src/server.js");
+    const mcpEntry = resolveWorkspaceServiceEntry("../../caller-skill-mcp-adapter/src/server.js", "@delexec/caller-skill-mcp-adapter");
     const httpBaseUrl = processBaseUrl(state.config.runtime.ports.mcp_adapter || 8092);
     return {
       mode: "multi_transport",
@@ -1733,6 +1782,70 @@ export function createOpsSupervisorServer() {
     };
   }
 
+  async function buildExampleDiagnostics() {
+    const status = await buildStatus();
+    const uiPort = Number(process.env.DELEXEC_OPS_UI_PORT || 4173);
+    const serviceCheck = (label, service) => {
+      const running = service?.running === true;
+      const healthy = service?.health?.status === 200 || service?.health?.body?.ok === true;
+      return {
+        name: label,
+        status: healthy ? "ok" : running ? "warn" : "fail",
+        detail: healthy
+          ? `${label} health check is passing.`
+          : running
+            ? `${label} process is running but health has not reported ok yet.`
+            : `${label} process is not running.`
+      };
+    };
+
+    const callerRegistered = status.caller?.registered === true;
+    const responderEnabled = status.responder?.enabled === true;
+    const localExample = (state.config.responder.hotlines || []).find((item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID);
+
+    return {
+      generated_at: nowIso(),
+      checks: [
+        {
+          name: "caller_registration",
+          status: callerRegistered ? "ok" : "fail",
+          detail: callerRegistered
+            ? `Caller is registered in ${status.caller.registration_mode || "configured"} mode.`
+            : "Caller is not registered yet; run bootstrap or auth register before sending calls."
+        },
+        {
+          name: "local_example_hotline",
+          status: localExample?.enabled === false ? "fail" : localExample ? "ok" : "fail",
+          detail: localExample
+            ? `${LOCAL_EXAMPLE_DISPLAY_NAME} is configured locally.`
+            : `${LOCAL_EXAMPLE_DISPLAY_NAME} is not configured locally; add the official example first.`
+        },
+        {
+          name: "responder_enabled",
+          status: responderEnabled ? "ok" : "fail",
+          detail: responderEnabled ? "Local responder is enabled." : "Local responder is disabled."
+        },
+        serviceCheck("relay", status.runtime?.relay),
+        serviceCheck("caller", status.runtime?.caller),
+        serviceCheck("responder", status.runtime?.responder),
+        serviceCheck("skill_adapter", status.runtime?.skill_adapter),
+        serviceCheck("mcp_adapter", status.runtime?.mcp_adapter)
+      ],
+      links: [
+        { label: "Ops Console", url: processBaseUrl(uiPort) },
+        { label: "Runtime", url: appendPath(processBaseUrl(uiPort), "/general/runtime") },
+        { label: "Calls", url: appendPath(processBaseUrl(uiPort), "/caller/calls") },
+        { label: "Catalog", url: appendPath(processBaseUrl(uiPort), "/caller/catalog") },
+        { label: "Supervisor Health", url: appendPath(processBaseUrl(state.config.runtime.ports.supervisor), "/healthz") }
+      ],
+      next_steps: [
+        "Run delexec-ops status to inspect the local runtime.",
+        "Open Calls after this request finishes to inspect the result package.",
+        "Run delexec-ops debug-snapshot if any check is warn or fail."
+      ]
+    };
+  }
+
   function buildRuntimeAlerts(service, { maxItems = 20 } = {}) {
     const events = readSupervisorEventTail({ maxLines: 200 })
       .filter((event) => {
@@ -2021,7 +2134,12 @@ function buildResponderRegisterHeaders() {
   }
 
   async function addOfficialExampleHotline() {
-    const definition = buildExampleHotlineDefinition();
+    const existing = findConfiguredExampleHotline(state);
+    const definition = buildExampleHotlineDefinition(existing);
+    if (isExampleHotlineDefinitionStale(existing)) {
+      definition.submitted_for_review = false;
+      definition.review_status = "local_only";
+    }
     const registrationDraft = ensureHotlineRegistrationDraft(state, definition);
     upsertHotline(state, definition);
     state.env = saveOpsState(state);
@@ -2039,6 +2157,33 @@ function buildResponderRegisterHeaders() {
       registration_draft_file: registrationDraft.draft_file,
       registration_draft: registrationDraft.draft
     };
+  }
+
+  async function ensureOfficialExampleHotlineCurrent() {
+    const existing = findConfiguredExampleHotline(state);
+    if (!existing) {
+      return null;
+    }
+    const current = buildExampleHotlineDefinition(existing);
+    const stale = isExampleHotlineDefinitionStale(existing);
+    if (!stale) {
+      return existing;
+    }
+    current.submitted_for_review = false;
+    current.review_status = "local_only";
+    const registrationDraft = ensureHotlineRegistrationDraft(state, current);
+    upsertHotline(state, current);
+    state.env = saveOpsState(state);
+    await reloadResponderIfRunning();
+    appendSupervisorEvent({
+      type: "hotline_upserted",
+      hotline_id: current.hotline_id,
+      adapter_type: current.adapter_type,
+      example: true,
+      upgraded: true,
+      registration_draft_file: registrationDraft.draft_file
+    });
+    return current;
   }
 
   async function dispatchExampleRequest(body = {}) {
@@ -2062,89 +2207,59 @@ function buildResponderRegisterHeaders() {
       };
     }
 
-    const example = findConfiguredExampleHotline(state);
+    const example = await ensureOfficialExampleHotlineCurrent();
     if (!example) {
       return buildExampleVisibilityError(example);
     }
     const responderIdentity = ensureResponderIdentity(state);
     let signerPublicKeyPem = responderIdentity.public_key_pem;
 
-    if (platformFeaturesEnabled(state)) {
-      if (example.submitted_for_review !== true) {
-        return buildExampleVisibilityError(example);
-      }
-
-      const catalog = await requestJson(
-        processBaseUrl(state.config.runtime.ports.caller),
-        `/controller/hotlines?hotline_id=${encodeURIComponent(LOCAL_EXAMPLE_HOTLINE_ID)}&responder_id=${encodeURIComponent(
-          state.config.responder.responder_id || ""
-        )}`,
-        {
-          headers: buildPlatformHeaders(state, runtime)
-        }
-      );
-
-      const selected = catalog.body?.items?.find(
-        (item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID && item.responder_id === state.config.responder.responder_id
-      );
-      if (!selected) {
-        return buildExampleVisibilityError(example);
-      }
-      signerPublicKeyPem = selected.responder_public_key_pem || signerPublicKeyPem;
-    }
-
+    const diagnostics = await buildExampleDiagnostics();
     const requestBody = buildExampleRequestBody({
       text: body.text,
       responderId: state.config.responder.responder_id,
       hotlineId: LOCAL_EXAMPLE_HOTLINE_ID,
-      signerPublicKeyPem
+      signerPublicKeyPem,
+      diagnostics
     });
     let response;
-    if (platformFeaturesEnabled(state)) {
-      response = await requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/remote-requests", {
-        method: "POST",
-        headers: buildPlatformHeaders(state, runtime),
-        body: requestBody
-      });
+    const created = await requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/requests", {
+      method: "POST",
+      body: requestBody
+    });
+    if (created.status !== 201 || !created.body?.request_id) {
+      response = created;
     } else {
-      const created = await requestJson(processBaseUrl(state.config.runtime.ports.caller), "/controller/requests", {
-        method: "POST",
-        body: requestBody
-      });
-      if (created.status !== 201 || !created.body?.request_id) {
-        response = created;
-      } else {
-        await requestJson(
-          processBaseUrl(state.config.runtime.ports.caller),
-          `/controller/requests/${encodeURIComponent(created.body.request_id)}/contract-draft`,
-          {
-            method: "POST",
-            body: {}
-          }
-        );
-        const dispatched = await requestJson(
-          processBaseUrl(state.config.runtime.ports.caller),
-          `/controller/requests/${encodeURIComponent(created.body.request_id)}/dispatch`,
-          {
-            method: "POST",
-            body: {
-              thread_id: LOCAL_EXAMPLE_HOTLINE_ID,
-              payload: requestBody.payload,
-              task_input: requestBody.input
-            }
-          }
-        );
-        response = {
-          status: dispatched.status === 202 ? 201 : dispatched.status,
+      await requestJson(
+        processBaseUrl(state.config.runtime.ports.caller),
+        `/controller/requests/${encodeURIComponent(created.body.request_id)}/contract-draft`,
+        {
+          method: "POST",
+          body: {}
+        }
+      );
+      const dispatched = await requestJson(
+        processBaseUrl(state.config.runtime.ports.caller),
+        `/controller/requests/${encodeURIComponent(created.body.request_id)}/dispatch`,
+        {
+          method: "POST",
           body: {
-            request_id: created.body.request_id,
-            request: dispatched.body?.request || created.body,
-            accepted: dispatched.body?.accepted === true,
-            delivery_meta: null,
-            task_token: null
+            thread_id: LOCAL_EXAMPLE_HOTLINE_ID,
+            payload: requestBody.payload,
+            task_input: requestBody.input
           }
-        };
-      }
+        }
+      );
+      response = {
+        status: dispatched.status === 202 ? 201 : dispatched.status,
+        body: {
+          request_id: created.body.request_id,
+          request: dispatched.body?.request || created.body,
+          accepted: dispatched.body?.accepted === true,
+          delivery_meta: null,
+          task_token: null
+        }
+      };
     }
     const draft = loadHotlineRegistrationDraft(state, example);
     return {
@@ -2456,14 +2571,14 @@ function buildResponderRegisterHeaders() {
         return;
       }
       if (method === "GET" && pathname === "/catalog/hotlines") {
+        const localItems = listLocalCatalogHotlines(state, runtime, {
+          hotline_id: url.searchParams.get("hotline_id") || undefined,
+          responder_id: url.searchParams.get("responder_id") || undefined,
+          task_type: url.searchParams.get("task_type") || undefined,
+          capability: url.searchParams.get("capability") || undefined
+        });
         if (!platformFeaturesEnabled(state)) {
-          const items = listLocalCatalogHotlines(state, runtime, {
-            hotline_id: url.searchParams.get("hotline_id") || undefined,
-            responder_id: url.searchParams.get("responder_id") || undefined,
-            task_type: url.searchParams.get("task_type") || undefined,
-            capability: url.searchParams.get("capability") || undefined
-          });
-          sendJson(res, 200, { items });
+          sendJson(res, 200, { items: localItems.filter(isCallableCatalogItem) });
           return;
         }
         const response = await requestJson(
@@ -2472,19 +2587,31 @@ function buildResponderRegisterHeaders() {
         , {
           headers: buildPlatformHeaders(state, runtime)
         });
+        if (response.status >= 200 && response.status < 300) {
+          sendJson(res, response.status, {
+            ...(response.body || {}),
+            items: mergeCatalogItems(response.body?.items || [], localItems)
+          });
+          return;
+        }
+        const callableLocalItems = localItems.filter(isCallableCatalogItem);
+        if (callableLocalItems.length > 0) {
+          sendJson(res, 200, { items: callableLocalItems });
+          return;
+        }
         sendJson(res, response.status, response.body);
         return;
       }
       const catalogDetailMatch = pathname.match(/^\/catalog\/hotlines\/([^/]+)$/);
       if (method === "GET" && catalogDetailMatch) {
         const hotlineId = decodeURIComponent(catalogDetailMatch[1]);
-        if (!platformFeaturesEnabled(state)) {
-          const localItem = listLocalCatalogHotlines(state, runtime, { hotline_id: hotlineId })[0] || null;
-          if (!localItem) {
-            sendError(res, 404, "HOTLINE_NOT_FOUND", "hotline is not configured locally");
-            return;
-          }
+        const localItem = listLocalCatalogHotlines(state, runtime, { hotline_id: hotlineId })[0] || null;
+        if (localItem && isCallableCatalogItem(localItem)) {
           sendJson(res, 200, localItem);
+          return;
+        }
+        if (!platformFeaturesEnabled(state)) {
+          sendError(res, 404, "HOTLINE_NOT_FOUND", "hotline is not configured locally");
           return;
         }
         const response = await requestJson(
@@ -2494,6 +2621,10 @@ function buildResponderRegisterHeaders() {
             headers: buildPlatformReadHeaders()
           }
         );
+        if (response.status >= 200 && response.status < 300 && isPlatformBootstrapDemoCatalogItem(response.body)) {
+          sendError(res, 404, "HOTLINE_NOT_FOUND", "hotline is not available in the local caller catalog");
+          return;
+        }
         sendJson(res, response.status, response.body);
         return;
       }

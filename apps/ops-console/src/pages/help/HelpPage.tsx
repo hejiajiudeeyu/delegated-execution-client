@@ -356,9 +356,9 @@ function Section2({ register }: SectionProps) {
         </li>
         <li>
           <strong>有一个 Hotline 可调。</strong>
-          全新的本地环境只会有一个 <strong>官方示例 hotline</strong>（<Code>workspace-summary</Code>），它在
+          全新的本地环境只需要一个 <strong>官方本机诊断 hotline</strong>（<Code>Local Workspace Doctor</Code>），它在
           <Link to="/caller/catalog" className="text-cyan-700 underline underline-offset-2 mx-1">Catalog</Link>
-          里有 official 标签。本地没有自己发布的 hotline 也没关系，先用这个。
+          里会优先显示。本地没有自己发布的 hotline 也没关系，先用这个确认本机调用链路。
         </li>
         <li>
           <strong>试拨。</strong>

@@ -55,6 +55,7 @@ function hotline(overrides: Record<string, unknown> = {}) {
     review_status: "approved",
     task_types: ["classify"],
     tags: ["text"],
+    availability_status: "healthy",
     input_schema: {
       required: ["text"],
       properties: {
@@ -71,6 +72,19 @@ function hotline(overrides: Record<string, unknown> = {}) {
     },
     ...overrides,
   };
+}
+
+function localWorkspaceDoctor(overrides: Record<string, unknown> = {}) {
+  return hotline({
+    hotline_id: "local.delegated-execution.workspace-summary.v1",
+    display_name: "Local Workspace Doctor",
+    responder_id: "responder_local",
+    description: "Read-only local delegated-execution environment diagnostic.",
+    review_status: "local_only",
+    task_types: ["workspace_diagnose"],
+    tags: ["local", "example", "diagnostic"],
+    ...overrides,
+  });
 }
 
 function watchConsoleWarnings() {
@@ -135,6 +149,59 @@ describe("CatalogPage", () => {
     expect(screen.queryByText(/启用平台模式/)).toBeNull();
   });
 
+  it("does not list offline platform templates as available hotlines", async () => {
+    const offlineTemplate = hotline({
+      hotline_id: "starlight.creative.studio.v1",
+      display_name: "Starlight AI 创意工坊",
+      responder_id: "responder_starlight",
+      tags: ["creative", "image"],
+      availability_status: "offline",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/auth/session") return jsonResponse({ recoverable_session: { token: "tok" } });
+        if (url.startsWith("/catalog/hotlines")) return jsonResponse({ items: [offlineTemplate] });
+        return jsonResponse({}, 404);
+      }),
+    );
+
+    renderPage({ initialEntries: ["/caller/catalog?from=dashboard-nextup"] });
+
+    await waitFor(() => {
+      expect(screen.queryByText("没有可用的真实热线")).toBeTruthy();
+    });
+    expect(screen.queryByText("Starlight AI 创意工坊")).toBeNull();
+  });
+
+  it("keeps the local official example visible even when returned with stale platform metadata", async () => {
+    const staleLocal = localWorkspaceDoctor({
+      display_name: "Delegated Execution Workspace Summary",
+      description: "old summary example",
+      task_types: ["text_summarize"],
+      tags: ["local", "example", "demo"],
+      availability_status: "healthy",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/auth/session") return jsonResponse({ recoverable_session: { token: "tok" } });
+        if (url.startsWith("/catalog/hotlines/")) return jsonResponse(staleLocal);
+        if (url.startsWith("/catalog/hotlines")) return jsonResponse({ items: [staleLocal] });
+        return jsonResponse({}, 404);
+      }),
+    );
+
+    renderPage({ initialEntries: ["/caller/catalog?from=dashboard-nextup"] });
+
+    await waitFor(() => {
+      expect(screen.queryAllByText("Local Workspace Doctor").length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.queryByText("workspace_diagnose")).toBeTruthy();
+  });
+
   it("auto-selects the first hotline and loads its detail", async () => {
     const consoleWatch = watchConsoleWarnings();
     const item = hotline();
@@ -162,6 +229,42 @@ describe("CatalogPage", () => {
     });
     consoleWatch.expectClean();
     consoleWatch.restore();
+  });
+
+  it("prioritizes the local official example when arriving from dashboard next-up", async () => {
+    const remoteShowcase = hotline({
+      hotline_id: "starlight.creative.studio.v1",
+      display_name: "Starlight AI 创意工坊",
+      responder_id: "responder_starlight",
+      review_status: "approved",
+      tags: ["platform", "showcase"],
+    });
+    const localExample = localWorkspaceDoctor({ availability_status: "healthy" });
+    const detailRequests: string[] = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/auth/session") return jsonResponse({ recoverable_session: { token: "tok" } });
+        if (url.startsWith("/catalog/hotlines/")) {
+          detailRequests.push(url);
+          if (url.includes(localExample.hotline_id)) return jsonResponse(localExample);
+          return jsonResponse(remoteShowcase);
+        }
+        if (url.startsWith("/catalog/hotlines")) return jsonResponse({ items: [remoteShowcase, localExample] });
+        return jsonResponse({}, 404);
+      }),
+    );
+
+    renderPage({ initialEntries: ["/caller/catalog?from=dashboard-nextup"] });
+
+    await waitFor(() => {
+      expect(detailRequests[0]).toBe(`/catalog/hotlines/${encodeURIComponent(localExample.hotline_id)}`);
+    });
+    expect(screen.queryByText(/试拨本机诊断示例/)).toBeTruthy();
+    expect(screen.queryAllByText("Local Workspace Doctor").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("workspace_diagnose")).toBeTruthy();
   });
 
   it("auto-opens the Try-Call drawer when arriving with ?hotline_id=", async () => {

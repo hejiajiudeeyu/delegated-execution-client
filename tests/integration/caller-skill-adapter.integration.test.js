@@ -8,8 +8,21 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createCallerSkillAdapterServer } from "../../apps/caller-skill-adapter/src/server.js";
 import { closeServer, jsonRequest, listenServer } from "../helpers/http.js";
 
-function createFakeCallerControllerServer() {
+function createFakeCallerControllerServer(options = {}) {
   const requests = new Map();
+  const catalogItems = options.catalogItems || [
+    {
+      responder_id: "responder_local_demo",
+      hotline_id: "local.delegated-execution.workspace-summary.v1",
+      display_name: "Workspace Summary",
+      description: "Summarize a local workspace",
+      review_status: "local_only",
+      task_types: ["text_summarize"],
+      capabilities: ["workspace.summary"],
+      tags: ["local", "workspace"],
+      responder_public_key_pem: "pem"
+    }
+  ];
 
   return http.createServer(async (req, res) => {
     const method = req.method || "GET";
@@ -36,19 +49,7 @@ function createFakeCallerControllerServer() {
 
     if (method === "GET" && pathname === "/controller/hotlines") {
       send(200, {
-        items: [
-          {
-            responder_id: "responder_local_demo",
-            hotline_id: "local.delegated-execution.workspace-summary.v1",
-            display_name: "Workspace Summary",
-            description: "Summarize a local workspace",
-            review_status: "local_only",
-            task_types: ["text_summarize"],
-            capabilities: ["workspace.summary"],
-            tags: ["local", "workspace"],
-            responder_public_key_pem: "pem"
-          }
-        ]
+        items: catalogItems
       });
       return;
     }
@@ -99,6 +100,42 @@ function createFakeCallerControllerServer() {
             summary: "Workspace summary complete"
           }
         }
+      });
+      return;
+    }
+
+    send(404, { error: { code: "NOT_FOUND", message: "not found" } });
+  });
+}
+
+function createFakeSupervisorServer() {
+  return http.createServer(async (req, res) => {
+    const method = req.method || "GET";
+    const url = new URL(req.url || "/", "http://localhost");
+    const pathname = url.pathname;
+
+    const send = (status, body) => {
+      res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(body));
+    };
+
+    if (method === "GET" && pathname === "/catalog/hotlines") {
+      send(200, {
+        items: [
+          {
+            responder_id: "responder_local_demo",
+            hotline_id: "local.delegated-execution.workspace-summary.v1",
+            display_name: "Local Workspace Doctor",
+            description: "Diagnose the local delegated-execution workspace",
+            review_status: "approved",
+            source: "local",
+            availability_status: "healthy",
+            task_types: ["workspace_diagnose"],
+            capabilities: ["workspace.diagnose"],
+            tags: ["local", "workspace", "doctor"],
+            responder_public_key_pem: "pem"
+          }
+        ]
       });
       return;
     }
@@ -158,15 +195,21 @@ function writeExampleDraft(homeDir) {
 
 describe("caller skill adapter integration", () => {
   let callerServer;
+  let supervisorServer;
   let skillServer;
   let tempHome;
 
   afterEach(async () => {
     delete process.env.CALLER_CONTROLLER_BASE_URL;
+    delete process.env.OPS_SUPERVISOR_BASE_URL;
     delete process.env.DELEXEC_HOME;
     if (skillServer) {
       await closeServer(skillServer);
       skillServer = null;
+    }
+    if (supervisorServer) {
+      await closeServer(supervisorServer);
+      supervisorServer = null;
     }
     if (callerServer) {
       await closeServer(callerServer);
@@ -282,6 +325,52 @@ describe("caller skill adapter integration", () => {
     expect(report.status).toBe(200);
     expect(report.body.request_id).toBe("req_skill_1");
     expect(report.body.result.summary).toBe("Workspace summary complete");
+  });
+
+  it("discovers local official hotlines from the supervisor catalog before offline templates", async () => {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "caller-skill-"));
+    process.env.DELEXEC_HOME = tempHome;
+    writeExampleDraft(tempHome);
+
+    callerServer = createFakeCallerControllerServer({
+      catalogItems: [
+        {
+          responder_id: "responder_template",
+          hotline_id: "starlight.creative.studio.v1",
+          display_name: "Starlight AI 创意工坊",
+          description: "Template catalog entry",
+          review_status: "approved",
+          availability_status: "offline",
+          task_types: ["creative_generation"],
+          capabilities: ["image_synthesis"],
+          tags: ["template"]
+        }
+      ]
+    });
+    const callerUrl = await listenServer(callerServer);
+    process.env.CALLER_CONTROLLER_BASE_URL = callerUrl;
+
+    supervisorServer = createFakeSupervisorServer();
+    const supervisorUrl = await listenServer(supervisorServer);
+    process.env.OPS_SUPERVISOR_BASE_URL = supervisorUrl;
+
+    skillServer = createCallerSkillAdapterServer();
+    const skillUrl = await listenServer(skillServer);
+
+    const brief = await jsonRequest(skillUrl, "/skills/caller/search-hotlines-brief", {
+      method: "POST",
+      body: {
+        task_type: "workspace_diagnose",
+        task_goal: "diagnose workspace status",
+        limit: 5
+      }
+    });
+
+    expect(brief.status).toBe(200);
+    expect(brief.body.items).toHaveLength(1);
+    expect(brief.body.items[0].hotline_id).toBe("local.delegated-execution.workspace-summary.v1");
+    expect(brief.body.items[0].display_name).toBe("Local Workspace Doctor");
+    expect(brief.body.items[0].source).toBe("local");
   });
 
   it("reads allowed local markdown files and rejects unsupported extensions", async () => {

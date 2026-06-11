@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -601,12 +601,14 @@ describe("ops cli integration", () => {
 
     expect(output.ok).toBe(true);
     expect(example).toBeTruthy();
-    expect(example.display_name).toBe("Delegated Execution Workspace Summary");
-    expect(example.task_types).toEqual(["text_summarize"]);
-    expect(example.capabilities).toEqual(["text.summarize"]);
-    expect(example.tags).toEqual(["local", "example", "demo"]);
+    expect(example.display_name).toBe("Local Workspace Doctor");
+    expect(example.task_types).toEqual(["workspace_diagnose"]);
+    expect(example.capabilities).toEqual(["workspace.diagnose"]);
+    expect(example.tags).toEqual(["local", "example", "diagnostic"]);
     expect(example.adapter_type).toBe("process");
     expect(example.adapter.cmd).toContain("example-hotline-worker.js");
+    expect(output.registration_draft.draft_meta.generated_profile).toBe("workspace_diagnose");
+    expect(output.registration_draft.output_schema.required).toEqual(["summary", "checks", "links", "next_steps"]);
   });
 
   it("registers a local-only caller through the cli without platform credentials", async () => {
@@ -631,7 +633,7 @@ describe("ops cli integration", () => {
     expect(envText).not.toContain("CALLER_PLATFORM_API_KEY=");
   });
 
-  it("bootstraps the local client and stops at admin approval when operator credentials are unavailable", async () => {
+  it("bootstraps locally and warns when PLATFORM_API_BASE_URL is present without --platform", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-bootstrap-awaiting-"));
     cleanupDirs.push(opsHome);
 
@@ -642,7 +644,6 @@ describe("ops cli integration", () => {
     const platformUrl = await listenServer(platformServer);
 
     process.env.DELEXEC_HOME = opsHome;
-    process.env.PLATFORM_API_BASE_URL = platformUrl;
     process.env.OPS_PORT_SUPERVISOR = supervisorPort;
     process.env.OPS_PORT_RELAY = relayPort;
     process.env.OPS_PORT_CALLER = callerPort;
@@ -667,10 +668,11 @@ describe("ops cli integration", () => {
         (await execFileAsync(process.execPath, [CLI_PATH, "bootstrap", "--email", "bootstrap-awaiting@test.local"], { env })).stdout
       );
 
-      expect(output.ok).toBe(false);
-      expect(output.stage).toBe("awaiting_admin_approval");
+      expect(output.ok).toBe(true);
+      expect(output.status).toBe("SUCCEEDED");
       expect(output.hotline_id).toBe("local.delegated-execution.workspace-summary.v1");
-      expect(output.steps.map((item) => item.step)).toContain("review_submitted");
+      expect(output.warnings).toContain("PLATFORM_API_BASE_URL ignored for bootstrap; pass --platform to enable platform mode.");
+      expect(output.steps.map((item) => item.step)).not.toContain("review_submitted");
       expect(output.steps.map((item) => item.step)).toContain("responder_enabled");
     } finally {
       await supervisor.stopManagedServices();
@@ -724,7 +726,16 @@ describe("ops cli integration", () => {
         (
           await execFileAsync(
             process.execPath,
-            [CLI_PATH, "bootstrap", "--email", "bootstrap-success@test.local", "--text", "Summarize this bootstrap request."],
+            [
+              CLI_PATH,
+              "bootstrap",
+              "--email",
+              "bootstrap-success@test.local",
+              "--platform",
+              platformUrl,
+              "--text",
+              "Summarize this bootstrap request."
+            ],
             { env }
           )
         ).stdout
@@ -822,8 +833,14 @@ describe("ops cli integration", () => {
     fs.writeFileSync(
       uiServerScript,
       `import http from "node:http";
+import fs from "node:fs";
 const host = process.env.DELEXEC_OPS_UI_HOST || "127.0.0.1";
 const port = Number(process.env.DELEXEC_OPS_UI_PORT || 4173);
+fs.writeFileSync(process.env.UI_ENV_CAPTURE_FILE, JSON.stringify({
+  OPS_PORT_SUPERVISOR: process.env.OPS_PORT_SUPERVISOR || null,
+  DELEXEC_OPS_UI_HOST: process.env.DELEXEC_OPS_UI_HOST || null,
+  DELEXEC_OPS_UI_PORT: process.env.DELEXEC_OPS_UI_PORT || null
+}));
 const server = http.createServer((req, res) => {
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   res.end("<html><body>ops console ok</body></html>");
@@ -842,7 +859,8 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
       OPS_PORT_CALLER: callerPort,
       OPS_PORT_RESPONDER: responderPort,
       DELEXEC_OPS_UI_BIN: process.execPath,
-      DELEXEC_OPS_UI_ARGS: JSON.stringify([uiServerScript])
+      DELEXEC_OPS_UI_ARGS: JSON.stringify([uiServerScript]),
+      UI_ENV_CAPTURE_FILE: path.join(opsHome, "ui-env.json")
     };
 
     const supervisor = createOpsSupervisorServer();
@@ -860,6 +878,9 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
       expect(output.next_steps.reopen_web_ui).toBe("delexec-ops ui start --open");
       expect(typeof output.ui.pid).toBe("number");
       cleanupPids.push(output.ui.pid);
+      const capturedEnv = JSON.parse(fs.readFileSync(env.UI_ENV_CAPTURE_FILE, "utf8"));
+      expect(capturedEnv.OPS_PORT_SUPERVISOR).toBe(supervisorPort);
+      expect(capturedEnv.DELEXEC_OPS_UI_PORT).toBe(uiPort);
     } finally {
       await closeServer(supervisor);
     }
@@ -899,6 +920,10 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
       const response = await fetch(output.ui.url);
       expect(response.status).toBe(200);
       expect(await response.text()).toContain("<div id=\"root\"></div>");
+      const status = await fetch(`${output.ui.url}/status`);
+      expect(status.status).toBe(200);
+      const statusBody = await status.json();
+      expect(statusBody.ok).toBe(true);
     } finally {
       await closeServer(supervisor);
     }
@@ -933,7 +958,17 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
       env: process.env
     });
 
-    const cleanRoomEnv = await createIsolatedCliEnv(path.join(installDir, ".ops-home"));
+    const [supervisorPort, relayPort, callerPort, responderPort, skillAdapterPort, mcpAdapterPort] = (await reserveFreePorts(6)).map(String);
+    const cleanRoomEnv = {
+      ...process.env,
+      DELEXEC_HOME: path.join(installDir, ".ops-home"),
+      OPS_PORT_SUPERVISOR: supervisorPort,
+      OPS_PORT_RELAY: relayPort,
+      OPS_PORT_CALLER: callerPort,
+      OPS_PORT_RESPONDER: responderPort,
+      OPS_PORT_SKILL_ADAPTER: skillAdapterPort,
+      OPS_PORT_MCP_ADAPTER: mcpAdapterPort
+    };
     const cliPath = path.join(installDir, "node_modules/.bin/delexec-ops");
 
     await execFileAsync(cliPath, ["responder", "init", "--responder-id", "responder_cli_test"], {
@@ -948,5 +983,50 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     const output = JSON.parse(doctor.stdout);
     expect(output.config.platform.base_url).toBe("http://127.0.0.1:8080");
     expect(output.config.responder.responder_id).toBe("responder_cli_test");
-  });
+
+    const bootstrap = JSON.parse(
+      (
+        await execFileAsync(
+          cliPath,
+          ["bootstrap", "--email", "clean-room@test.local", "--text", "Summarize this bootstrap request."],
+          {
+            cwd: installDir,
+            env: cleanRoomEnv,
+            timeout: 20000
+          }
+        )
+      ).stdout
+    );
+    expect(bootstrap.ok).toBe(true);
+    expect(bootstrap.status).toBe("SUCCEEDED");
+
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      try {
+        const health = await fetch(`http://127.0.0.1:${supervisorPort}/healthz`);
+        if (health.status === 200) {
+          break;
+        }
+      } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const mcpSpec = JSON.parse(
+      (
+        await execFileAsync(cliPath, ["mcp", "spec"], {
+          cwd: installDir,
+          env: cleanRoomEnv
+        })
+      ).stdout
+    );
+    expect(mcpSpec.ok).toBe(true);
+    expect(mcpSpec.spec.stdio.args[0]).toContain(path.join("node_modules", "@delexec", "caller-skill-mcp-adapter"));
+    expect(fs.existsSync(mcpSpec.spec.stdio.args[0])).toBe(true);
+
+    const uiStart = await execFileAsync(cliPath, ["ui", "start", "--no-browser"], {
+      cwd: installDir,
+      env: cleanRoomEnv
+    }).catch((error) => error);
+    expect(uiStart.code).toBe(1);
+    expect(uiStart.stderr || uiStart.stdout).toContain("Ops Console UI requires a source checkout");
+  }, 30000);
 });

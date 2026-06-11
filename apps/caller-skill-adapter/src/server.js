@@ -8,6 +8,7 @@ import { ensureOpsDirectories, getOpsHomeDir, readJsonFile, writeJsonFile } from
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const OPS_SESSION_HEADER = "X-Ops-Session";
 
 function loadDisplayHintsMap() {
   const map = new Map();
@@ -86,6 +87,22 @@ function buildCallerHeaders() {
 
 function callerBaseUrl() {
   return process.env.CALLER_CONTROLLER_BASE_URL || `http://127.0.0.1:${process.env.CALLER_CONTROLLER_PORT || 8081}`;
+}
+
+function supervisorBaseUrl() {
+  return process.env.OPS_SUPERVISOR_BASE_URL || `http://127.0.0.1:${process.env.OPS_PORT_SUPERVISOR || 8079}`;
+}
+
+function readOpsSessionToken() {
+  const session = readJsonFile(path.join(ensureOpsDirectories(), "run", "session.json"), null);
+  if (!session?.token || !session?.expires_at) {
+    return null;
+  }
+  const expiresAt = Date.parse(session.expires_at);
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    return null;
+  }
+  return String(session.token);
 }
 
 function sanitizeHotlineIdForFileName(hotlineId) {
@@ -247,11 +264,11 @@ async function parseJsonBody(req) {
   });
 }
 
-async function requestJson(baseUrl, pathname, { method = "GET", body } = {}) {
+async function requestRawJson(baseUrl, pathname, { method = "GET", headers = {}, body } = {}) {
   const response = await fetch(new URL(pathname, baseUrl), {
     method,
     headers: {
-      ...buildCallerHeaders(),
+      ...headers,
       ...(body === undefined ? {} : { "content-type": "application/json; charset=utf-8" })
     },
     body: body === undefined ? undefined : JSON.stringify(body)
@@ -261,6 +278,46 @@ async function requestJson(baseUrl, pathname, { method = "GET", body } = {}) {
     status: response.status,
     body: text ? JSON.parse(text) : null
   };
+}
+
+async function requestJson(baseUrl, pathname, { method = "GET", body } = {}) {
+  return requestRawJson(baseUrl, pathname, {
+    method,
+    headers: buildCallerHeaders(),
+    body
+  });
+}
+
+async function requestSupervisorJson(pathname) {
+  const token = readOpsSessionToken();
+  return requestRawJson(supervisorBaseUrl(), pathname, {
+    headers: token ? { [OPS_SESSION_HEADER]: token } : {}
+  });
+}
+
+async function requestCatalogItems(query = "") {
+  const suffix = query ? `?${query}` : "";
+  try {
+    const supervisor = await requestSupervisorJson(`/catalog/hotlines${suffix}`);
+    if (supervisor.status === 200) {
+      return supervisor;
+    }
+  } catch {
+    // The skill adapter can run without the Ops supervisor in tests or minimal setups.
+  }
+  return requestJson(callerBaseUrl(), `/controller/hotlines${suffix}`);
+}
+
+async function requestCatalogDetail(hotlineId) {
+  try {
+    const supervisor = await requestSupervisorJson(`/catalog/hotlines/${encodeURIComponent(hotlineId)}`);
+    if (supervisor.status === 200) {
+      return supervisor;
+    }
+  } catch {
+    // Fall back to the caller controller catalog below.
+  }
+  return null;
 }
 
 function mapRequestState(request, result = null) {
@@ -341,12 +398,13 @@ function buildCallerSkillManifest() {
 }
 
 function mapCatalogBriefItem(item, score = null, matchReason = null) {
+  const source = item.source || (item.review_status && item.review_status !== "local_only" ? "platform" : "local");
   return {
     hotline_id: item.hotline_id,
     display_name: item.display_name || item.hotline_id,
     short_description: item.description || null,
     task_types: item.task_types || [],
-    source: item.review_status && item.review_status !== "local_only" ? "platform" : "local",
+    source,
     match_reason: matchReason,
     score
   };
@@ -354,6 +412,7 @@ function mapCatalogBriefItem(item, score = null, matchReason = null) {
 
 function mapCatalogDetailedItem(item, draftInfo = null) {
   const draft = draftInfo?.draft || null;
+  const localOnly = item.source === "local" || !item.review_status || item.review_status === "local_only";
   return {
     hotline_id: item.hotline_id,
     responder_id: item.responder_id,
@@ -363,7 +422,7 @@ function mapCatalogDetailedItem(item, draftInfo = null) {
     output_summary: draft?.output_summary || null,
     task_types: draft?.task_types || item.task_types || [],
     draft_ready: Boolean(draft),
-    local_only: !item.review_status || item.review_status === "local_only",
+    local_only: localOnly,
     review_status: item.review_status || "local_only"
   };
 }
@@ -446,6 +505,14 @@ async function waitForTerminalRequest(requestId, { timeoutMs, intervalMs } = {})
 }
 
 async function resolveCatalogTarget(hotlineId, responderId = null) {
+  const supervisorTarget = responderId ? null : await requestCatalogDetail(hotlineId);
+  if (supervisorTarget?.status === 200) {
+    return {
+      status: 200,
+      body: supervisorTarget.body
+    };
+  }
+
   const params = new URLSearchParams();
   if (hotlineId) {
     params.set("hotline_id", hotlineId);
@@ -453,7 +520,7 @@ async function resolveCatalogTarget(hotlineId, responderId = null) {
   if (responderId) {
     params.set("responder_id", responderId);
   }
-  const catalog = await requestJson(callerBaseUrl(), `/controller/hotlines?${params.toString()}`);
+  const catalog = await requestCatalogItems(params.toString());
   if (catalog.status !== 200) {
     return catalog;
   }
@@ -491,6 +558,7 @@ function loadHotlineDraft(hotlineId) {
 
 function buildReadHotlineResponse(selected, draftInfo) {
   const draft = draftInfo.draft || {};
+  const localOnly = selected.source === "local" || !selected.review_status || selected.review_status === "local_only";
   return {
     hotline_id: selected.hotline_id,
     responder_id: selected.responder_id,
@@ -502,7 +570,7 @@ function buildReadHotlineResponse(selected, draftInfo) {
     output_schema: draft.output_schema || null,
     draft_ready: Boolean(draftInfo.draft),
     draft_file: draftInfo.draft_file,
-    local_only: !selected.review_status || selected.review_status === "local_only",
+    local_only: localOnly,
     review_status: selected.review_status || "local_only",
     task_types: draft.task_types || selected.task_types || [],
     output_display_hints: displayHintsMap.get(selected.hotline_id) ?? null
@@ -737,7 +805,7 @@ export function createCallerSkillAdapterServer() {
         const taskGoalTerms = tokenizeSearchText(body.task_goal || body.taskGoal);
         const taskType = normalizedString(body.task_type || body.taskType);
         const limit = Math.max(1, Math.min(Number(body.limit || 8), 25));
-        const catalog = await requestJson(callerBaseUrl(), "/controller/hotlines");
+        const catalog = await requestCatalogItems();
         if (catalog.status !== 200) {
           sendJson(res, catalog.status, catalog.body);
           return;
@@ -770,7 +838,7 @@ export function createCallerSkillAdapterServer() {
           return;
         }
 
-        const catalog = await requestJson(callerBaseUrl(), "/controller/hotlines");
+        const catalog = await requestCatalogItems();
         if (catalog.status !== 200) {
           sendJson(res, catalog.status, catalog.body);
           return;

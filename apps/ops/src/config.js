@@ -804,6 +804,32 @@ function buildDefaultContractProfile(definition = {}) {
     hotlineId.includes("pdf.parse") ||
     hotlineId.includes("mineru");
 
+  if (definition.input_schema || definition.output_schema) {
+    return {
+      profile_key: taskTypes[0] || capabilities[0] || "explicit_contract",
+      description: definition.description || `Use ${displayName} for this configured local task.`,
+      summary: definition.summary || `Send a request to ${displayName} using its configured local contract.`,
+      template_ref: definition.template_ref || `docs/templates/hotlines/${hotlineId}/`,
+      input_schema: definition.input_schema || {
+        type: "object",
+        additionalProperties: false,
+        properties: {}
+      },
+      output_schema: definition.output_schema || {
+        type: "object",
+        additionalProperties: false,
+        properties: {}
+      },
+      input_examples: Array.isArray(definition.input_examples) ? definition.input_examples : [],
+      output_examples: Array.isArray(definition.output_examples) ? definition.output_examples : [],
+      input_summary: definition.input_summary || "Use the configured input schema for this local hotline.",
+      output_summary: definition.output_summary || "Returns the configured output schema for this local hotline.",
+      recommended_for: Array.isArray(definition.recommended_for) ? definition.recommended_for : [],
+      not_recommended_for: Array.isArray(definition.not_recommended_for) ? definition.not_recommended_for : [],
+      limitations: Array.isArray(definition.limitations) ? definition.limitations : []
+    };
+  }
+
   if (textSummarize) {
     return {
       profile_key: "text_summarize",
@@ -1021,9 +1047,9 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
     output_examples: profile.output_examples,
     input_summary: profile.input_summary,
     output_summary: profile.output_summary,
-    recommended_for: [],
-    not_recommended_for: [],
-    limitations: [],
+    recommended_for: Array.isArray(profile.recommended_for) ? profile.recommended_for : [],
+    not_recommended_for: Array.isArray(profile.not_recommended_for) ? profile.not_recommended_for : [],
+    limitations: Array.isArray(profile.limitations) ? profile.limitations : [],
     contact_email: fallbackContactEmail,
     support_email: null
   };

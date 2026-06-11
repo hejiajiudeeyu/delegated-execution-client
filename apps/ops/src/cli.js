@@ -19,7 +19,7 @@ import {
   setHotlineEnabled,
   upsertHotline
 } from "./config.js";
-import { buildExampleHotlineDefinition, LOCAL_EXAMPLE_HOTLINE_ID } from "./example-hotline.js";
+import { buildExampleHotlineDefinition, isExampleHotlineDefinitionStale, LOCAL_EXAMPLE_HOTLINE_ID } from "./example-hotline.js";
 
 const execFileAsync = promisify(execFile);
 const CLI_PATH = fileURLToPath(import.meta.url);
@@ -280,7 +280,9 @@ function buildUiLaunchCommand({ host, port }) {
     };
   }
   if (!canLaunchOpsConsoleWorkspace()) {
-    throw new Error("ops_console_workspace_required");
+    throw new Error(
+      "Ops Console UI requires a source checkout. Run from the delegated-execution-client workspace, or use delexec-ops status/debug-snapshot from the global CLI. See the README source install section."
+    );
   }
   return {
     command: corepackExecutable(),
@@ -357,6 +359,7 @@ async function ensureUiAvailable(args = {}, env = process.env) {
       cwd: launch.cwd,
       env: {
         ...env,
+        OPS_PORT_SUPERVISOR: String(env.OPS_PORT_SUPERVISOR || ensureOpsState().config.runtime.ports.supervisor),
         DELEXEC_OPS_UI_HOST: ui.host,
         DELEXEC_OPS_UI_PORT: String(ui.port)
       },
@@ -846,7 +849,13 @@ async function commandAttachProject(args) {
 
 async function commandAddExampleHotline() {
   const state = ensureOpsState();
-  const definition = buildExampleHotlineDefinition();
+  const existing = (state.config.responder.hotlines || []).find((item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID);
+  const stale = isExampleHotlineDefinitionStale(existing);
+  const definition = buildExampleHotlineDefinition(existing);
+  if (stale) {
+    definition.submitted_for_review = false;
+    definition.review_status = "local_only";
+  }
   const registrationDraft = ensureHotlineRegistrationDraft(state, definition);
   upsertHotline(state, definition);
   state.env = saveOpsState(state);
@@ -1139,9 +1148,19 @@ async function commandBootstrap(args) {
     setupArgs.push("--display-name", String(args["display-name"]));
   }
 
-  const platformUrl = String(args.platform || initialState.config.platform.base_url || process.env.PLATFORM_API_BASE_URL || "http://127.0.0.1:8080").trim();
-  const env = { ...process.env, PLATFORM_API_BASE_URL: platformUrl };
-  const bootstrapUsesPlatform = Boolean(args.platform || process.env.PLATFORM_API_BASE_URL);
+  const explicitPlatformUrl = typeof args.platform === "string" ? args.platform.trim() : "";
+  const platformUrl = String(explicitPlatformUrl || initialState.config.platform.base_url || "http://127.0.0.1:8080").trim();
+  const bootstrapUsesPlatform = Boolean(explicitPlatformUrl);
+  const warnings = [];
+  const env = { ...process.env };
+  if (bootstrapUsesPlatform) {
+    env.PLATFORM_API_BASE_URL = platformUrl;
+  } else {
+    if (process.env.PLATFORM_API_BASE_URL) {
+      warnings.push("PLATFORM_API_BASE_URL ignored for bootstrap; pass --platform to enable platform mode.");
+    }
+    delete env.PLATFORM_API_BASE_URL;
+  }
 
   try {
     const setup = await runCliSubcommand(setupArgs, env);
@@ -1186,25 +1205,20 @@ async function commandBootstrap(args) {
 
     state = ensureOpsState();
     const hasExample = (state.config.responder.hotlines || []).some((item) => item.hotline_id === LOCAL_EXAMPLE_HOTLINE_ID);
-    if (hasExample) {
-      logBootstrapStep(steps, "example_hotline_added", true, {
-        hotline_id: LOCAL_EXAMPLE_HOTLINE_ID,
-        existing: true
+    const added = await runCliSubcommand(["add-example-hotline"], env);
+    logBootstrapStep(steps, "example_hotline_added", added.ok !== false, {
+      hotline_id: added.hotline_id || LOCAL_EXAMPLE_HOTLINE_ID,
+      existing: hasExample,
+      refreshed: hasExample
+    });
+    if (added.ok === false) {
+      emit({
+        ok: false,
+        stage: "example_hotline_add_failed",
+        steps,
+        response: added
       });
-    } else {
-      const added = await runCliSubcommand(["add-example-hotline"], env);
-      logBootstrapStep(steps, "example_hotline_added", added.ok !== false, {
-        hotline_id: added.hotline_id || LOCAL_EXAMPLE_HOTLINE_ID
-      });
-      if (added.ok === false) {
-        emit({
-          ok: false,
-          stage: "example_hotline_add_failed",
-          steps,
-          response: added
-        });
-        return;
-      }
+      return;
     }
 
     state = ensureOpsState();
@@ -1309,6 +1323,7 @@ async function commandBootstrap(args) {
           ok: false,
           stage: "awaiting_admin_approval",
           steps,
+          warnings,
           responder_id: responderId,
           hotline_id: LOCAL_EXAMPLE_HOTLINE_ID,
           next_action: "Approve the responder and hotline runtime, then rerun delexec-ops bootstrap or delexec-ops run-example.",
@@ -1344,6 +1359,7 @@ async function commandBootstrap(args) {
         ok: false,
         stage: "request_start_failed",
         steps,
+        warnings,
         response: started.body || started
       });
       return;
@@ -1370,6 +1386,7 @@ async function commandBootstrap(args) {
       hotline_id: LOCAL_EXAMPLE_HOTLINE_ID,
       supervisor_url: supervisorUrl,
       ui: args["open-ui"] ? await ensureUiAvailable(args, env) : null,
+      warnings,
       next_steps: {
         one_click_start: "delexec-ops bootstrap --open-ui",
         reopen_web_ui: "delexec-ops ui start --open",
@@ -1383,6 +1400,7 @@ async function commandBootstrap(args) {
       ok: false,
       stage: "bootstrap_failed",
       steps,
+      warnings,
       error: error instanceof Error ? error.message : "unknown_error"
     });
   }

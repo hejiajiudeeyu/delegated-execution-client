@@ -313,6 +313,174 @@ describe("ops supervisor integration", () => {
       delete process.env.OPS_PORT_SKILL_ADAPTER;
       delete process.env.OPS_PORT_MCP_ADAPTER;
     }
+  }, 20_000);
+
+  it("keeps the local official example in catalog while caller remains in platform mode", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-platform-local-example-"));
+    cleanupDirs.push(opsHome);
+    const [supervisorPort, relayPort, callerPort, responderPort, skillAdapterPort, mcpAdapterPort] = await reserveFreePorts(6);
+    process.env.OPS_PORT_SUPERVISOR = String(supervisorPort);
+    process.env.OPS_PORT_RELAY = String(relayPort);
+    process.env.OPS_PORT_CALLER = String(callerPort);
+    process.env.OPS_PORT_RESPONDER = String(responderPort);
+    process.env.OPS_PORT_SKILL_ADAPTER = String(skillAdapterPort);
+    process.env.OPS_PORT_MCP_ADAPTER = String(mcpAdapterPort);
+    process.env.DELEXEC_HOME = opsHome;
+
+    const platformState = createPlatformState();
+    const platformServer = createPlatformServer({ serviceName: "platform-local-example-catalog-test", state: platformState });
+    const platformUrl = await listenServer(platformServer);
+    process.env.PLATFORM_API_BASE_URL = platformUrl;
+
+    const supervisor = createOpsSupervisorServer();
+    supervisor.listen(0, "127.0.0.1");
+    await new Promise((resolve) => supervisor.once("listening", resolve));
+    const supervisorUrl = `http://127.0.0.1:${supervisor.address().port}`;
+    await jsonRequest(supervisorUrl, "/setup", { method: "POST", body: {} });
+    await supervisor.startManagedServices();
+
+    try {
+      await waitFor(async () => {
+        const status = await jsonRequest(supervisorUrl, "/status");
+        if (status.body.runtime.caller.health?.status !== 200 || status.body.runtime.skill_adapter.health?.status !== 200) {
+          throw new Error("runtime_not_ready");
+        }
+        return status;
+      });
+
+      const platformRegistered = await jsonRequest(supervisorUrl, "/auth/register-caller", {
+        method: "POST",
+        body: { contact_email: "ops-platform-local-example@test.local", mode: "platform" }
+      });
+      expect(platformRegistered.status).toBe(201);
+
+      const enabled = await jsonRequest(supervisorUrl, "/responder/enable", {
+        method: "POST",
+        body: { responder_id: "responder_platform_local_example" }
+      });
+      expect(enabled.status).toBe(200);
+
+      const example = await jsonRequest(supervisorUrl, "/responder/hotlines/example", {
+        method: "POST",
+        body: {}
+      });
+      expect(example.status).toBe(201);
+
+      const catalog = await jsonRequest(supervisorUrl, "/catalog/hotlines");
+      expect(catalog.status).toBe(200);
+      const localExample = catalog.body.items.find(
+        (item) => item.hotline_id === "local.delegated-execution.workspace-summary.v1"
+      );
+      expect(localExample).toBeTruthy();
+      expect(localExample.display_name).toBe("Local Workspace Doctor");
+      expect(localExample.source).toBe("local");
+      expect(localExample.availability_status).toBe("healthy");
+      const hotlineIds = catalog.body.items.map((item) => item.hotline_id);
+      expect(hotlineIds).not.toContain("starlight.creative.studio.v1");
+      expect(hotlineIds).not.toContain("atlas.knowledge.qa.v1");
+      expect(hotlineIds).not.toContain("pixel.product.renderer.v1");
+      const hiddenBootstrapDemo = await jsonRequest(supervisorUrl, "/catalog/hotlines/starlight.creative.studio.v1");
+      expect(hiddenBootstrapDemo.status).toBe(404);
+
+      const started = await jsonRequest(supervisorUrl, "/requests/example", {
+        method: "POST",
+        body: { text: "Check local doctor from platform-mode catalog." }
+      });
+      expect(started.status).toBe(201);
+      expect(started.body.hotline_id).toBe("local.delegated-execution.workspace-summary.v1");
+    } finally {
+      await supervisor.stopManagedServices();
+      await closeServer(supervisor);
+      await closeServer(platformServer);
+      delete process.env.DELEXEC_HOME;
+      delete process.env.PLATFORM_API_BASE_URL;
+      delete process.env.OPS_PORT_SUPERVISOR;
+      delete process.env.OPS_PORT_RELAY;
+      delete process.env.OPS_PORT_CALLER;
+      delete process.env.OPS_PORT_RESPONDER;
+      delete process.env.OPS_PORT_SKILL_ADAPTER;
+      delete process.env.OPS_PORT_MCP_ADAPTER;
+    }
+  });
+
+  it("keeps the local official example in catalog when the platform catalog is unavailable", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "ops-supervisor-platform-catalog-down-"));
+    cleanupDirs.push(opsHome);
+    const [supervisorPort, relayPort, callerPort, responderPort, skillAdapterPort, mcpAdapterPort] = await reserveFreePorts(6);
+    process.env.OPS_PORT_SUPERVISOR = String(supervisorPort);
+    process.env.OPS_PORT_RELAY = String(relayPort);
+    process.env.OPS_PORT_CALLER = String(callerPort);
+    process.env.OPS_PORT_RESPONDER = String(responderPort);
+    process.env.OPS_PORT_SKILL_ADAPTER = String(skillAdapterPort);
+    process.env.OPS_PORT_MCP_ADAPTER = String(mcpAdapterPort);
+    process.env.DELEXEC_HOME = opsHome;
+
+    const platformState = createPlatformState();
+    let platformServer = createPlatformServer({ serviceName: "platform-local-example-catalog-down-test", state: platformState });
+    const platformUrl = await listenServer(platformServer);
+    process.env.PLATFORM_API_BASE_URL = platformUrl;
+
+    const supervisor = createOpsSupervisorServer();
+    supervisor.listen(0, "127.0.0.1");
+    await new Promise((resolve) => supervisor.once("listening", resolve));
+    const supervisorUrl = `http://127.0.0.1:${supervisor.address().port}`;
+    await jsonRequest(supervisorUrl, "/setup", { method: "POST", body: {} });
+    await supervisor.startManagedServices();
+
+    try {
+      await waitFor(async () => {
+        const status = await jsonRequest(supervisorUrl, "/status");
+        if (status.body.runtime.caller.health?.status !== 200 || status.body.runtime.skill_adapter.health?.status !== 200) {
+          throw new Error("runtime_not_ready");
+        }
+        return status;
+      });
+
+      const platformRegistered = await jsonRequest(supervisorUrl, "/auth/register-caller", {
+        method: "POST",
+        body: { contact_email: "ops-platform-catalog-down@test.local", mode: "platform" }
+      });
+      expect(platformRegistered.status).toBe(201);
+
+      const enabled = await jsonRequest(supervisorUrl, "/responder/enable", {
+        method: "POST",
+        body: { responder_id: "responder_platform_catalog_down" }
+      });
+      expect(enabled.status).toBe(200);
+
+      const example = await jsonRequest(supervisorUrl, "/responder/hotlines/example", {
+        method: "POST",
+        body: {}
+      });
+      expect(example.status).toBe(201);
+
+      await closeServer(platformServer);
+      platformServer = null;
+
+      const catalog = await jsonRequest(supervisorUrl, "/catalog/hotlines");
+      expect(catalog.status).toBe(200);
+      const localExample = catalog.body.items.find(
+        (item) => item.hotline_id === "local.delegated-execution.workspace-summary.v1"
+      );
+      expect(localExample).toBeTruthy();
+      expect(localExample.display_name).toBe("Local Workspace Doctor");
+      expect(localExample.source).toBe("local");
+      expect(localExample.availability_status).toBe("healthy");
+    } finally {
+      await supervisor.stopManagedServices();
+      await closeServer(supervisor);
+      if (platformServer) {
+        await closeServer(platformServer);
+      }
+      delete process.env.DELEXEC_HOME;
+      delete process.env.PLATFORM_API_BASE_URL;
+      delete process.env.OPS_PORT_SUPERVISOR;
+      delete process.env.OPS_PORT_RELAY;
+      delete process.env.OPS_PORT_CALLER;
+      delete process.env.OPS_PORT_RESPONDER;
+      delete process.env.OPS_PORT_SKILL_ADAPTER;
+      delete process.env.OPS_PORT_MCP_ADAPTER;
+    }
   });
 
   it("starts relay from an external command instead of a direct package entry", async () => {
