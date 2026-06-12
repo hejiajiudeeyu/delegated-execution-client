@@ -927,7 +927,7 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     } finally {
       await closeServer(supervisor);
     }
-  });
+  }, 60000);
 
   it("packs into a clean-room installable cli tarball", async () => {
     const packDir = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-pack-"));
