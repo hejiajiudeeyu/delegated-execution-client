@@ -13,14 +13,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          path: delegated-execution-client
+      - name: Checkout protocol (local contracts dependency)
+        uses: actions/checkout@v5
+        with:
+          repository: hejiajiudeeyu/delegated-execution-protocol
+          path: protocol
+      - name: Checkout platform (integration test dependency)
+        uses: actions/checkout@v5
+        with:
+          repository: hejiajiudeeyu/delegated-execution-platform-selfhost
+          path: platform
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: delegated-execution-client/package-lock.json
           registry-url: https://registry.npmjs.org
+      - name: Install platform deps (provides @delexec/platform-api and transport-relay for integration tests)
+        run: npm install
+        working-directory: platform
       - run: npm ci
+        working-directory: delegated-execution-client
       - run: npm test
+        working-directory: delegated-execution-client
       - run: npm run test:packages
+        working-directory: delegated-execution-client
       - run: npm publish --workspace "${{ inputs.workspace }}" --access public
+        working-directory: delegated-execution-client
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
