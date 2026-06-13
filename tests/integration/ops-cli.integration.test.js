@@ -1049,4 +1049,68 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     expect(uiStart.code).toBe(1);
     expect(uiStart.stderr || uiStart.stdout).toContain("Ops Console UI requires a source checkout");
   }, 30000);
+
+  it("packs into a globally installable cli tarball", async () => {
+    const packDir = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-global-pack-"));
+    const prefixDir = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-global-prefix-"));
+    cleanupDirs.push(packDir);
+    cleanupDirs.push(prefixDir);
+
+    const packed = await execFileAsync("npm", ["pack", "--workspace", "@delexec/ops"], {
+      cwd: process.cwd(),
+      env: process.env
+    });
+    const tarballName = packed.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .pop();
+    const tarballPath = path.join(process.cwd(), tarballName);
+    const copiedTarballPath = path.join(packDir, tarballName);
+    fs.copyFileSync(tarballPath, copiedTarballPath);
+    fs.rmSync(tarballPath, { force: true });
+
+    const tarballContents = (
+      await execFileAsync("tar", ["-tzf", copiedTarballPath], {
+        cwd: packDir,
+        maxBuffer: 1024 * 1024 * 16
+      })
+    ).stdout.split(/\r?\n/);
+    expect(tarballContents.some((entry) => entry.startsWith("package/node_modules/better-sqlite3/"))).toBe(false);
+
+    const cleanGlobalEnv = {
+      ...process.env,
+      PATH: (process.env.PATH || "")
+        .split(path.delimiter)
+        .filter((entry) => !entry.includes(`node_modules${path.sep}.bin`) && !entry.includes("node_modules/.bin"))
+        .join(path.delimiter)
+    };
+
+    await execFileAsync("npm", ["install", "-g", copiedTarballPath, "--prefix", prefixDir], {
+      cwd: packDir,
+      env: cleanGlobalEnv,
+      maxBuffer: 1024 * 1024 * 16,
+      timeout: 60000
+    });
+
+    const cliPath = path.join(prefixDir, "bin", "delexec-ops");
+    const setup = await execFileAsync(cliPath, ["setup"], {
+      cwd: packDir,
+      env: {
+        ...cleanGlobalEnv,
+        DELEXEC_HOME: path.join(prefixDir, ".ops-home")
+      }
+    });
+    expect(JSON.parse(setup.stdout).ok).toBe(true);
+    const doctor = await execFileAsync(cliPath, ["doctor"], {
+      cwd: packDir,
+      env: {
+        ...cleanGlobalEnv,
+        DELEXEC_HOME: path.join(prefixDir, ".ops-home")
+      }
+    });
+    const output = JSON.parse(doctor.stdout);
+    expect(typeof output.ok).toBe("boolean");
+    expect(output.config.platform.base_url).toBe("http://127.0.0.1:8080");
+  }, 90000);
 });

@@ -1,6 +1,6 @@
 {
   "name": "@delexec/ops",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Unified operator CLI for delegated execution clients",
   "type": "module",
   "bin": {
@@ -19,7 +19,8 @@
     "@delexec/transport-email",
     "@delexec/transport-emailengine",
     "@delexec/transport-gmail",
-    "@delexec/transport-relay-http"
+    "@delexec/transport-relay-http",
+    "prebuild-install"
   ],
   "main": "src/cli.js",
   "exports": {
@@ -46,12 +47,12 @@
   "dependencies": {
     "@delexec/caller-controller": "0.1.0",
     "@delexec/caller-controller-core": "0.1.0",
-    "@delexec/caller-skill-mcp-adapter": "0.1.0",
     "@delexec/caller-skill-adapter": "0.1.0",
+    "@delexec/caller-skill-mcp-adapter": "0.1.0",
     "@delexec/contracts": "^0.1.0",
-    "@delexec/runtime-utils": "0.1.0",
     "@delexec/responder-controller": "0.1.0",
     "@delexec/responder-runtime-core": "0.1.0",
+    "@delexec/runtime-utils": "0.1.0",
     "@delexec/sqlite-store": "0.1.0",
     "@delexec/transport-email": "0.1.0",
     "@delexec/transport-emailengine": "0.1.0",
@@ -59,6 +60,7 @@
     "@delexec/transport-relay-http": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.6.2",
+    "prebuild-install": "^7.1.3",
     "zod": "^4.1.12"
   }
 }

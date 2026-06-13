@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, "..");
+const require = createRequire(import.meta.url);
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -20,6 +22,10 @@ function ensureDir(dirPath) {
 
 function removePath(targetPath) {
   fs.rmSync(targetPath, { recursive: true, force: true });
+}
+
+function packageTargetDir(nodeModulesDir, packageName) {
+  return path.join(nodeModulesDir, ...packageName.split("/"));
 }
 
 function copyDir(sourceDir, targetDir) {
@@ -85,6 +91,70 @@ function workspacePackageIndex() {
   return index;
 }
 
+function resolveInstalledPackageDir(packageName) {
+  const packageJsonPath = require.resolve(`${packageName}/package.json`, {
+    paths: [ROOT_DIR]
+  });
+  return path.dirname(packageJsonPath);
+}
+
+function dependencyNames(manifest) {
+  return [
+    ...Object.keys(manifest.dependencies || {}),
+    ...Object.keys(manifest.optionalDependencies || {})
+  ];
+}
+
+function sanitizeBundledWorkspaceManifest(packageDir) {
+  const packageJsonPath = path.join(packageDir, "package.json");
+  const manifest = readJson(packageJsonPath);
+  delete manifest.dependencies;
+  delete manifest.devDependencies;
+  delete manifest.optionalDependencies;
+  delete manifest.peerDependencies;
+  writeJson(packageJsonPath, manifest);
+}
+
+function stageInstalledPackageClosure(packageName, nodeModulesDir, staged, visited = new Set()) {
+  if (visited.has(packageName)) {
+    return;
+  }
+  visited.add(packageName);
+
+  const sourceDir = resolveInstalledPackageDir(packageName);
+  const manifest = readJson(path.join(sourceDir, "package.json"));
+  const dependencyTargetDir = packageTargetDir(nodeModulesDir, packageName);
+  ensureDir(path.dirname(dependencyTargetDir));
+  removePath(dependencyTargetDir);
+  copyDir(sourceDir, dependencyTargetDir);
+  staged.push(dependencyTargetDir);
+
+  for (const dependencyName of dependencyNames(manifest)) {
+    stageInstalledPackageClosure(dependencyName, nodeModulesDir, staged, visited);
+  }
+}
+
+function stageBinLinks(nodeModulesDir, staged) {
+  const binDir = path.join(nodeModulesDir, ".bin");
+  ensureDir(binDir);
+  for (const packageDir of staged) {
+    const packageJsonPath = path.join(packageDir, "package.json");
+    if (!fs.existsSync(packageJsonPath)) {
+      continue;
+    }
+    const manifest = readJson(packageJsonPath);
+    const binEntries =
+      typeof manifest.bin === "string"
+        ? [[manifest.name.split("/").pop(), manifest.bin]]
+        : Object.entries(manifest.bin || {});
+    for (const [binName, relativeBinPath] of binEntries) {
+      const linkPath = path.join(binDir, binName);
+      removePath(linkPath);
+      fs.symlinkSync(path.relative(binDir, path.join(packageDir, relativeBinPath)), linkPath);
+    }
+  }
+}
+
 function resolveTargetDir() {
   const relativeTarget = process.argv[3] || "apps/ops";
   return path.resolve(ROOT_DIR, relativeTarget);
@@ -105,20 +175,25 @@ function stageBundledWorkspaces(targetDir) {
   const bundledDependencies = Array.isArray(targetManifest.bundleDependencies) ? targetManifest.bundleDependencies : [];
   const workspaceIndex = workspacePackageIndex();
   const staged = [];
-  const { stageMarker } = buildTargetPaths(targetDir);
+  const { stagedNodeModulesDir, stageMarker } = buildTargetPaths(targetDir);
+
+  removePath(stagedNodeModulesDir);
 
   for (const packageName of bundledDependencies) {
     const workspacePackage = workspaceIndex.get(packageName);
-    if (!workspacePackage) {
-      continue;
+    if (workspacePackage) {
+      const dependencyTargetDir = packageTargetDir(stagedNodeModulesDir, packageName);
+      ensureDir(path.dirname(dependencyTargetDir));
+      removePath(dependencyTargetDir);
+      copyDir(workspacePackage.dir, dependencyTargetDir);
+      sanitizeBundledWorkspaceManifest(dependencyTargetDir);
+      staged.push(dependencyTargetDir);
+    } else {
+      stageInstalledPackageClosure(packageName, stagedNodeModulesDir, staged);
     }
-    const segments = packageName.split("/");
-    const dependencyTargetDir = path.join(targetDir, "node_modules", ...segments);
-    ensureDir(path.dirname(dependencyTargetDir));
-    removePath(dependencyTargetDir);
-    copyDir(workspacePackage.dir, dependencyTargetDir);
-    staged.push(dependencyTargetDir);
   }
+
+  stageBinLinks(stagedNodeModulesDir, staged);
 
   writeJson(stageMarker, {
     staged_at: new Date().toISOString(),
