@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -883,6 +884,50 @@ describe("responder-controller integration", () => {
         return item;
       });
       expect(state.heartbeat.last_sent_at).toBeTypeOf("string");
+    } finally {
+      stopHeartbeat();
+      await closeServer(platformServer);
+    }
+  });
+
+  it("preserves platform path prefixes when sending heartbeat", async () => {
+    const responderId = "responder_prefixed_heartbeat";
+    let heartbeatPath = null;
+    const platformServer = http.createServer((req, res) => {
+      if (req.method === "POST" && req.url === `/platform/v1/responders/${responderId}/heartbeat`) {
+        heartbeatPath = req.url;
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ accepted: true, responder_id: responderId }));
+        return;
+      }
+      res.writeHead(404, { "content-type": "text/html; charset=utf-8" });
+      res.end("<html><body>brand site fallback</body></html>");
+    });
+    const platformUrl = `${await listenServer(platformServer)}/platform`;
+    const state = createResponderState({
+      responderId,
+      hotlineIds: ["prefixed.heartbeat.v1"]
+    });
+
+    const stopHeartbeat = startResponderHeartbeatLoop({
+      state,
+      platform: {
+        baseUrl: platformUrl,
+        apiKey: "sk_prefixed_heartbeat",
+        responderId
+      },
+      intervalMs: 50,
+      logger: { warn() {} }
+    });
+
+    try {
+      await waitFor(async () => {
+        if (!state.heartbeat.last_sent_at) {
+          throw new Error("heartbeat_not_sent");
+        }
+        return state.heartbeat.last_sent_at;
+      });
+      expect(heartbeatPath).toBe(`/platform/v1/responders/${responderId}/heartbeat`);
     } finally {
       stopHeartbeat();
       await closeServer(platformServer);

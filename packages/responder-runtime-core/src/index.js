@@ -49,7 +49,9 @@ function sendError(res, statusCode, code, message, { retryable, ...extra } = {})
 }
 
 async function postJson(baseUrl, pathname, { method = "POST", headers = {}, body } = {}) {
-  const response = await fetch(new URL(pathname, baseUrl), {
+  const base = String(baseUrl || "").endsWith("/") ? String(baseUrl) : `${baseUrl}/`;
+  const relativePath = String(pathname || "").replace(/^\/+/, "");
+  const response = await fetch(new URL(relativePath, base), {
     method,
     headers: {
       "content-type": "application/json; charset=utf-8",
