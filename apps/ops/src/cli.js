@@ -151,7 +151,9 @@ function sanitizeIdSegment(value) {
 }
 
 async function requestJson(baseUrl, pathname, { method = "GET", headers = {}, body } = {}) {
-  const response = await fetch(new URL(pathname, baseUrl), {
+  const base = String(baseUrl || "").endsWith("/") ? String(baseUrl) : `${baseUrl}/`;
+  const relativePath = String(pathname || "").replace(/^\/+/, "");
+  const response = await fetch(new URL(relativePath, base), {
     method,
     headers: {
       ...headers,

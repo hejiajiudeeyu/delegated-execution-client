@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -341,6 +342,47 @@ describe("ops cli integration", () => {
         billing_disclosure_url: "https://callanything.xyz/marketplace/responders/cli-register",
         trust_tier: "untrusted"
       });
+    } finally {
+      await closeServer(platformServer);
+    }
+  });
+
+  it("registers against a platform base url with a path prefix", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-prefixed-platform-"));
+    cleanupDirs.push(opsHome);
+    const seenPaths = [];
+    const platformServer = http.createServer((req, res) => {
+      seenPaths.push(req.url);
+      if (req.method === "POST" && req.url === "/platform/v1/users/register") {
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          user_id: "user_prefixed_platform",
+          contact_email: "prefixed@test.local",
+          api_key: "sk_prefixed_platform",
+          roles: ["caller"]
+        }));
+        return;
+      }
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "not_found" }, path: req.url }));
+    });
+    const platformUrl = `${await listenServer(platformServer)}/platform`;
+
+    try {
+      const env = await createIsolatedCliEnv(opsHome);
+      const auth = JSON.parse(
+        (
+          await execFileAsync(
+            process.execPath,
+            [CLI_PATH, "auth", "register", "--email", "prefixed@test.local", "--platform", platformUrl],
+            { env }
+          )
+        ).stdout
+      );
+
+      expect(auth.ok).toBe(true);
+      expect(auth.api_key).toBe("sk_prefixed_platform");
+      expect(seenPaths).toContain("/platform/v1/users/register");
     } finally {
       await closeServer(platformServer);
     }
