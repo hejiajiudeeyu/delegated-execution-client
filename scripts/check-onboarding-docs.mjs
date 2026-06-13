@@ -24,7 +24,25 @@ const requiredCommands = [
   /delexec-ops debug-snapshot|npm run ops -- debug-snapshot/
 ];
 
+const goldenPath = `npm install -g @delexec/ops
+delexec-ops bootstrap --email you@example.com --text "Summarize this bootstrap request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."`;
+
 const errors = [];
+
+function requireInstalledPackageFirst(docPath) {
+  const content = fs.readFileSync(path.join(ROOT, docPath), "utf8");
+  if (!content.includes(goldenPath)) {
+    errors.push(`${docPath}: missing exact installed-package golden path`);
+  }
+
+  const installedIndex = content.indexOf("npm install -g @delexec/ops");
+  const sourceIndex = content.indexOf("npm install\nnpm run ops --");
+  if (installedIndex === -1 || sourceIndex === -1 || installedIndex > sourceIndex) {
+    errors.push(`${docPath}: installed-package golden path must appear before source install path`);
+  }
+}
 
 for (const docPath of docs) {
   const absolute = path.join(ROOT, docPath);
@@ -44,6 +62,9 @@ for (const docPath of docs) {
     errors.push(`${docPath}: missing OPS_PORT_MCP_ADAPTER in isolated port list`);
   }
 }
+
+requireInstalledPackageFirst("README.md");
+requireInstalledPackageFirst("README.zh-CN.md");
 
 if (errors.length) {
   console.error(errors.join("\n"));

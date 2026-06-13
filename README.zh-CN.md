@@ -38,22 +38,27 @@ CALL ANYTHING 是一套面向 **AI Agent 委托外部能力（delegated executio
 
 如果你希望直接让另一个 agent 代你完成安装，请从[Agent 本地安装剧本](docs/current/guides/agent-local-install-playbook.zh-CN.md)开始。
 
-当前官方本地路径包括：
+当前官方本地路径从已发布的 CLI 包开始。`bootstrap` 会准备本地 runtime 和内置 example hotline；随后用 `status` 和 `run-example` 验证同一台机器能完成一次本地自调用。
 
-- `delexec-ops start` 自动拉起 embedded local relay
-- `delexec-ops auth register --local --email <email>`
-- 本地 responder 启用
-- 示例 hotline draft 查看
-- 本地自调用到 `SUCCEEDED`
+```bash
+npm install -g @delexec/ops
+delexec-ops bootstrap --email you@example.com --text "Summarize this bootstrap request."
+delexec-ops status
+delexec-ops run-example --text "Summarize this follow-up request."
+delexec-ops debug-snapshot
+```
 
-如果你是从源码安装，请优先使用仓库根目录的 npm 入口：
+如果你是贡献者或需要从源码拆解流程，请使用仓库根目录的 npm 入口：
 
 ```bash
 npm install
-npm run ops -- start
+npm run ops -- bootstrap --email localtest@example.com --text "Summarize this bootstrap request."
+npm run ops -- status
+npm run ops -- run-example --text "Summarize this follow-up request."
+npm run ops -- debug-snapshot
 ```
 
-在全新 clean-room 环境验证本地模式时，优先使用这条路径，不要先用 `pnpm --filter @delexec/ops exec ...`。
+在全新 clean-room 环境验证本地模式时，优先使用已发布的 `delexec-ops` 路径，不要先用 `pnpm --filter @delexec/ops exec ...`。
 
 机器本地的 hotline 接入配置和 hook 文件应统一放在 `DELEXEC_HOME` 下，不要放进 git 工作区。当前本地运行时使用：
 
