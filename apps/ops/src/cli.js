@@ -29,6 +29,10 @@ const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 const DEFAULT_CONSOLE_PORT = 4173;
 const DEFAULT_UI_READY_TIMEOUT_MS = 120000;
 const OPS_SESSION_HEADER = "X-Ops-Session";
+const FIXED_PRICE_MODEL = "fixed_price";
+const DEFAULT_PRICING_CURRENCY = "PTS";
+const DEFAULT_TRUST_TIER = "untrusted";
+const TRUST_TIERS = Object.freeze(["untrusted", "trusted", "verified"]);
 
 function getOpsSessionFile() {
   return path.join(ensureOpsDirectories(), "run", "session.json");
@@ -44,7 +48,7 @@ function usage() {
   delexec-ops mcp spec
   delexec-ops auth register --email <email> [--local] [--platform <url>]
   delexec-ops enable-responder [--responder-id <id>] [--display-name <name>]
-  delexec-ops add-hotline --type <process|http> --hotline-id <id> [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE]
+  delexec-ops add-hotline --type <process|http> --hotline-id <id> [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE] [--fixed-price-cents <amount>] [--currency <code>] [--billing-disclosure-url <url>]
   delexec-ops attach-project --project-path <path> [--project-name <name>] [--project-description <text>] [--hotline-id <id>] [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE] [--task-type <type>] [--capability <capability>]
   delexec-ops add-example-hotline
   delexec-ops remove-hotline --hotline-id <id>
@@ -247,6 +251,44 @@ function parsePort(value, fallback) {
     return fallback;
   }
   return Math.trunc(parsed);
+}
+
+function parseOptionalNonNegativeInteger(value, fieldName) {
+  if (value === undefined || value === null || value === false) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`${fieldName}_must_be_non_negative_integer`);
+  }
+  return parsed;
+}
+
+function parsePricingHint(args = {}) {
+  const fixedPriceCents = parseOptionalNonNegativeInteger(args["fixed-price-cents"], "fixed_price_cents");
+  if (fixedPriceCents === null) {
+    return undefined;
+  }
+  const maxTotalCents = parseOptionalNonNegativeInteger(args["max-total-cents"], "max_total_cents") ?? fixedPriceCents;
+  if (maxTotalCents < fixedPriceCents) {
+    throw new Error("max_total_cents_must_be_greater_than_or_equal_to_fixed_price_cents");
+  }
+  const trustTier = String(args["trust-tier"] || DEFAULT_TRUST_TIER).trim() || DEFAULT_TRUST_TIER;
+  if (!TRUST_TIERS.includes(trustTier)) {
+    throw new Error("trust_tier_unsupported");
+  }
+  const pricingHint = {
+    pricing_model: FIXED_PRICE_MODEL,
+    currency: String(args.currency || DEFAULT_PRICING_CURRENCY).trim() || DEFAULT_PRICING_CURRENCY,
+    fixed_price_cents: fixedPriceCents,
+    max_total_cents: maxTotalCents,
+    trust_tier: trustTier
+  };
+  const billingDisclosureUrl = String(args["billing-disclosure-url"] || "").trim();
+  if (billingDisclosureUrl) {
+    pricingHint.billing_disclosure_url = billingDisclosureUrl;
+  }
+  return pricingHint;
 }
 
 function resolveUiConfig(args = {}) {
@@ -473,6 +515,7 @@ function parseHotlineDefinition(args) {
       soft_timeout_s: Number(args["soft-timeout-s"] || 60),
       hard_timeout_s: Number(args["hard-timeout-s"] || 180)
     },
+    pricing_hint: parsePricingHint(args),
     review_status: "local_only",
     submitted_for_review: false
   };

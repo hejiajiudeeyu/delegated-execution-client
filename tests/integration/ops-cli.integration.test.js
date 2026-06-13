@@ -259,7 +259,11 @@ describe("ops cli integration", () => {
           "--hotline-id",
           "cli.register.v1",
           "--cmd",
-          "node worker.js"
+          "node worker.js",
+          "--fixed-price-cents",
+          "50",
+          "--billing-disclosure-url",
+          "https://callanything.xyz/marketplace/responders/cli-register"
         ],
         { env }
       );
@@ -293,6 +297,14 @@ describe("ops cli integration", () => {
           }
         }
       };
+      expect(draft.pricing_hint).toMatchObject({
+        pricing_model: "fixed_price",
+        currency: "PTS",
+        fixed_price_cents: 50,
+        max_total_cents: 50,
+        billing_disclosure_url: "https://callanything.xyz/marketplace/responders/cli-register",
+        trust_tier: "untrusted"
+      });
       fs.writeFileSync(draftFile, `${JSON.stringify(draft, null, 2)}\n`);
 
       const enabled = JSON.parse((await execFileAsync(process.execPath, [CLI_PATH, "enable-responder"], { env })).stdout);
@@ -321,6 +333,14 @@ describe("ops cli integration", () => {
       expect(platformState.catalog.get("cli.register.v1").output_summary).toBe(
         "You will receive a concise summary that can be reused in status updates or quick reviews."
       );
+      expect(platformState.catalog.get("cli.register.v1").pricing_hint).toMatchObject({
+        pricing_model: "fixed_price",
+        currency: "PTS",
+        fixed_price_cents: 50,
+        max_total_cents: 50,
+        billing_disclosure_url: "https://callanything.xyz/marketplace/responders/cli-register",
+        trust_tier: "untrusted"
+      });
     } finally {
       await closeServer(platformServer);
     }

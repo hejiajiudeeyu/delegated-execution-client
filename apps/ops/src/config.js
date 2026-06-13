@@ -1027,6 +1027,7 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
         "recommended_for",
         "not_recommended_for",
         "limitations",
+        "pricing_hint",
         "contact_email",
         "support_email"
       ]
@@ -1050,6 +1051,7 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
     recommended_for: Array.isArray(profile.recommended_for) ? profile.recommended_for : [],
     not_recommended_for: Array.isArray(profile.not_recommended_for) ? profile.not_recommended_for : [],
     limitations: Array.isArray(profile.limitations) ? profile.limitations : [],
+    pricing_hint: definition.pricing_hint === undefined ? null : definition.pricing_hint,
     contact_email: fallbackContactEmail,
     support_email: null
   };
@@ -1064,7 +1066,13 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
     display_name: reusableDraft?.display_name || definition.display_name || definition.hotline_id,
     task_types: taskTypes,
     capabilities,
-    tags
+    tags,
+    pricing_hint:
+      definition.pricing_hint === undefined
+        ? reusableDraft?.pricing_hint === undefined
+          ? generated.pricing_hint
+          : reusableDraft.pricing_hint
+        : definition.pricing_hint
   };
 }
 
@@ -1171,6 +1179,7 @@ export function buildHotlineOnboardingBody(state, hotline, responderIdentity) {
       recommended_for: Array.isArray(source.recommended_for) ? source.recommended_for : null,
       not_recommended_for: Array.isArray(source.not_recommended_for) ? source.not_recommended_for : null,
       limitations: Array.isArray(source.limitations) ? source.limitations : null,
+      pricing_hint: source.pricing_hint === undefined ? undefined : source.pricing_hint,
       input_summary: source.input_summary || null,
       output_summary: source.output_summary || null,
       contact_email: source.contact_email || state?.config?.caller?.contact_email || null,
