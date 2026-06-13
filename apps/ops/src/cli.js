@@ -27,6 +27,7 @@ const CLIENT_ROOT = path.resolve(path.dirname(CLI_PATH), "../../..");
 const OPS_CONSOLE_DIR = path.join(CLIENT_ROOT, "apps/ops-console");
 const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 const DEFAULT_CONSOLE_PORT = 4173;
+const DEFAULT_UI_READY_TIMEOUT_MS = 60000;
 const OPS_SESSION_HEADER = "X-Ops-Session";
 
 function getOpsSessionFile() {
@@ -312,7 +313,7 @@ async function waitForUi(url) {
       throw new Error("ui_not_ready");
     }
     return true;
-  }, { timeoutMs: 30000, intervalMs: 500 });
+  }, { timeoutMs: DEFAULT_UI_READY_TIMEOUT_MS, intervalMs: 500 });
 }
 
 function openBrowser(url) {
