@@ -261,8 +261,8 @@ function uiUrl({ host, port }) {
   return `http://${host}:${port}`;
 }
 
-function corepackExecutable() {
-  return process.platform === "win32" ? "corepack.cmd" : "corepack";
+function npmExecutable() {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
 function canLaunchOpsConsoleWorkspace() {
@@ -286,14 +286,12 @@ function buildUiLaunchCommand({ host, port }) {
     );
   }
   return {
-    command: corepackExecutable(),
+    command: npmExecutable(),
     args: [
-      "pnpm",
-      "--dir",
-      CLIENT_ROOT,
-      "--filter",
-      "@delexec/ops-console",
       "exec",
+      "--workspace",
+      "@delexec/ops-console",
+      "--",
       "vite",
       "--host",
       host,
