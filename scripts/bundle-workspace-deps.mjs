@@ -91,9 +91,9 @@ function workspacePackageIndex() {
   return index;
 }
 
-function resolveInstalledPackageDir(packageName) {
+function resolveInstalledPackageDir(packageName, fromDir = ROOT_DIR) {
   const packageJsonPath = require.resolve(`${packageName}/package.json`, {
-    paths: [ROOT_DIR]
+    paths: [fromDir, ROOT_DIR]
   });
   return path.dirname(packageJsonPath);
 }
@@ -115,13 +115,13 @@ function sanitizeBundledWorkspaceManifest(packageDir) {
   writeJson(packageJsonPath, manifest);
 }
 
-function stageInstalledPackageClosure(packageName, nodeModulesDir, staged, visited = new Set()) {
+function stageInstalledPackageClosure(packageName, nodeModulesDir, staged, visited = new Set(), fromDir = ROOT_DIR) {
   if (visited.has(packageName)) {
     return;
   }
   visited.add(packageName);
 
-  const sourceDir = resolveInstalledPackageDir(packageName);
+  const sourceDir = resolveInstalledPackageDir(packageName, fromDir);
   const manifest = readJson(path.join(sourceDir, "package.json"));
   const dependencyTargetDir = packageTargetDir(nodeModulesDir, packageName);
   ensureDir(path.dirname(dependencyTargetDir));
@@ -130,7 +130,7 @@ function stageInstalledPackageClosure(packageName, nodeModulesDir, staged, visit
   staged.push(dependencyTargetDir);
 
   for (const dependencyName of dependencyNames(manifest)) {
-    stageInstalledPackageClosure(dependencyName, nodeModulesDir, staged, visited);
+    stageInstalledPackageClosure(dependencyName, nodeModulesDir, staged, visited, sourceDir);
   }
 }
 
@@ -189,7 +189,7 @@ function stageBundledWorkspaces(targetDir) {
       sanitizeBundledWorkspaceManifest(dependencyTargetDir);
       staged.push(dependencyTargetDir);
     } else {
-      stageInstalledPackageClosure(packageName, stagedNodeModulesDir, staged);
+      stageInstalledPackageClosure(packageName, stagedNodeModulesDir, staged, new Set(), targetDir);
     }
   }
 
