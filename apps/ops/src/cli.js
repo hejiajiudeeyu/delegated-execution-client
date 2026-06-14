@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,6 +15,7 @@ import {
   ensureOpsState,
   ensureResponderIdentity,
   loadHotlineRegistrationDraft,
+  readResolvedOpsSecrets,
   removeHotline,
   saveOpsState,
   setHotlineEnabled,
@@ -33,6 +35,8 @@ const FIXED_PRICE_MODEL = "fixed_price";
 const DEFAULT_PRICING_CURRENCY = "PTS";
 const DEFAULT_TRUST_TIER = "untrusted";
 const TRUST_TIERS = Object.freeze(["untrusted", "trusted", "verified"]);
+const DEFAULT_CALL_HOTLINE_TIMEOUT_MS = 60000;
+const DEFAULT_CALL_HOTLINE_POLL_INTERVAL_MS = 1000;
 
 function getOpsSessionFile() {
   return path.join(ensureOpsDirectories(), "run", "session.json");
@@ -47,6 +51,7 @@ function usage() {
   delexec-ops ui start [--host <host>] [--port <port>] [--open] [--no-browser]
   delexec-ops mcp spec
   delexec-ops auth register --email <email> [--local] [--platform <url>]
+  delexec-ops call-hotline --platform <url> --hotline-id <id> --responder-id <id> [--text <text> | --payload-json <json>] [--request-id <id>] [--max-charge-cents <amount>]
   delexec-ops enable-responder [--responder-id <id>] [--display-name <name>]
   delexec-ops add-hotline --type <process|http> --hotline-id <id> [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE] [--fixed-price-cents <amount>] [--currency <code>] [--billing-disclosure-url <url>]
   delexec-ops attach-project --project-path <path> [--project-name <name>] [--project-description <text>] [--hotline-id <id>] [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE] [--task-type <type>] [--capability <capability>]
@@ -264,6 +269,118 @@ function parseOptionalNonNegativeInteger(value, fieldName) {
     throw new Error(`${fieldName}_must_be_non_negative_integer`);
   }
   return parsed;
+}
+
+function parsePositiveInteger(value, fieldName, fallback) {
+  if (value === undefined || value === null || value === false || value === "") {
+    return fallback;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${fieldName}_must_be_positive_integer`);
+  }
+  return parsed;
+}
+
+function requireStringArg(args, key) {
+  const value = String(args[key] || "").trim();
+  if (!value) {
+    throw new Error(`${key.replace(/-/g, "_")}_required`);
+  }
+  return value;
+}
+
+function parsePayloadArg(args = {}) {
+  if (args["payload-json"] !== undefined && args["payload-json"] !== false) {
+    try {
+      const parsed = JSON.parse(String(args["payload-json"]));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("payload_json_must_be_object");
+      }
+      return parsed;
+    } catch (error) {
+      if (error instanceof Error && error.message === "payload_json_must_be_object") {
+        throw error;
+      }
+      throw new Error("payload_json_invalid");
+    }
+  }
+  return {
+    text: String(args.text || "Run this paid hotline request.").trim()
+  };
+}
+
+function resolveCallerApiKey(state) {
+  const secrets = readResolvedOpsSecrets(state);
+  const apiKey =
+    secrets.caller_api_key ||
+    state.config.caller?.api_key ||
+    state.env.CALLER_PLATFORM_API_KEY ||
+    state.env.PLATFORM_API_KEY ||
+    process.env.CALLER_PLATFORM_API_KEY ||
+    process.env.PLATFORM_API_KEY ||
+    null;
+  if (!apiKey) {
+    throw new Error("caller_platform_api_key_required");
+  }
+  return apiKey;
+}
+
+function buildBearerHeaders(apiKey) {
+  return { Authorization: `Bearer ${apiKey}` };
+}
+
+function normalizeBaseUrl(value, fieldName) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    throw new Error(`${fieldName}_required`);
+  }
+  try {
+    return new URL(raw).toString().replace(/\/+$/, "");
+  } catch {
+    throw new Error(`${fieldName}_invalid`);
+  }
+}
+
+function deriveRelayBaseUrl(platformUrl, args = {}, state = null) {
+  const explicit = String(args.relay || "").trim();
+  if (explicit) {
+    return normalizeBaseUrl(explicit, "relay");
+  }
+  const envRelay =
+    process.env.TRANSPORT_BASE_URL ||
+    state?.env?.TRANSPORT_BASE_URL ||
+    state?.config?.runtime?.transport?.relay_http?.base_url ||
+    "";
+  if (envRelay) {
+    return normalizeBaseUrl(envRelay, "relay");
+  }
+  try {
+    const url = new URL(platformUrl);
+    if (url.hostname === "callanything.xyz" && url.pathname.replace(/\/+$/, "") === "/platform") {
+      url.pathname = "/relay";
+      url.search = "";
+      url.hash = "";
+      return url.toString().replace(/\/+$/, "");
+    }
+  } catch {}
+  return null;
+}
+
+function buildResultDelivery(requestId) {
+  return {
+    kind: "relay_http",
+    address: `local://relay/caller-controller/${requestId}`
+  };
+}
+
+function ensureSuccess(response, expectedStatus, code) {
+  const expected = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus];
+  if (!expected.includes(response.status)) {
+    const upstreamCode = response.body?.error?.code || code;
+    throw new Error(`${code}:${response.status}:${upstreamCode}`);
+  }
+  return response.body;
 }
 
 function parsePricingHint(args = {}) {
@@ -1181,6 +1298,139 @@ async function commandRunExample(args) {
   });
 }
 
+async function commandCallHotline(args) {
+  const state = ensureOpsState();
+  const platformUrl = normalizeBaseUrl(requireStringArg(args, "platform"), "platform");
+  const hotlineId = requireStringArg(args, "hotline-id");
+  const responderId = requireStringArg(args, "responder-id");
+  const requestId = String(args["request-id"] || `req_${crypto.randomUUID()}`).trim();
+  const maxChargeCents = parseOptionalNonNegativeInteger(args["max-charge-cents"], "max_charge_cents") ?? 500;
+  const currency = String(args.currency || DEFAULT_PRICING_CURRENCY).trim() || DEFAULT_PRICING_CURRENCY;
+  const trustTier = String(args["trust-tier"] || DEFAULT_TRUST_TIER).trim() || DEFAULT_TRUST_TIER;
+  if (!TRUST_TIERS.includes(trustTier)) {
+    throw new Error("trust_tier_unsupported");
+  }
+  const callerBaseUrl = normalizeBaseUrl(
+    args["caller-base-url"] || `http://127.0.0.1:${process.env.OPS_PORT_CALLER || state.config.runtime.ports.caller || 8081}`,
+    "caller_base_url"
+  );
+  const relayBaseUrl = deriveRelayBaseUrl(platformUrl, args, state);
+  const pollIntervalMs = parsePositiveInteger(args["poll-interval-ms"], "poll_interval_ms", DEFAULT_CALL_HOTLINE_POLL_INTERVAL_MS);
+  const timeoutMs = parsePositiveInteger(args["timeout-ms"], "timeout_ms", DEFAULT_CALL_HOTLINE_TIMEOUT_MS);
+  const payload = parsePayloadArg(args);
+  const apiKey = resolveCallerApiKey(state);
+  const resultDelivery = buildResultDelivery(requestId);
+  const billing = {
+    acknowledged: true,
+    pricing_model: FIXED_PRICE_MODEL,
+    currency,
+    max_charge_cents: maxChargeCents,
+    trust_tier: trustTier
+  };
+
+  const tokenResponse = await requestJson(platformUrl, "/v1/tokens/task", {
+    method: "POST",
+    headers: buildBearerHeaders(apiKey),
+    body: {
+      request_id: requestId,
+      responder_id: responderId,
+      hotline_id: hotlineId,
+      billing
+    }
+  });
+  const tokenBody = ensureSuccess(tokenResponse, 201, "CALL_HOTLINE_TOKEN_FAILED");
+
+  const deliveryMetaResponse = await requestJson(platformUrl, `/v1/requests/${encodeURIComponent(requestId)}/delivery-meta`, {
+    method: "POST",
+    headers: buildBearerHeaders(apiKey),
+    body: {
+      responder_id: responderId,
+      hotline_id: hotlineId,
+      task_token: tokenBody.task_token,
+      result_delivery: resultDelivery
+    }
+  });
+  const deliveryMeta = ensureSuccess(deliveryMetaResponse, 200, "CALL_HOTLINE_DELIVERY_META_FAILED");
+
+  const createdResponse = await requestJson(callerBaseUrl, "/controller/requests", {
+    method: "POST",
+    body: {
+      request_id: requestId,
+      responder_id: responderId,
+      hotline_id: hotlineId,
+      task_token: tokenBody.task_token,
+      delivery_meta: deliveryMeta,
+      result_delivery: deliveryMeta.result_delivery || resultDelivery,
+      expected_signer_public_key_pem: deliveryMeta.responder_public_key_pem || null,
+      task_input: payload,
+      payload
+    }
+  });
+  const request = ensureSuccess(createdResponse, 201, "CALL_HOTLINE_CREATE_FAILED");
+
+  const dispatchResponse = await requestJson(callerBaseUrl, `/controller/requests/${encodeURIComponent(requestId)}/dispatch`, {
+    method: "POST",
+    body: {
+      payload,
+      task_input: payload,
+      task_token: tokenBody.task_token,
+      result_delivery: deliveryMeta.result_delivery || resultDelivery
+    }
+  });
+  const dispatch = ensureSuccess(dispatchResponse, 202, "CALL_HOTLINE_DISPATCH_FAILED");
+
+  const inbox = await waitFor(async () => {
+    const current = await requestJson(callerBaseUrl, "/controller/inbox/pull", {
+      method: "POST",
+      body: {
+        receiver: "caller-controller"
+      }
+    });
+    if (current.status !== 200 || !Array.isArray(current.body?.accepted) || current.body.accepted.length === 0) {
+      throw new Error("call_hotline_inbox_not_ready");
+    }
+    return current.body;
+  }, { timeoutMs, intervalMs: pollIntervalMs });
+
+  const result = await waitFor(async () => {
+    const current = await requestJson(callerBaseUrl, `/controller/requests/${encodeURIComponent(requestId)}/result`);
+    if (current.status !== 200 || current.body?.available !== true || !current.body?.result_package) {
+      throw new Error("call_hotline_result_not_ready");
+    }
+    return current.body;
+  }, { timeoutMs, intervalMs: pollIntervalMs });
+
+  const eventsResponse = await requestJson(platformUrl, `/v1/requests/${encodeURIComponent(requestId)}/events`, {
+    headers: buildBearerHeaders(apiKey)
+  });
+  const events = ensureSuccess(eventsResponse, 200, "CALL_HOTLINE_EVENTS_FAILED");
+  const balanceResponse = await requestJson(platformUrl, "/v1/tenants/me/balance", {
+    headers: buildBearerHeaders(apiKey)
+  });
+  const balance = ensureSuccess(balanceResponse, 200, "CALL_HOTLINE_BALANCE_FAILED");
+  const ledgerResponse = await requestJson(platformUrl, "/v1/tenants/me/ledger?limit=20", {
+    headers: buildBearerHeaders(apiKey)
+  });
+  const ledger = ensureSuccess(ledgerResponse, 200, "CALL_HOTLINE_LEDGER_FAILED");
+
+  emit({
+    ok: true,
+    request_id: request.request_id,
+    hotline_id: hotlineId,
+    responder_id: responderId,
+    relay_base_url: relayBaseUrl,
+    task_token_present: Boolean(tokenBody.task_token),
+    task_token_claims: tokenBody.claims || null,
+    delivery_meta: deliveryMeta,
+    dispatch,
+    inbox,
+    result,
+    events,
+    balance,
+    ledger
+  });
+}
+
 async function commandBootstrap(args) {
   const steps = [];
   const initialState = ensureOpsState();
@@ -1546,6 +1796,10 @@ async function main() {
   }
   if (group === "run-example") {
     await commandRunExample(args);
+    return;
+  }
+  if (group === "call-hotline") {
+    await commandCallHotline(args);
     return;
   }
   if (group === "auth" && command === "register") {

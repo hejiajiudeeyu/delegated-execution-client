@@ -87,6 +87,12 @@ describe("ops cli integration", () => {
     }
   });
 
+  it("shows the public paid call wrapper in help output", async () => {
+    const help = await execFileAsync(process.execPath, [CLI_PATH, "--help"]);
+    expect(help.stdout).toContain("delexec-ops call-hotline");
+    expect(help.stdout).toContain("--max-charge-cents");
+  });
+
   it("initializes ops config idempotently and adds process/http hotlines", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-home-"));
     cleanupDirs.push(opsHome);
@@ -384,6 +390,276 @@ describe("ops cli integration", () => {
       expect(auth.api_key).toBe("sk_prefixed_platform");
       expect(seenPaths).toContain("/platform/v1/users/register");
     } finally {
+      await closeServer(platformServer);
+    }
+  });
+
+  it("calls a paid hotline through platform token delivery metadata dispatch and result polling", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-call-hotline-"));
+    cleanupDirs.push(opsHome);
+    const requestLog = [];
+    const requestId = "req_ops_paid_cli_1";
+    const apiKey = "sk_paid_cli_secret";
+    const responderPublicKeyPem = "-----BEGIN PUBLIC KEY-----\nfake-public-key\n-----END PUBLIC KEY-----";
+
+    function send(res, statusCode, body) {
+      res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(body));
+    }
+
+    async function readBody(req) {
+      const chunks = [];
+      for await (const chunk of req) {
+        chunks.push(chunk);
+      }
+      return chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    }
+
+    const platformServer = http.createServer(async (req, res) => {
+      const body = req.method === "POST" ? await readBody(req) : null;
+      requestLog.push({ server: "platform", method: req.method, url: req.url, authorization: req.headers.authorization, body });
+
+      if (req.method === "POST" && req.url === "/platform/v1/tokens/task") {
+        expect(req.headers.authorization).toBe(`Bearer ${apiKey}`);
+        expect(body).toMatchObject({
+          request_id: requestId,
+          responder_id: "responder_paid_cli",
+          hotline_id: "paid.summary.v1",
+          billing: {
+            acknowledged: true,
+            pricing_model: "fixed_price",
+            currency: "PTS",
+            max_charge_cents: 750,
+            trust_tier: "untrusted"
+          }
+        });
+        send(res, 201, {
+          task_token: "task_token_paid_cli",
+          claims: {
+            request_id: requestId,
+            responder_id: "responder_paid_cli",
+            hotline_id: "paid.summary.v1",
+            max_charge_cents: 750
+          }
+        });
+        return;
+      }
+
+      if (req.method === "POST" && req.url === `/platform/v1/requests/${requestId}/delivery-meta`) {
+        expect(req.headers.authorization).toBe(`Bearer ${apiKey}`);
+        expect(body).toMatchObject({
+          responder_id: "responder_paid_cli",
+          hotline_id: "paid.summary.v1",
+          task_token: "task_token_paid_cli",
+          result_delivery: {
+            kind: "relay_http",
+            address: `local://relay/caller-controller/${requestId}`
+          }
+        });
+        send(res, 200, {
+          request_id: requestId,
+          responder_id: "responder_paid_cli",
+          hotline_id: "paid.summary.v1",
+          responder_public_key_pem: responderPublicKeyPem,
+          task_delivery: {
+            kind: "relay_http",
+            address: "local://relay/responder_paid_cli",
+            thread_hint: `req:${requestId}`
+          },
+          result_delivery: body.result_delivery,
+          verification: {
+            display_code: "PAIDCLI"
+          }
+        });
+        return;
+      }
+
+      if (req.method === "GET" && req.url === `/platform/v1/requests/${requestId}/events`) {
+        expect(req.headers.authorization).toBe(`Bearer ${apiKey}`);
+        send(res, 200, {
+          request_id: requestId,
+          events: [
+            { event_type: "BILLING_HELD", amount_cents: 750 },
+            { event_type: "COMPLETED" }
+          ],
+          items: [
+            { event_type: "BILLING_HELD", amount_cents: 750 },
+            { event_type: "COMPLETED" }
+          ]
+        });
+        return;
+      }
+
+      if (req.method === "GET" && req.url === "/platform/v1/tenants/me/balance") {
+        expect(req.headers.authorization).toBe(`Bearer ${apiKey}`);
+        send(res, 200, {
+          tenant_id: "caller_paid_cli",
+          balance: {
+            credit_balance_cents: 9250,
+            currency: "PTS"
+          }
+        });
+        return;
+      }
+
+      if (req.method === "GET" && req.url === "/platform/v1/tenants/me/ledger?limit=20") {
+        expect(req.headers.authorization).toBe(`Bearer ${apiKey}`);
+        send(res, 200, {
+          tenant_id: "caller_paid_cli",
+          items: [
+            {
+              kind: "hold",
+              amount_cents: 750,
+              request_id: requestId
+            }
+          ]
+        });
+        return;
+      }
+
+      send(res, 404, { error: { code: "not_found" }, path: req.url });
+    });
+
+    const callerServer = http.createServer(async (req, res) => {
+      const body = req.method === "POST" ? await readBody(req) : null;
+      requestLog.push({ server: "caller", method: req.method, url: req.url, body });
+
+      if (req.method === "POST" && req.url === "/controller/requests") {
+        expect(body).toMatchObject({
+          request_id: requestId,
+          responder_id: "responder_paid_cli",
+          hotline_id: "paid.summary.v1",
+          task_token: "task_token_paid_cli",
+          delivery_meta: {
+            result_delivery: {
+              address: `local://relay/caller-controller/${requestId}`
+            }
+          },
+          expected_signer_public_key_pem: responderPublicKeyPem
+        });
+        send(res, 201, {
+          status: "CREATED",
+          ...body
+        });
+        return;
+      }
+
+      if (req.method === "POST" && req.url === `/controller/requests/${requestId}/dispatch`) {
+        expect(body).toMatchObject({
+          payload: {
+            text: "Summarize paid CLI wrapper."
+          }
+        });
+        send(res, 202, {
+          accepted: true,
+          envelope: {
+            request_id: requestId,
+            to: "local://relay/responder_paid_cli",
+            task_token: "task_token_paid_cli",
+            payload: body.payload
+          },
+          request: {
+            request_id: requestId,
+            status: "SENT"
+          }
+        });
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/controller/inbox/pull") {
+        expect(body).toEqual({ receiver: "caller-controller" });
+        send(res, 200, {
+          accepted: [
+            {
+              request_id: requestId,
+              status: "ok"
+            }
+          ]
+        });
+        return;
+      }
+
+      if (req.method === "GET" && req.url === `/controller/requests/${requestId}/result`) {
+        send(res, 200, {
+          available: true,
+          status: "SUCCEEDED",
+          result_package: {
+            request_id: requestId,
+            status: "ok",
+            output: {
+              summary: "paid cli ok"
+            }
+          }
+        });
+        return;
+      }
+
+      send(res, 404, { error: { code: "not_found" }, path: req.url });
+    });
+
+    const platformUrl = `${await listenServer(platformServer)}/platform`;
+    const callerUrl = await listenServer(callerServer);
+
+    try {
+      const env = {
+        ...(await createIsolatedCliEnv(opsHome)),
+        CALLER_PLATFORM_API_KEY: apiKey
+      };
+
+      const raw = (
+        await execFileAsync(
+          process.execPath,
+          [
+            CLI_PATH,
+            "call-hotline",
+            "--platform",
+            platformUrl,
+            "--caller-base-url",
+            callerUrl,
+            "--request-id",
+            requestId,
+            "--responder-id",
+            "responder_paid_cli",
+            "--hotline-id",
+            "paid.summary.v1",
+            "--text",
+            "Summarize paid CLI wrapper.",
+            "--max-charge-cents",
+            "750",
+            "--poll-interval-ms",
+            "1",
+            "--timeout-ms",
+            "1000"
+          ],
+          { env }
+        )
+      ).stdout;
+      const output = JSON.parse(raw);
+
+      expect(raw).not.toContain(apiKey);
+      expect(output.ok).toBe(true);
+      expect(output.request_id).toBe(requestId);
+      expect(output.task_token_present).toBe(true);
+      expect(output.task_token_claims.max_charge_cents).toBe(750);
+      expect(output.delivery_meta.result_delivery.address).toBe(`local://relay/caller-controller/${requestId}`);
+      expect(output.dispatch.envelope.payload.text).toBe("Summarize paid CLI wrapper.");
+      expect(output.result.result_package.output.summary).toBe("paid cli ok");
+      expect(output.events.events).toHaveLength(2);
+      expect(output.balance.balance.credit_balance_cents).toBe(9250);
+      expect(output.ledger.items[0].request_id).toBe(requestId);
+      expect(requestLog.map((entry) => `${entry.method} ${entry.url}`)).toEqual([
+        "POST /platform/v1/tokens/task",
+        `POST /platform/v1/requests/${requestId}/delivery-meta`,
+        "POST /controller/requests",
+        `POST /controller/requests/${requestId}/dispatch`,
+        "POST /controller/inbox/pull",
+        `GET /controller/requests/${requestId}/result`,
+        `GET /platform/v1/requests/${requestId}/events`,
+        "GET /platform/v1/tenants/me/balance",
+        "GET /platform/v1/tenants/me/ledger?limit=20"
+      ]);
+    } finally {
+      await closeServer(callerServer);
       await closeServer(platformServer);
     }
   });

@@ -1,6 +1,6 @@
 {
   "name": "@delexec/ops",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Unified operator CLI for delegated execution clients",
   "type": "module",
   "bin": {
