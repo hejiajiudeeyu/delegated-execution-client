@@ -115,13 +115,20 @@ function sanitizeBundledWorkspaceManifest(packageDir) {
   writeJson(packageJsonPath, manifest);
 }
 
-function stageInstalledPackageClosure(packageName, nodeModulesDir, staged, visited = new Set(), fromDir = ROOT_DIR) {
+function stageInstalledPackageClosure(
+  packageName,
+  nodeModulesDir,
+  staged,
+  visited = new Set(),
+  fromDir = ROOT_DIR,
+  sourceDirOverride = null
+) {
   if (visited.has(packageName)) {
     return;
   }
   visited.add(packageName);
 
-  const sourceDir = resolveInstalledPackageDir(packageName, fromDir);
+  const sourceDir = sourceDirOverride || resolveInstalledPackageDir(packageName, fromDir);
   const manifest = readJson(path.join(sourceDir, "package.json"));
   const dependencyTargetDir = packageTargetDir(nodeModulesDir, packageName);
   ensureDir(path.dirname(dependencyTargetDir));
@@ -174,13 +181,20 @@ function stageBundledWorkspaces(targetDir) {
   const targetManifest = readJson(path.join(targetDir, "package.json"));
   const bundledDependencies = Array.isArray(targetManifest.bundleDependencies) ? targetManifest.bundleDependencies : [];
   const workspaceIndex = workspacePackageIndex();
+  const bundlePlan = bundledDependencies.map((packageName) => {
+    const workspacePackage = workspaceIndex.get(packageName);
+    return {
+      packageName,
+      workspacePackage,
+      sourceDir: workspacePackage ? null : resolveInstalledPackageDir(packageName, targetDir)
+    };
+  });
   const staged = [];
   const { stagedNodeModulesDir, stageMarker } = buildTargetPaths(targetDir);
 
   removePath(stagedNodeModulesDir);
 
-  for (const packageName of bundledDependencies) {
-    const workspacePackage = workspaceIndex.get(packageName);
+  for (const { packageName, workspacePackage, sourceDir } of bundlePlan) {
     if (workspacePackage) {
       const dependencyTargetDir = packageTargetDir(stagedNodeModulesDir, packageName);
       ensureDir(path.dirname(dependencyTargetDir));
@@ -189,7 +203,7 @@ function stageBundledWorkspaces(targetDir) {
       sanitizeBundledWorkspaceManifest(dependencyTargetDir);
       staged.push(dependencyTargetDir);
     } else {
-      stageInstalledPackageClosure(packageName, stagedNodeModulesDir, staged, new Set(), targetDir);
+      stageInstalledPackageClosure(packageName, stagedNodeModulesDir, staged, new Set(), targetDir, sourceDir);
     }
   }
 
