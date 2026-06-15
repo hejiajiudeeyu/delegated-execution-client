@@ -28,6 +28,7 @@ interface Hotline {
   local_status?: string
   task_types?: string[]
   capabilities?: string[]
+  service_id?: string | null
   tags?: string[]
   adapter?: Record<string, unknown>
   metadata?: { registration?: { draft_file?: string } | null } | null
@@ -52,6 +53,7 @@ interface DraftDocument {
   template_ref?: string
   task_types?: string[]
   capabilities?: string[]
+  service_id?: string | null
   tags?: string[]
   input_summary?: string
   output_summary?: string
@@ -219,6 +221,9 @@ function HotlineRow({
           )}
         </div>
         <p className="text-xs font-mono text-muted-foreground mt-0.5 truncate">{hotline.hotline_id}</p>
+        {hotline.service_id && (
+          <p className="text-xs font-mono text-muted-foreground mt-0.5 truncate">{hotline.service_id}</p>
+        )}
         {hotline.task_types && hotline.task_types.length > 0 && (
           <div className="flex gap-1 mt-1 flex-wrap">
             {hotline.task_types.map((t) => (
@@ -262,7 +267,7 @@ function AddHotlineDialog({
   const [form, setForm] = useState({
     hotline_id: "", display_name: "", adapter_type: "process" as "process" | "http",
     cmd: "", url: "",
-    task_types: "", capabilities: "", tags: "",
+    service_id: "", task_types: "", capabilities: "", tags: "",
     soft_timeout_s: "60", hard_timeout_s: "180",
   })
   const [saving, setSaving] = useState(false)
@@ -279,6 +284,7 @@ function AddHotlineDialog({
       silent: true,
       body: {
         hotline_id: form.hotline_id,
+        service_id: form.service_id.trim() || null,
         display_name: form.display_name || form.hotline_id,
         adapter_type: form.adapter_type,
         adapter,
@@ -295,7 +301,7 @@ function AddHotlineDialog({
     setSaving(false)
     if (res.ok) {
       onAdded(); onClose()
-      setForm({ hotline_id: "", display_name: "", adapter_type: "process", cmd: "", url: "", task_types: "", capabilities: "", tags: "", soft_timeout_s: "60", hard_timeout_s: "180" })
+      setForm({ hotline_id: "", display_name: "", adapter_type: "process", cmd: "", url: "", service_id: "", task_types: "", capabilities: "", tags: "", soft_timeout_s: "60", hard_timeout_s: "180" })
     } else {
       setError(res.error.message)
     }
@@ -314,6 +320,10 @@ function AddHotlineDialog({
           <div className="space-y-1.5">
             <Label>显示名称</Label>
             <Input placeholder="My Hotline" value={form.display_name} onChange={(e) => patch("display_name", e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Service ID</Label>
+            <Input placeholder="mineru.document.parse.v1" value={form.service_id} onChange={(e) => patch("service_id", e.target.value)} />
           </div>
           <div className="space-y-1.5">
             <Label>Adapter 类型</Label>
@@ -563,6 +573,10 @@ export function ResponderHotlinesPage() {
                         </DraftSection>
                         <DraftSection title="Binding">
                           <div className="space-y-2 text-sm">
+                            <div>
+                              <p className="text-muted-foreground">Service ID</p>
+                              <p className="break-all font-mono text-xs">{draftDoc.service_id ?? "—"}</p>
+                            </div>
                             <div>
                               <p className="text-muted-foreground">Template Ref</p>
                               <p className="break-all font-mono text-xs">{draftDoc.template_ref ?? "—"}</p>

@@ -2,7 +2,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import { CatalogPage } from "../../apps/ops-console/src/pages/caller/CatalogPage";
@@ -291,5 +291,64 @@ describe("CatalogPage", () => {
     expect(screen.queryByText("发送调用")).toBeTruthy();
     consoleWatch.expectClean();
     consoleWatch.restore();
+  });
+
+  it("submits logical service calls from the catalog drawer by default", async () => {
+    const item = hotline({
+      service_id: "mineru.document.parse.v1",
+      capabilities: ["document.parse.pdf"],
+      task_types: ["document_parse"],
+      input_schema: {
+        required: ["text"],
+        properties: {
+          text: {
+            type: "string",
+            description: "PDF text or URL",
+          },
+        },
+      },
+    });
+    let confirmBody: Record<string, unknown> | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/auth/session") return jsonResponse({ recoverable_session: { token: "tok" } });
+        if (url.startsWith("/catalog/hotlines/")) return jsonResponse(item);
+        if (url.startsWith("/catalog/hotlines")) return jsonResponse({ items: [item] });
+        if (url === "/calls/confirm" && init?.method === "POST") {
+          confirmBody = JSON.parse(String(init.body));
+          return jsonResponse({ request_id: "req_service_console_1" }, 201);
+        }
+        return jsonResponse({}, 404);
+      }),
+    );
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.queryByText(/试拨当前 Hotline/)).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText(/试拨当前 Hotline/).closest("button")!);
+    await waitFor(() => {
+      expect(screen.queryByText(/试拨 · Foxlab Text Classifier/)).toBeTruthy();
+    });
+    expect(screen.queryByText("池模式")).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("PDF text or URL"), { target: { value: "Parse this PDF" } });
+    fireEvent.click(screen.getByText("发送调用").closest("button")!);
+
+    await waitFor(() => {
+      expect(confirmBody).toMatchObject({
+        service_id: "mineru.document.parse.v1",
+        capability: "document.parse.pdf",
+        task_type: "document_parse",
+        input: { text: "Parse this PDF" },
+      });
+    });
+    expect(confirmBody?.responder_id).toBeUndefined();
+    expect(confirmBody?.hotline_id).toBeUndefined();
+    expect(toastCalls.some((call) => call.level === "success")).toBe(true);
   });
 });

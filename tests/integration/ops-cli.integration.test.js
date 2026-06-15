@@ -118,6 +118,8 @@ describe("ops cli integration", () => {
             "process",
             "--hotline-id",
             "cli.process.v1",
+            "--service-id",
+            "mineru.document.parse.v1",
             "--cmd",
             "node worker.js",
             "--cwd",
@@ -167,6 +169,7 @@ describe("ops cli integration", () => {
     expect(envText).toContain("HOTLINE_IDS=cli.process.v1,cli.http.v1");
     expect(config.responder.hotlines).toHaveLength(2);
     expect(config.responder.hotlines[0].adapter_type).toBe("process");
+    expect(config.responder.hotlines[0].service_id).toBe("mineru.document.parse.v1");
     expect(config.responder.hotlines[1].adapter_type).toBe("http");
     expect(processAdded.local_integration_file).toBe(processIntegrationFile);
     expect(processAdded.local_hook_file).toBe(processHookFile);
@@ -174,12 +177,16 @@ describe("ops cli integration", () => {
     expect(fs.existsSync(processIntegrationFile)).toBe(true);
     expect(fs.existsSync(processHookFile)).toBe(true);
     expect(fs.existsSync(httpIntegrationFile)).toBe(true);
-    expect(JSON.parse(fs.readFileSync(processIntegrationFile, "utf8")).adapter.cmd).toBe("node worker.js");
-    expect(JSON.parse(fs.readFileSync(processIntegrationFile, "utf8")).adapter.cwd).toBe(workerCwd);
-    expect(JSON.parse(fs.readFileSync(processIntegrationFile, "utf8")).adapter.env).toEqual({
+    const processIntegration = JSON.parse(fs.readFileSync(processIntegrationFile, "utf8"));
+    const processDraft = JSON.parse(fs.readFileSync(path.join(opsHome, "hotline-registration-drafts", "cli.process.v1.registration.json"), "utf8"));
+    expect(processIntegration.service_id).toBe("mineru.document.parse.v1");
+    expect(processIntegration.adapter.cmd).toBe("node worker.js");
+    expect(processIntegration.adapter.cwd).toBe(workerCwd);
+    expect(processIntegration.adapter.env).toEqual({
       PROCESS_MODE: "worker",
       PROCESS_PROFILE: "mineru_like"
     });
+    expect(processDraft.service_id).toBe("mineru.document.parse.v1");
     expect(JSON.parse(fs.readFileSync(httpIntegrationFile, "utf8")).adapter.url).toBe("http://127.0.0.1:9191/invoke");
   });
 
@@ -650,6 +657,426 @@ describe("ops cli integration", () => {
       expect(requestLog.map((entry) => `${entry.method} ${entry.url}`)).toEqual([
         "POST /platform/v1/tokens/task",
         `POST /platform/v1/requests/${requestId}/delivery-meta`,
+        "POST /controller/requests",
+        `POST /controller/requests/${requestId}/dispatch`,
+        "POST /controller/inbox/pull",
+        `GET /controller/requests/${requestId}/result`,
+        `GET /platform/v1/requests/${requestId}/events`,
+        "GET /platform/v1/tenants/me/balance",
+        "GET /platform/v1/tenants/me/ledger?limit=20"
+      ]);
+    } finally {
+      await closeServer(callerServer);
+      await closeServer(platformServer);
+    }
+  });
+
+  it("calls a paid logical service through platform-side service resolution", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-call-service-"));
+    cleanupDirs.push(opsHome);
+    const requestLog = [];
+    const requestId = "req_ops_paid_service_1";
+    const apiKey = "sk_paid_service_secret";
+    const responderPublicKeyPem = "-----BEGIN PUBLIC KEY-----\nfake-public-key\n-----END PUBLIC KEY-----";
+
+    function send(res, statusCode, body) {
+      res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(body));
+    }
+
+    async function readBody(req) {
+      const chunks = [];
+      for await (const chunk of req) {
+        chunks.push(chunk);
+      }
+      return chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    }
+
+    const platformServer = http.createServer(async (req, res) => {
+      const body = req.method === "POST" ? await readBody(req) : null;
+      requestLog.push({ server: "platform", method: req.method, url: req.url, authorization: req.headers.authorization, body });
+
+      if (req.method === "POST" && req.url === "/platform/v1/service-resolutions") {
+        expect(req.headers.authorization).toBe(`Bearer ${apiKey}`);
+        expect(body).toMatchObject({
+          request_id: requestId,
+          service_id: "mineru.document.parse.v1",
+          capability: "document.parse.pdf",
+          task_type: "document_parse",
+          billing: {
+            acknowledged: true,
+            pricing_model: "fixed_price",
+            currency: "PTS",
+            max_charge_cents: 900,
+            trust_tier: "untrusted"
+          },
+          result_delivery: {
+            kind: "relay_http",
+            address: `local://relay/caller-controller/${requestId}`
+          }
+        });
+        send(res, 201, {
+          selected: {
+            service_id: "mineru.document.parse.v1",
+            capability: "document.parse.pdf",
+            responder_id: "responder_mineru_b",
+            hotline_id: "mineru.machine-b.parse.v1",
+            selection_reason: "healthy_deterministic"
+          },
+          task_token: "task_token_paid_service",
+          claims: {
+            request_id: requestId,
+            responder_id: "responder_mineru_b",
+            hotline_id: "mineru.machine-b.parse.v1",
+            max_charge_cents: 900
+          },
+          delivery_meta: {
+            request_id: requestId,
+            responder_id: "responder_mineru_b",
+            hotline_id: "mineru.machine-b.parse.v1",
+            responder_public_key_pem: responderPublicKeyPem,
+            task_delivery: {
+              kind: "relay_http",
+              address: "local://relay/responder_mineru_b",
+              thread_hint: `req:${requestId}`
+            },
+            result_delivery: body.result_delivery,
+            verification: {
+              display_code: "SVC001"
+            }
+          }
+        });
+        return;
+      }
+
+      if (req.method === "GET" && req.url === `/platform/v1/requests/${requestId}/events`) {
+        send(res, 200, { request_id: requestId, events: [{ event_type: "COMPLETED" }], items: [{ event_type: "COMPLETED" }] });
+        return;
+      }
+      if (req.method === "GET" && req.url === "/platform/v1/tenants/me/balance") {
+        send(res, 200, { balance: { credit_balance_cents: 9100, currency: "PTS" } });
+        return;
+      }
+      if (req.method === "GET" && req.url === "/platform/v1/tenants/me/ledger?limit=20") {
+        send(res, 200, { items: [{ kind: "hold", amount_cents: 900, request_id: requestId }] });
+        return;
+      }
+      send(res, 404, { error: { code: "not_found" }, path: req.url });
+    });
+
+    const callerServer = http.createServer(async (req, res) => {
+      const body = req.method === "POST" ? await readBody(req) : null;
+      requestLog.push({ server: "caller", method: req.method, url: req.url, body });
+
+      if (req.method === "POST" && req.url === "/controller/requests") {
+        expect(body).toMatchObject({
+          request_id: requestId,
+          service_id: "mineru.document.parse.v1",
+          capability: "document.parse.pdf",
+          task_type: "document_parse",
+          responder_id: "responder_mineru_b",
+          hotline_id: "mineru.machine-b.parse.v1",
+          task_token: "task_token_paid_service",
+          expected_signer_public_key_pem: responderPublicKeyPem
+        });
+        send(res, 201, { status: "CREATED", ...body });
+        return;
+      }
+      if (req.method === "POST" && req.url === `/controller/requests/${requestId}/dispatch`) {
+        send(res, 202, {
+          accepted: true,
+          envelope: {
+            request_id: requestId,
+            responder_id: "responder_mineru_b",
+            hotline_id: "mineru.machine-b.parse.v1",
+            task_token: "task_token_paid_service",
+            payload: body.payload
+          },
+          request: { request_id: requestId, status: "SENT" }
+        });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/controller/inbox/pull") {
+        send(res, 200, { accepted: [{ request_id: requestId, status: "ok" }] });
+        return;
+      }
+      if (req.method === "GET" && req.url === `/controller/requests/${requestId}/result`) {
+        send(res, 200, {
+          available: true,
+          status: "SUCCEEDED",
+          result_package: {
+            request_id: requestId,
+            status: "ok",
+            output: { summary: "service cli ok" }
+          }
+        });
+        return;
+      }
+      send(res, 404, { error: { code: "not_found" }, path: req.url });
+    });
+
+    const platformUrl = `${await listenServer(platformServer)}/platform`;
+    const callerUrl = await listenServer(callerServer);
+
+    try {
+      const env = {
+        ...(await createIsolatedCliEnv(opsHome)),
+        CALLER_PLATFORM_API_KEY: apiKey
+      };
+
+      const raw = (
+        await execFileAsync(
+          process.execPath,
+          [
+            CLI_PATH,
+            "call-hotline",
+            "--platform",
+            platformUrl,
+            "--caller-base-url",
+            callerUrl,
+            "--request-id",
+            requestId,
+            "--service-id",
+            "mineru.document.parse.v1",
+            "--capability",
+            "document.parse.pdf",
+            "--task-type",
+            "document_parse",
+            "--text",
+            "Parse this PDF.",
+            "--max-charge-cents",
+            "900",
+            "--poll-interval-ms",
+            "1",
+            "--timeout-ms",
+            "1000"
+          ],
+          { env }
+        )
+      ).stdout;
+      const output = JSON.parse(raw);
+
+      expect(raw).not.toContain(apiKey);
+      expect(output.ok).toBe(true);
+      expect(output.service_id).toBe("mineru.document.parse.v1");
+      expect(output.capability).toBe("document.parse.pdf");
+      expect(output.selected).toMatchObject({
+        responder_id: "responder_mineru_b",
+        hotline_id: "mineru.machine-b.parse.v1"
+      });
+      expect(output.task_token_claims).toMatchObject({
+        responder_id: "responder_mineru_b",
+        hotline_id: "mineru.machine-b.parse.v1"
+      });
+      expect(output.result.result_package.output.summary).toBe("service cli ok");
+      expect(requestLog.map((entry) => `${entry.method} ${entry.url}`)).toEqual([
+        "POST /platform/v1/service-resolutions",
+        "POST /controller/requests",
+        `POST /controller/requests/${requestId}/dispatch`,
+        "POST /controller/inbox/pull",
+        `GET /controller/requests/${requestId}/result`,
+        `GET /platform/v1/requests/${requestId}/events`,
+        "GET /platform/v1/tenants/me/balance",
+        "GET /platform/v1/tenants/me/ledger?limit=20"
+      ]);
+    } finally {
+      await closeServer(callerServer);
+      await closeServer(platformServer);
+    }
+  });
+
+  it("calls a paid logical capability through platform-side service resolution", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-call-capability-"));
+    cleanupDirs.push(opsHome);
+    const requestLog = [];
+    const requestId = "req_ops_paid_capability_1";
+    const apiKey = "sk_paid_capability_secret";
+    const responderPublicKeyPem = "-----BEGIN PUBLIC KEY-----\nfake-public-key\n-----END PUBLIC KEY-----";
+
+    function send(res, statusCode, body) {
+      res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(body));
+    }
+
+    async function readBody(req) {
+      const chunks = [];
+      for await (const chunk of req) {
+        chunks.push(chunk);
+      }
+      return chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    }
+
+    const platformServer = http.createServer(async (req, res) => {
+      const body = req.method === "POST" ? await readBody(req) : null;
+      requestLog.push({ server: "platform", method: req.method, url: req.url, authorization: req.headers.authorization, body });
+
+      if (req.method === "POST" && req.url === "/platform/v1/service-resolutions") {
+        expect(req.headers.authorization).toBe(`Bearer ${apiKey}`);
+        expect(body).toMatchObject({
+          request_id: requestId,
+          capability: "document.parse.pdf",
+          task_type: "document_parse",
+          billing: {
+            acknowledged: true,
+            pricing_model: "fixed_price",
+            currency: "PTS",
+            max_charge_cents: 500,
+            trust_tier: "untrusted"
+          },
+          result_delivery: {
+            kind: "relay_http",
+            address: `local://relay/caller-controller/${requestId}`
+          }
+        });
+        expect(body.service_id).toBeUndefined();
+        send(res, 201, {
+          selected: {
+            service_id: "mineru.document.parse.v1",
+            capability: "document.parse.pdf",
+            responder_id: "responder_mineru_capability",
+            hotline_id: "mineru.capability.parse.v1",
+            selection_reason: "healthy_deterministic"
+          },
+          task_token: "task_token_paid_capability",
+          claims: {
+            request_id: requestId,
+            responder_id: "responder_mineru_capability",
+            hotline_id: "mineru.capability.parse.v1",
+            max_charge_cents: 500
+          },
+          delivery_meta: {
+            request_id: requestId,
+            responder_id: "responder_mineru_capability",
+            hotline_id: "mineru.capability.parse.v1",
+            responder_public_key_pem: responderPublicKeyPem,
+            task_delivery: {
+              kind: "relay_http",
+              address: "local://relay/responder_mineru_capability",
+              thread_hint: `req:${requestId}`
+            },
+            result_delivery: body.result_delivery,
+            verification: {
+              display_code: "CAP001"
+            }
+          }
+        });
+        return;
+      }
+
+      if (req.method === "GET" && req.url === `/platform/v1/requests/${requestId}/events`) {
+        send(res, 200, { request_id: requestId, events: [{ event_type: "COMPLETED" }], items: [{ event_type: "COMPLETED" }] });
+        return;
+      }
+      if (req.method === "GET" && req.url === "/platform/v1/tenants/me/balance") {
+        send(res, 200, { balance: { credit_balance_cents: 9500, currency: "PTS" } });
+        return;
+      }
+      if (req.method === "GET" && req.url === "/platform/v1/tenants/me/ledger?limit=20") {
+        send(res, 200, { items: [{ kind: "hold", amount_cents: 500, request_id: requestId }] });
+        return;
+      }
+      send(res, 404, { error: { code: "not_found" }, path: req.url });
+    });
+
+    const callerServer = http.createServer(async (req, res) => {
+      const body = req.method === "POST" ? await readBody(req) : null;
+      requestLog.push({ server: "caller", method: req.method, url: req.url, body });
+
+      if (req.method === "POST" && req.url === "/controller/requests") {
+        expect(body).toMatchObject({
+          request_id: requestId,
+          capability: "document.parse.pdf",
+          task_type: "document_parse",
+          responder_id: "responder_mineru_capability",
+          hotline_id: "mineru.capability.parse.v1",
+          task_token: "task_token_paid_capability",
+          expected_signer_public_key_pem: responderPublicKeyPem
+        });
+        expect(body.service_id).toBeUndefined();
+        send(res, 201, { status: "CREATED", ...body });
+        return;
+      }
+      if (req.method === "POST" && req.url === `/controller/requests/${requestId}/dispatch`) {
+        send(res, 202, {
+          accepted: true,
+          envelope: {
+            request_id: requestId,
+            responder_id: "responder_mineru_capability",
+            hotline_id: "mineru.capability.parse.v1",
+            task_token: "task_token_paid_capability",
+            payload: body.payload
+          },
+          request: { request_id: requestId, status: "SENT" }
+        });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/controller/inbox/pull") {
+        send(res, 200, { accepted: [{ request_id: requestId, status: "ok" }] });
+        return;
+      }
+      if (req.method === "GET" && req.url === `/controller/requests/${requestId}/result`) {
+        send(res, 200, {
+          available: true,
+          status: "SUCCEEDED",
+          result_package: {
+            request_id: requestId,
+            status: "ok",
+            output: { summary: "capability cli ok" }
+          }
+        });
+        return;
+      }
+      send(res, 404, { error: { code: "not_found" }, path: req.url });
+    });
+
+    const platformUrl = `${await listenServer(platformServer)}/platform`;
+    const callerUrl = await listenServer(callerServer);
+
+    try {
+      const env = {
+        ...(await createIsolatedCliEnv(opsHome)),
+        CALLER_PLATFORM_API_KEY: apiKey
+      };
+
+      const raw = (
+        await execFileAsync(
+          process.execPath,
+          [
+            CLI_PATH,
+            "call-hotline",
+            "--platform",
+            platformUrl,
+            "--caller-base-url",
+            callerUrl,
+            "--request-id",
+            requestId,
+            "--capability",
+            "document.parse.pdf",
+            "--task-type",
+            "document_parse",
+            "--text",
+            "Parse this PDF.",
+            "--poll-interval-ms",
+            "1",
+            "--timeout-ms",
+            "1000"
+          ],
+          { env }
+        )
+      ).stdout;
+      const output = JSON.parse(raw);
+
+      expect(raw).not.toContain(apiKey);
+      expect(output.ok).toBe(true);
+      expect(output.service_id).toBe(null);
+      expect(output.capability).toBe("document.parse.pdf");
+      expect(output.selected).toMatchObject({
+        responder_id: "responder_mineru_capability",
+        hotline_id: "mineru.capability.parse.v1"
+      });
+      expect(output.result.result_package.output.summary).toBe("capability cli ok");
+      expect(requestLog.map((entry) => `${entry.method} ${entry.url}`)).toEqual([
+        "POST /platform/v1/service-resolutions",
         "POST /controller/requests",
         `POST /controller/requests/${requestId}/dispatch`,
         "POST /controller/inbox/pull",

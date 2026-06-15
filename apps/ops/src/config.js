@@ -732,6 +732,7 @@ function buildHotlineLocalIntegration(definition = {}) {
     timeouts: definition.timeouts || null,
     task_types: ensureStringList(definition.task_types),
     capabilities: ensureStringList(definition.capabilities),
+    service_id: definition.service_id || null,
     tags: ensureStringList(definition.tags),
     project: definition?.metadata?.project || null,
     note: "Machine-local hotline integration config. Keep responder-specific commands, URLs, paths, and hook references here instead of inside git-tracked files."
@@ -1033,6 +1034,7 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
       ]
     },
     hotline_id: definition.hotline_id,
+    service_id: definition.service_id || null,
     display_name: definition.display_name || definition.hotline_id,
     description: profile.description,
     summary: profile.summary,
@@ -1063,6 +1065,7 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
       ...(reusableDraft?.draft_meta || {})
     },
     hotline_id: definition.hotline_id,
+    service_id: definition.service_id || reusableDraft?.service_id || null,
     display_name: reusableDraft?.display_name || definition.display_name || definition.hotline_id,
     task_types: taskTypes,
     capabilities,
@@ -1162,6 +1165,7 @@ export function buildHotlineOnboardingBody(state, hotline, responderIdentity) {
     body: {
       responder_id: responderIdentity.responder_id,
       hotline_id: hotline.hotline_id,
+      service_id: source.service_id || hotline.service_id || null,
       display_name: source.display_name || hotline.display_name || hotline.hotline_id,
       responder_public_key_pem: responderIdentity.public_key_pem,
       description: source.description || null,

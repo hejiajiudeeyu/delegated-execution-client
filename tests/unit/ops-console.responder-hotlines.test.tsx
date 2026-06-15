@@ -2,7 +2,7 @@
 
 import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 
 import { ResponderHotlinesPage } from "../../apps/ops-console/src/pages/responder/ResponderHotlinesPage"
@@ -115,5 +115,40 @@ describe("ResponderHotlinesPage", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(screen.getByText("Local Example Summary")).toBeTruthy()
+  })
+
+  it("submits service_id when adding a hotline", async () => {
+    let createdBody: Record<string, unknown> | null = null
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url === "/responder/hotlines" && init?.method === "POST") {
+        createdBody = JSON.parse(String(init.body))
+        return jsonResponse({ ok: true, ...createdBody }, 201)
+      }
+      if (url === "/responder/hotlines") {
+        return jsonResponse({ platform_enabled: false, items: [] })
+      }
+      return jsonResponse({}, 404)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    fireEvent.click(await screen.findByRole("button", { name: "添加" }))
+    fireEvent.change(screen.getByPlaceholderText("my-org.my-skill.v1"), { target: { value: "mineru.machine-a.parse.v1" } })
+    fireEvent.change(screen.getByPlaceholderText("mineru.document.parse.v1"), { target: { value: "mineru.document.parse.v1" } })
+    fireEvent.change(screen.getByPlaceholderText("node ./worker.js"), { target: { value: "node worker.js" } })
+    fireEvent.change(screen.getByPlaceholderText("text_summarize, code_review"), { target: { value: "document_parse" } })
+    fireEvent.change(screen.getByPlaceholderText("text.summarize, code.review"), { target: { value: "document.parse.pdf" } })
+    fireEvent.click(screen.getByRole("button", { name: "添加" }))
+
+    await waitFor(() => {
+      expect(createdBody).toMatchObject({
+        hotline_id: "mineru.machine-a.parse.v1",
+        service_id: "mineru.document.parse.v1",
+        task_types: ["document_parse"],
+        capabilities: ["document.parse.pdf"]
+      })
+    })
   })
 })

@@ -394,6 +394,212 @@ describe("caller-controller integration", () => {
     }
   });
 
+  it("prepares requests through platform-side service resolution", async () => {
+    const platformState = createPlatformState();
+    const platformServer = createPlatformServer({ serviceName: "platform-caller-service-resolve-test", state: platformState });
+    const platformUrl = await listenServer(platformServer);
+
+    const registered = await jsonRequest(platformUrl, "/v1/users/register", {
+      method: "POST",
+      body: { contact_email: "caller-service-resolve@test.local" }
+    });
+    const callerAuth = {
+      Authorization: `Bearer ${registered.body.api_key}`
+    };
+    const responderRegistration = await jsonRequest(platformUrl, "/v2/responders/register", {
+      method: "POST",
+      headers: callerAuth,
+      body: {
+        responder_id: "responder_client_mineru",
+        hotline_id: "client.mineru.parse.v1",
+        service_id: "mineru.document.parse.v1",
+        display_name: "Client MinerU Parser",
+        responder_public_key_pem: platformState.bootstrap.responders[0].signing.publicKeyPem,
+        task_types: ["document_parse"],
+        capabilities: ["document.parse.pdf"]
+      }
+    });
+    expect(responderRegistration.status).toBe(201);
+    expect(
+      (
+        await jsonRequest(platformUrl, "/v2/admin/responders/responder_client_mineru/approve", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${platformState.adminApiKey}` }
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await jsonRequest(platformUrl, "/v2/admin/hotlines/client.mineru.parse.v1/approve", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${platformState.adminApiKey}` }
+        })
+      ).status
+    ).toBe(200);
+
+    const callerServer = createCallerControllerCoreServer({
+      serviceName: "caller-controller-service-resolve-test",
+      platform: {
+        baseUrl: platformUrl,
+        apiKey: registered.body.api_key
+      }
+    });
+    const callerUrl = await listenServer(callerServer);
+
+    try {
+      const requestId = "req_caller_service_resolve_1";
+      const created = await jsonRequest(callerUrl, "/controller/requests", {
+        method: "POST",
+        body: {
+          request_id: requestId,
+          service_id: "mineru.document.parse.v1",
+          capability: "document.parse.pdf",
+          task_type: "document_parse"
+        }
+      });
+      expect(created.status).toBe(201);
+
+      const prepared = await jsonRequest(callerUrl, `/controller/requests/${requestId}/prepare`, {
+        method: "POST",
+        body: {
+          result_delivery: {
+            kind: "local",
+            address: "caller-controller"
+          }
+        }
+      });
+      expect(prepared.status).toBe(200);
+      expect(prepared.body.selected).toMatchObject({
+        service_id: "mineru.document.parse.v1",
+        responder_id: "responder_client_mineru",
+        hotline_id: "client.mineru.parse.v1"
+      });
+      expect(prepared.body.claims).toMatchObject({
+        request_id: requestId,
+        responder_id: "responder_client_mineru",
+        hotline_id: "client.mineru.parse.v1"
+      });
+      expect(prepared.body.request).toMatchObject({
+        request_id: requestId,
+        service_id: "mineru.document.parse.v1",
+        capability: "document.parse.pdf",
+        responder_id: "responder_client_mineru",
+        hotline_id: "client.mineru.parse.v1",
+        status: "PREPARED"
+      });
+    } finally {
+      await closeServer(callerServer);
+      await closeServer(platformServer);
+    }
+  });
+
+  it("dispatches remote requests through platform-side service resolution", async () => {
+    const platformState = createPlatformState();
+    const platformServer = createPlatformServer({ serviceName: "platform-caller-service-dispatch-test", state: platformState });
+    const platformUrl = await listenServer(platformServer);
+
+    const registered = await jsonRequest(platformUrl, "/v1/users/register", {
+      method: "POST",
+      body: { contact_email: "caller-service-dispatch@test.local" }
+    });
+    const callerAuth = {
+      Authorization: `Bearer ${registered.body.api_key}`
+    };
+    const responderRegistration = await jsonRequest(platformUrl, "/v2/responders/register", {
+      method: "POST",
+      headers: callerAuth,
+      body: {
+        responder_id: "responder_client_mineru_dispatch",
+        hotline_id: "client.mineru.dispatch.parse.v1",
+        service_id: "mineru.document.dispatch.parse.v1",
+        display_name: "Client MinerU Dispatch Parser",
+        responder_public_key_pem: platformState.bootstrap.responders[0].signing.publicKeyPem,
+        task_delivery_address: "local://relay/responder_client_mineru_dispatch/client.mineru.dispatch.parse.v1",
+        task_types: ["document_parse"],
+        capabilities: ["document.parse.pdf"]
+      }
+    });
+    expect(responderRegistration.status).toBe(201);
+    expect(
+      (
+        await jsonRequest(platformUrl, "/v2/admin/responders/responder_client_mineru_dispatch/approve", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${platformState.adminApiKey}` }
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await jsonRequest(platformUrl, "/v2/admin/hotlines/client.mineru.dispatch.parse.v1/approve", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${platformState.adminApiKey}` }
+        })
+      ).status
+    ).toBe(200);
+
+    const hub = createLocalTransportHub();
+    const callerTransport = createLocalTransportAdapter({ hub, receiver: "caller-controller" });
+    const responderTransport = createLocalTransportAdapter({ hub, receiver: "responder_client_mineru_dispatch" });
+    const callerServer = createCallerControllerCoreServer({
+      serviceName: "caller-controller-service-dispatch-test",
+      transport: callerTransport,
+      platform: {
+        baseUrl: platformUrl,
+        apiKey: registered.body.api_key
+      }
+    });
+    const callerUrl = await listenServer(callerServer);
+
+    try {
+      const requestId = "req_caller_service_dispatch_1";
+      const dispatched = await jsonRequest(callerUrl, "/controller/remote-requests", {
+        method: "POST",
+        body: {
+          request_id: requestId,
+          service_id: "mineru.document.dispatch.parse.v1",
+          capability: "document.parse.pdf",
+          task_type: "document_parse",
+          payload: {
+            document_url: "local://fixture/mineru.pdf"
+          },
+          result_delivery: {
+            kind: "local",
+            address: "caller-controller"
+          }
+        }
+      });
+      expect(dispatched.status).toBe(201);
+      expect(dispatched.body.request).toMatchObject({
+        request_id: requestId,
+        service_id: "mineru.document.dispatch.parse.v1",
+        capability: "document.parse.pdf",
+        responder_id: "responder_client_mineru_dispatch",
+        hotline_id: "client.mineru.dispatch.parse.v1",
+        status: "SENT"
+      });
+      expect(dispatched.body.envelope).toMatchObject({
+        request_id: requestId,
+        responder_id: "responder_client_mineru_dispatch",
+        hotline_id: "client.mineru.dispatch.parse.v1",
+        payload: {
+          document_url: "local://fixture/mineru.pdf"
+        },
+        result_delivery: {
+          kind: "local",
+          address: "caller-controller"
+        }
+      });
+      expect(dispatched.body.envelope.task_token).toBeTypeOf("string");
+
+      const queued = await responderTransport.peek();
+      expect(queued.items).toHaveLength(1);
+      expect(queued.items[0]).toMatchObject(dispatched.body.envelope);
+    } finally {
+      await closeServer(callerServer);
+      await closeServer(platformServer);
+    }
+  });
+
   it("reports caller metrics for dispatch, ack, and result", async () => {
     const platformState = createPlatformState();
     const platformServer = createPlatformServer({ serviceName: "platform-caller-metrics-test", state: platformState });

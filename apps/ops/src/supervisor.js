@@ -636,6 +636,7 @@ function buildLocalCatalogHotline(state, runtime, hotline) {
   return {
     responder_id: state.config.responder.responder_id || responderIdentity.responder_id,
     hotline_id: hotline.hotline_id,
+    service_id: source.service_id || hotline.service_id || null,
     display_name: source.display_name || hotline.display_name || hotline.hotline_id,
     description: source.description || null,
     summary: source.summary || null,
@@ -1591,34 +1592,40 @@ export function createOpsSupervisorServer() {
     await ensureBaseServices();
     const chosenHotlineId = normalizedString(body.hotline_id);
     const chosenResponderId = normalizedString(body.responder_id);
+    const serviceId = normalizedString(body.service_id);
+    const capability = normalizedString(body.capability);
     const taskType = normalizedString(body.task_type);
-    if (!chosenHotlineId || !chosenResponderId || !taskType) {
+    const hasConcreteSelection = Boolean(chosenHotlineId && chosenResponderId);
+    const hasLogicalSelection = Boolean(serviceId || capability);
+    if ((!hasConcreteSelection && !hasLogicalSelection) || !taskType) {
       return {
         status: 400,
         body: buildStructuredError(
           "CONTRACT_INVALID_CONFIRM_BODY",
-          "hotline_id, responder_id, and task_type are required for call confirmation"
+          "task_type and either hotline_id + responder_id or service_id/capability are required for call confirmation"
         )
       };
     }
 
-    const candidates = await fetchCatalogCandidates(state, runtime, {
-      hotline_id: chosenHotlineId,
-      responder_id: chosenResponderId,
-      task_type: taskType
-    });
-    const selected = candidates.find((item) => item.hotline_id === chosenHotlineId && item.responder_id === chosenResponderId);
-    if (!selected) {
-      return {
-        status: 409,
-        body: buildStructuredError("HOTLINE_NO_LONGER_VISIBLE", "chosen hotline is no longer visible for this caller", {
-          hotline_id: chosenHotlineId,
-          responder_id: chosenResponderId
-        })
-      };
+    if (hasConcreteSelection) {
+      const candidates = await fetchCatalogCandidates(state, runtime, {
+        hotline_id: chosenHotlineId,
+        responder_id: chosenResponderId,
+        task_type: taskType
+      });
+      const selected = candidates.find((item) => item.hotline_id === chosenHotlineId && item.responder_id === chosenResponderId);
+      if (!selected) {
+        return {
+          status: 409,
+          body: buildStructuredError("HOTLINE_NO_LONGER_VISIBLE", "chosen hotline is no longer visible for this caller", {
+            hotline_id: chosenHotlineId,
+            responder_id: chosenResponderId
+          })
+        };
+      }
     }
 
-    if (body.remember_for_task_type === true) {
+    if (hasConcreteSelection && body.remember_for_task_type === true) {
       setTaskTypePreference(state, taskType, {
         hotline_id: chosenHotlineId,
         responder_id: chosenResponderId
@@ -1630,8 +1637,14 @@ export function createOpsSupervisorServer() {
       method: "POST",
       headers: buildPlatformHeaders(state, runtime),
       body: {
-        responder_id: chosenResponderId,
-        hotline_id: chosenHotlineId,
+        ...(hasConcreteSelection
+          ? {
+              responder_id: chosenResponderId,
+              hotline_id: chosenHotlineId
+            }
+          : {}),
+        ...(serviceId ? { service_id: serviceId } : {}),
+        ...(capability ? { capability } : {}),
         task_type: taskType,
         input: body.input || { text: normalizedString(body.text) || "" },
         payload: body.payload || { text: normalizedString(body.text) || "" },
@@ -2800,6 +2813,7 @@ function buildResponderRegisterHeaders() {
         const body = await parseJsonBody(req);
         const definition = {
           hotline_id: body.hotline_id,
+          service_id: body.service_id || null,
           display_name: body.display_name || body.hotline_id,
           enabled: body.enabled !== false,
           task_types: body.task_types || [],

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert } from "@/components/ui/alert"
+import { Switch } from "@/components/ui/switch"
 import {
   Sheet,
   SheetContent,
@@ -30,6 +31,7 @@ import { toast } from "sonner"
 
 interface HotlineItem {
   hotline_id: string
+  service_id?: string | null
   display_name?: string
   responder_id?: string
   description?: string
@@ -39,6 +41,7 @@ interface HotlineItem {
   source?: string
   availability_status?: string
   task_types?: string[]
+  capabilities?: string[]
 }
 
 interface HotlineSchemaProperty {
@@ -183,6 +186,10 @@ function TryCallDrawer({
   const properties = detail?.input_schema?.properties ?? {}
   const required = detail?.input_schema?.required ?? []
   const entries = Object.entries(properties)
+  const serviceId = detail?.service_id ?? hotline?.service_id ?? null
+  const capability = detail?.capabilities?.[0] ?? hotline?.capabilities?.[0] ?? null
+  const supportsServiceResolution = Boolean(serviceId || capability)
+  const [useServiceResolution, setUseServiceResolution] = useState(false)
 
   // Initialise / reset values when the drawer opens or the detail changes.
   useEffect(() => {
@@ -211,6 +218,7 @@ function TryCallDrawer({
     }
     setValues(next)
     setError("")
+    setUseServiceResolution(Boolean(serviceId || capability))
   }, [open, detail, prefill])
 
   const missing = required.find((field) => !String(values[field] ?? "").trim())
@@ -242,8 +250,14 @@ function TryCallDrawer({
           method: "POST",
           silent: true,
           body: {
-            responder_id: detail?.responder_id ?? hotline.responder_id,
-            hotline_id: hotline.hotline_id,
+            ...(useServiceResolution
+              ? {}
+              : {
+                  responder_id: detail?.responder_id ?? hotline.responder_id,
+                  hotline_id: hotline.hotline_id,
+                }),
+            ...(serviceId ? { service_id: serviceId } : {}),
+            ...(capability ? { capability } : {}),
             task_type: taskType,
             text: values.text ?? "",
             input: payload,
@@ -331,6 +345,37 @@ function TryCallDrawer({
                   </div>
                 )
               })}
+            </div>
+          )}
+
+          {hotline && supportsServiceResolution && !isLocalOfficialExample(hotline) && (
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="catalog-service-resolution-mode">池模式</Label>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    让 Platform 按 service/capability 选择具体 responder 和 Hotline。
+                  </p>
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {serviceId && (
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {serviceId}
+                      </Badge>
+                    )}
+                    {capability && (
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {capability}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                <Switch
+                  id="catalog-service-resolution-mode"
+                  checked={useServiceResolution}
+                  onCheckedChange={setUseServiceResolution}
+                  aria-label="使用池模式调用"
+                />
+              </div>
             </div>
           )}
         </div>
@@ -632,6 +677,11 @@ export function CatalogPage() {
                               <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
                                 {item.hotline_id}
                               </p>
+                              {item.service_id && (
+                                <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                                  {item.service_id}
+                                </p>
+                              )}
                               {item.description && (
                                 <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">
                                   {item.description}

@@ -51,10 +51,10 @@ function usage() {
   delexec-ops ui start [--host <host>] [--port <port>] [--open] [--no-browser]
   delexec-ops mcp spec
   delexec-ops auth register --email <email> [--local] [--platform <url>]
-  delexec-ops call-hotline --platform <url> --hotline-id <id> --responder-id <id> [--text <text> | --payload-json <json>] [--request-id <id>] [--max-charge-cents <amount>]
+  delexec-ops call-hotline --platform <url> (--hotline-id <id> --responder-id <id> | --service-id <id> | --capability <capability>) [--task-type <type>] [--text <text> | --payload-json <json>] [--request-id <id>] [--max-charge-cents <amount>]
   delexec-ops enable-responder [--responder-id <id>] [--display-name <name>]
-  delexec-ops add-hotline --type <process|http> --hotline-id <id> [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE] [--fixed-price-cents <amount>] [--currency <code>] [--billing-disclosure-url <url>]
-  delexec-ops attach-project --project-path <path> [--project-name <name>] [--project-description <text>] [--hotline-id <id>] [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE] [--task-type <type>] [--capability <capability>]
+  delexec-ops add-hotline --type <process|http> --hotline-id <id> [--service-id <id>] [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE] [--fixed-price-cents <amount>] [--currency <code>] [--billing-disclosure-url <url>]
+  delexec-ops attach-project --project-path <path> [--project-name <name>] [--project-description <text>] [--hotline-id <id>] [--service-id <id>] [--cmd <command> | --url <url>] [--cwd <path>] [--env KEY=VALUE] [--task-type <type>] [--capability <capability>]
   delexec-ops add-example-hotline
   delexec-ops remove-hotline --hotline-id <id>
   delexec-ops enable-hotline --hotline-id <id>
@@ -288,6 +288,11 @@ function requireStringArg(args, key) {
     throw new Error(`${key.replace(/-/g, "_")}_required`);
   }
   return value;
+}
+
+function optionalStringArg(args, key) {
+  const value = String(args[key] || "").trim();
+  return value || null;
 }
 
 function parsePayloadArg(args = {}) {
@@ -624,6 +629,7 @@ function parseHotlineDefinition(args) {
   }
   const definition = {
     hotline_id: hotlineId,
+    service_id: optionalStringArg(args, "service-id"),
     display_name: String(args["display-name"] || hotlineId),
     enabled: true,
     task_types: getValues(args["task-type"]),
@@ -681,6 +687,7 @@ function buildProjectHotlineDefinition(args) {
 
   const definition = {
     hotline_id: hotlineId,
+    service_id: optionalStringArg(args, "service-id"),
     display_name: String(args["display-name"] || projectName).trim(),
     enabled: true,
     task_types: taskTypes.length > 0 ? taskTypes : ["project_task"],
@@ -1301,8 +1308,14 @@ async function commandRunExample(args) {
 async function commandCallHotline(args) {
   const state = ensureOpsState();
   const platformUrl = normalizeBaseUrl(requireStringArg(args, "platform"), "platform");
-  const hotlineId = requireStringArg(args, "hotline-id");
-  const responderId = requireStringArg(args, "responder-id");
+  const serviceId = optionalStringArg(args, "service-id");
+  const capability = optionalStringArg(args, "capability");
+  const taskType = optionalStringArg(args, "task-type");
+  const concreteHotlineId = optionalStringArg(args, "hotline-id");
+  const concreteResponderId = optionalStringArg(args, "responder-id");
+  if (!serviceId && !capability && (!concreteHotlineId || !concreteResponderId)) {
+    throw new Error("hotline_id_and_responder_id_or_service_id_or_capability_required");
+  }
   const requestId = String(args["request-id"] || `req_${crypto.randomUUID()}`).trim();
   const maxChargeCents = parseOptionalNonNegativeInteger(args["max-charge-cents"], "max_charge_cents") ?? 500;
   const currency = String(args.currency || DEFAULT_PRICING_CURRENCY).trim() || DEFAULT_PRICING_CURRENCY;
@@ -1328,29 +1341,56 @@ async function commandCallHotline(args) {
     trust_tier: trustTier
   };
 
-  const tokenResponse = await requestJson(platformUrl, "/v1/tokens/task", {
-    method: "POST",
-    headers: buildBearerHeaders(apiKey),
-    body: {
-      request_id: requestId,
-      responder_id: responderId,
-      hotline_id: hotlineId,
-      billing
-    }
-  });
-  const tokenBody = ensureSuccess(tokenResponse, 201, "CALL_HOTLINE_TOKEN_FAILED");
+  let tokenBody;
+  let deliveryMeta;
+  let selected = null;
+  if (serviceId || capability) {
+    const resolveResponse = await requestJson(platformUrl, "/v1/service-resolutions", {
+      method: "POST",
+      headers: buildBearerHeaders(apiKey),
+      body: {
+        request_id: requestId,
+        ...(serviceId ? { service_id: serviceId } : {}),
+        ...(capability ? { capability } : {}),
+        ...(taskType ? { task_type: taskType } : {}),
+        billing,
+        result_delivery: resultDelivery
+      }
+    });
+    const resolved = ensureSuccess(resolveResponse, 201, "CALL_HOTLINE_SERVICE_RESOLVE_FAILED");
+    tokenBody = {
+      task_token: resolved.task_token,
+      claims: resolved.claims || null
+    };
+    deliveryMeta = resolved.delivery_meta;
+    selected = resolved.selected || null;
+  } else {
+    const tokenResponse = await requestJson(platformUrl, "/v1/tokens/task", {
+      method: "POST",
+      headers: buildBearerHeaders(apiKey),
+      body: {
+        request_id: requestId,
+        responder_id: concreteResponderId,
+        hotline_id: concreteHotlineId,
+        billing
+      }
+    });
+    tokenBody = ensureSuccess(tokenResponse, 201, "CALL_HOTLINE_TOKEN_FAILED");
 
-  const deliveryMetaResponse = await requestJson(platformUrl, `/v1/requests/${encodeURIComponent(requestId)}/delivery-meta`, {
-    method: "POST",
-    headers: buildBearerHeaders(apiKey),
-    body: {
-      responder_id: responderId,
-      hotline_id: hotlineId,
-      task_token: tokenBody.task_token,
-      result_delivery: resultDelivery
-    }
-  });
-  const deliveryMeta = ensureSuccess(deliveryMetaResponse, 200, "CALL_HOTLINE_DELIVERY_META_FAILED");
+    const deliveryMetaResponse = await requestJson(platformUrl, `/v1/requests/${encodeURIComponent(requestId)}/delivery-meta`, {
+      method: "POST",
+      headers: buildBearerHeaders(apiKey),
+      body: {
+        responder_id: concreteResponderId,
+        hotline_id: concreteHotlineId,
+        task_token: tokenBody.task_token,
+        result_delivery: resultDelivery
+      }
+    });
+    deliveryMeta = ensureSuccess(deliveryMetaResponse, 200, "CALL_HOTLINE_DELIVERY_META_FAILED");
+  }
+  const responderId = selected?.responder_id || deliveryMeta.responder_id || tokenBody.claims?.responder_id || concreteResponderId;
+  const hotlineId = selected?.hotline_id || deliveryMeta.hotline_id || tokenBody.claims?.hotline_id || concreteHotlineId;
 
   const createdResponse = await requestJson(callerBaseUrl, "/controller/requests", {
     method: "POST",
@@ -1358,6 +1398,9 @@ async function commandCallHotline(args) {
       request_id: requestId,
       responder_id: responderId,
       hotline_id: hotlineId,
+      ...(serviceId ? { service_id: serviceId } : {}),
+      ...(capability ? { capability } : {}),
+      ...(taskType ? { task_type: taskType } : {}),
       task_token: tokenBody.task_token,
       delivery_meta: deliveryMeta,
       result_delivery: deliveryMeta.result_delivery || resultDelivery,
@@ -1418,6 +1461,9 @@ async function commandCallHotline(args) {
     request_id: request.request_id,
     hotline_id: hotlineId,
     responder_id: responderId,
+    service_id: serviceId,
+    capability,
+    selected,
     relay_base_url: relayBaseUrl,
     task_token_present: Boolean(tokenBody.task_token),
     task_token_claims: tokenBody.claims || null,

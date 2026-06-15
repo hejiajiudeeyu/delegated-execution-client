@@ -261,6 +261,27 @@ export function createCallerPlatformClient({ baseUrl, apiKey } = {}) {
       return response.body;
     },
 
+    async resolveService({ requestId, serviceId, capability, taskType, constraints, resultDelivery }) {
+      const response = await requestJson(baseUrl, "/v1/service-resolutions", {
+        method: "POST",
+        headers: authHeaders(true),
+        body: {
+          request_id: requestId,
+          ...(serviceId ? { service_id: serviceId } : {}),
+          ...(capability ? { capability } : {}),
+          ...(taskType ? { task_type: taskType } : {}),
+          ...(constraints ? { constraints } : {}),
+          result_delivery: resultDelivery
+        }
+      });
+
+      if (response.status !== 201) {
+        throw createUpstreamError("CALLER_PLATFORM_SERVICE_RESOLVE_FAILED", response);
+      }
+
+      return response.body;
+    },
+
     async getRequestEvents(requestId) {
       const response = await requestJson(baseUrl, `/v1/requests/${requestId}/events`, {
         headers: authHeaders(true)
@@ -343,6 +364,48 @@ function createLocalFallbackPlatformClient() {
         items = items.filter((item) => item.hotline_id === filters.hotline_id);
       }
       return { items };
+    },
+
+    async resolveService({ requestId, serviceId, capability, taskType, resultDelivery }) {
+      const catalog = await this.listCatalogHotlines({
+        status: "enabled",
+        ...(capability ? { capability } : {}),
+        ...(taskType ? { task_type: taskType } : {})
+      });
+      const selected = serviceId ? catalog.items.find((item) => item.service_id === serviceId) : catalog.items[0];
+      if (!selected) {
+        const error = new Error("CATALOG_SERVICE_NOT_FOUND");
+        error.response = {
+          status: 404,
+          body: buildStructuredError("CATALOG_SERVICE_NOT_FOUND", "no enabled healthy hotline matches the requested service or capability")
+        };
+        throw error;
+      }
+      const issued = await this.issueTaskToken({
+        requestId,
+        responderId: selected.responder_id,
+        hotlineId: selected.hotline_id
+      });
+      const deliveryMeta = await this.getDeliveryMeta({
+        requestId,
+        responderId: selected.responder_id,
+        hotlineId: selected.hotline_id,
+        taskToken: issued.task_token,
+        resultDelivery
+      });
+      return {
+        selected: {
+          service_id: serviceId || selected.service_id || null,
+          capability: capability || null,
+          responder_id: selected.responder_id,
+          hotline_id: selected.hotline_id,
+          availability_status: selected.availability_status || "healthy",
+          selection_reason: "healthy_deterministic"
+        },
+        task_token: issued.task_token,
+        claims: issued.claims,
+        delivery_meta: deliveryMeta
+      };
     },
 
     async issueTaskToken({ requestId, responderId: nextResponderId, hotlineId }) {
@@ -463,6 +526,10 @@ export function createRequestRecord(config, body) {
     caller_id: body.caller_id || "caller_default",
     responder_id: body.responder_id || null,
     hotline_id: body.hotline_id || null,
+    service_id: body.service_id || null,
+    capability: body.capability || null,
+    task_type: body.task_type || null,
+    constraints: body.constraints || null,
     contract_version: body.contract_version || "0.1.0",
     expected_signer_public_key_pem: body.expected_signer_public_key_pem || null,
     status: "CREATED",
@@ -938,6 +1005,46 @@ export function startCallerBackgroundLoops({
 export async function prepareCallerRequest(request, platformClient, options = {}) {
   const responderId = options.responder_id || options.responderId || request.responder_id;
   const hotlineId = options.hotline_id || options.hotlineId || request.hotline_id;
+  const serviceId = options.service_id || options.serviceId || request.service_id;
+  const capability = options.capability || request.capability;
+  const taskType = options.task_type || options.taskType || request.task_type;
+  if ((!responderId || !hotlineId) && (serviceId || capability) && typeof platformClient.resolveService === "function") {
+    const resolved = await platformClient.resolveService({
+      requestId: request.request_id,
+      serviceId,
+      capability,
+      taskType,
+      constraints: options.constraints || request.constraints || null,
+      resultDelivery: options.result_delivery || options.resultDelivery || request.result_delivery
+    });
+    const deliveryMeta = resolved.delivery_meta || {};
+    const selected = resolved.selected || {};
+    const selectedResponderId = selected.responder_id || deliveryMeta.responder_id || resolved.claims?.responder_id;
+    const selectedHotlineId = selected.hotline_id || deliveryMeta.hotline_id || resolved.claims?.hotline_id;
+
+    request.service_id = serviceId || selected.service_id || null;
+    request.capability = capability || selected.capability || null;
+    request.task_type = taskType || request.task_type || null;
+    request.responder_id = selectedResponderId;
+    request.hotline_id = selectedHotlineId;
+    request.task_token = resolved.task_token;
+    request.result_delivery = deliveryMeta.result_delivery || request.result_delivery || null;
+    request.verification = deliveryMeta.verification || request.verification || null;
+    request.delivery_meta = deliveryMeta;
+    request.expected_signer_public_key_pem = normalizePemString(deliveryMeta.responder_public_key_pem);
+    request.last_error_code = null;
+    request.status = "PREPARED";
+    markUpdated(request, "PREPARED");
+
+    return {
+      selected,
+      task_token: resolved.task_token,
+      claims: resolved.claims,
+      delivery_meta: deliveryMeta,
+      request
+    };
+  }
+
   if (!responderId || !hotlineId) {
     throw new Error("caller_prepare_requires_responder_and_hotline");
   }
