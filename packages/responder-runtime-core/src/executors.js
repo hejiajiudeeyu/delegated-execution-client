@@ -33,6 +33,27 @@ function normalizeExecutionResult(result) {
   };
 }
 
+function resolveAdapterTimeouts(hotline, context) {
+  const hotlineTimeouts = hotline?.timeouts || {};
+  const constraintTimeouts = context?.constraints || {};
+  return {
+    soft_timeout_s: Number(constraintTimeouts.soft_timeout_s ?? hotlineTimeouts.soft_timeout_s ?? 0) || null,
+    hard_timeout_s: Number(constraintTimeouts.hard_timeout_s ?? hotlineTimeouts.hard_timeout_s ?? 0) || null
+  };
+}
+
+function parsePartialJsonOutput(stdout) {
+  const trimmed = String(stdout || "").trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return { partial_text: trimmed };
+  }
+}
+
 export function createFunctionExecutor(fn, { name = "function-executor", allowedTaskTypes = null } = {}) {
   if (typeof fn !== "function") {
     throw new TypeError("responder_executor_fn_required");
@@ -47,7 +68,7 @@ export function createFunctionExecutor(fn, { name = "function-executor", allowed
   };
 }
 
-async function runProcessAdapter(adapter, context) {
+async function runProcessAdapter(adapter, context, timeouts = {}, hooks = {}) {
   if (!adapter?.cmd) {
     throw new Error("process_adapter_cmd_required");
   }
@@ -65,6 +86,49 @@ async function runProcessAdapter(adapter, context) {
 
     let stdout = "";
     let stderr = "";
+    let softFired = false;
+    let hardFired = false;
+    let settled = false;
+
+    const finish = (result) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(softTimer);
+      clearTimeout(hardTimer);
+      resolve(result);
+    };
+
+    const softMs = timeouts.soft_timeout_s ? timeouts.soft_timeout_s * 1000 : null;
+    const hardMs = timeouts.hard_timeout_s ? timeouts.hard_timeout_s * 1000 : null;
+
+    const softTimer =
+      softMs && softMs > 0
+        ? setTimeout(() => {
+            softFired = true;
+            try {
+              child.kill("SIGUSR1");
+            } catch {
+              // optional adapter signal handling
+            }
+            if (typeof hooks.onSoftTimeout === "function") {
+              hooks.onSoftTimeout();
+            }
+          }, softMs)
+        : null;
+
+    const hardTimer =
+      hardMs && hardMs > 0
+        ? setTimeout(() => {
+            hardFired = true;
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              // force terminate
+            }
+          }, hardMs)
+        : null;
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString("utf8");
@@ -74,11 +138,34 @@ async function runProcessAdapter(adapter, context) {
       stderr += chunk.toString("utf8");
     });
 
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (!settled) {
+        reject(error);
+      }
+    });
 
     child.on("close", (code) => {
+      if (hardFired) {
+        finish({
+          status: "error",
+          error: {
+            code: "EXEC_TIMEOUT",
+            message: stderr.trim() || "process exceeded hard timeout",
+            retryable: true
+          },
+          output: parsePartialJsonOutput(stdout),
+          schema_valid: true,
+          usage: { tokens_in: 0, tokens_out: 0 },
+          timing: {
+            soft_timeout_fired: softFired,
+            hard_timeout_fired: true
+          }
+        });
+        return;
+      }
+
       if (code !== 0) {
-        resolve({
+        finish({
           status: "error",
           error: {
             code: "HOTLINE_PROCESS_EXITED",
@@ -86,16 +173,27 @@ async function runProcessAdapter(adapter, context) {
             retryable: false
           },
           schema_valid: true,
-          usage: { tokens_in: 0, tokens_out: 0 }
+          usage: { tokens_in: 0, tokens_out: 0 },
+          timing: {
+            soft_timeout_fired: softFired,
+            hard_timeout_fired: false
+          }
         });
         return;
       }
 
       try {
         const parsed = stdout.trim() ? JSON.parse(stdout) : null;
-        resolve(normalizeExecutionResult(parsed));
+        const normalized = normalizeExecutionResult(parsed);
+        if (softFired && normalized.status === "ok") {
+          normalized.timing = {
+            ...(normalized.timing || {}),
+            soft_timeout_fired: true
+          };
+        }
+        finish(normalized);
       } catch {
-        resolve({
+        finish({
           status: "error",
           error: {
             code: "HOTLINE_PROCESS_INVALID_JSON",
@@ -124,60 +222,113 @@ async function runProcessAdapter(adapter, context) {
   });
 }
 
-async function runHttpAdapter(adapter, context) {
+async function runHttpAdapter(adapter, context, timeouts = {}, hooks = {}) {
   if (!adapter?.url) {
     throw new Error("http_adapter_url_required");
   }
 
-  const response = await fetch(adapter.url, {
-    method: adapter.method || "POST",
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      ...(adapter.headers || {})
-    },
-    body: JSON.stringify({
-      request_id: context.requestId,
-      responder_id: context.responderId,
-      hotline_id: context.hotlineId,
-      task_type: context.taskType,
-      input: context.taskInput,
-      payload: context.payload,
-      constraints: context.constraints,
-      task: context.task
-    })
-  });
+  const controller = new AbortController();
+  const softMs = timeouts.soft_timeout_s ? timeouts.soft_timeout_s * 1000 : null;
+  const hardMs = timeouts.hard_timeout_s ? timeouts.hard_timeout_s * 1000 : null;
+  let softFired = false;
 
-  const text = await response.text();
-  let body = null;
+  const softTimer =
+    softMs && softMs > 0
+      ? setTimeout(() => {
+          softFired = true;
+          if (typeof hooks.onSoftTimeout === "function") {
+            hooks.onSoftTimeout();
+          }
+        }, softMs)
+      : null;
+
+  const hardTimer =
+    hardMs && hardMs > 0
+      ? setTimeout(() => {
+          controller.abort();
+        }, hardMs)
+      : null;
+
   try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    return {
-      status: "error",
-      error: {
-        code: "HOTLINE_HTTP_INVALID_JSON",
-        message: "http adapter must return JSON",
-        retryable: false
+    const response = await fetch(adapter.url, {
+      method: adapter.method || "POST",
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        ...(adapter.headers || {})
       },
-      schema_valid: true,
-      usage: { tokens_in: 0, tokens_out: 0 }
-    };
-  }
+      body: JSON.stringify({
+        request_id: context.requestId,
+        responder_id: context.responderId,
+        hotline_id: context.hotlineId,
+        task_type: context.taskType,
+        input: context.taskInput,
+        payload: context.payload,
+        constraints: context.constraints,
+        task: context.task
+      }),
+      signal: controller.signal
+    });
 
-  if (!response.ok) {
-    return {
-      status: "error",
-      error: {
-        code: "HOTLINE_HTTP_FAILED",
-        message: body?.error?.message || body?.message || `http adapter returned ${response.status}`,
-        retryable: false
-      },
-      schema_valid: true,
-      usage: { tokens_in: 0, tokens_out: 0 }
-    };
-  }
+    const text = await response.text();
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      return {
+        status: "error",
+        error: {
+          code: "HOTLINE_HTTP_INVALID_JSON",
+          message: "http adapter must return JSON",
+          retryable: false
+        },
+        schema_valid: true,
+        usage: { tokens_in: 0, tokens_out: 0 }
+      };
+    }
 
-  return normalizeExecutionResult(body);
+    if (!response.ok) {
+      return {
+        status: "error",
+        error: {
+          code: "HOTLINE_HTTP_FAILED",
+          message: body?.error?.message || body?.message || `http adapter returned ${response.status}`,
+          retryable: false
+        },
+        schema_valid: true,
+        usage: { tokens_in: 0, tokens_out: 0 }
+      };
+    }
+
+    const normalized = normalizeExecutionResult(body);
+    if (softFired && normalized.status === "ok") {
+      normalized.timing = {
+        ...(normalized.timing || {}),
+        soft_timeout_fired: true
+      };
+    }
+    return normalized;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      return {
+        status: "error",
+        error: {
+          code: "EXEC_TIMEOUT",
+          message: error instanceof Error ? error.message : "http adapter exceeded hard timeout",
+          retryable: true
+        },
+        schema_valid: true,
+        usage: { tokens_in: 0, tokens_out: 0 },
+        timing: {
+          soft_timeout_fired: softFired,
+          hard_timeout_fired: true
+        }
+      };
+    }
+    throw error;
+  } finally {
+    clearTimeout(softTimer);
+    clearTimeout(hardTimer);
+  }
 }
 
 export function createConfiguredHotlineExecutor(hotline) {
@@ -187,8 +338,8 @@ export function createConfiguredHotlineExecutor(hotline) {
     return {
       name: `http-adapter:${hotline.hotline_id}`,
       allowedTaskTypes,
-      async execute(context) {
-        return runHttpAdapter(hotline.adapter, context);
+      async execute(context, hooks = {}) {
+        return runHttpAdapter(hotline.adapter, context, resolveAdapterTimeouts(hotline, context), hooks);
       }
     };
   }
@@ -203,8 +354,8 @@ export function createConfiguredHotlineExecutor(hotline) {
   return {
     name: `process-adapter:${hotline?.hotline_id || "unknown"}`,
     allowedTaskTypes,
-    async execute(context) {
-      return runProcessAdapter(hotline?.adapter || {}, context);
+    async execute(context, hooks = {}) {
+      return runProcessAdapter(hotline?.adapter || {}, context, resolveAdapterTimeouts(hotline, context), hooks);
     }
   };
 }
@@ -225,18 +376,17 @@ export function createHotlineRouterExecutor(hotlines = [], fallback = createSimu
         enabled: definition.enabled !== false,
         adapter_type: definition.adapter_type || "process",
         task_types: definition.task_types || [],
-        capabilities: definition.capabilities || [],
         tags: definition.tags || []
       }));
     },
     getAllowedTaskTypes(hotlineId) {
       return enabled.get(hotlineId)?.executor.allowedTaskTypes || fallback?.allowedTaskTypes || null;
     },
-    async execute(context) {
+    async execute(context, hooks = {}) {
       const selected = enabled.get(context.hotlineId);
       if (!selected || selected.definition.enabled === false) {
         if (fallback?.execute) {
-          return fallback.execute(context);
+          return fallback.execute(context, hooks);
         }
         return {
           status: "error",
@@ -249,7 +399,7 @@ export function createHotlineRouterExecutor(hotlines = [], fallback = createSimu
           usage: { tokens_in: 0, tokens_out: 0 }
         };
       }
-      return selected.executor.execute(context);
+      return selected.executor.execute(context, hooks);
     }
   };
 }
@@ -279,7 +429,7 @@ export function createSimulatorExecutor() {
           status: "ok",
           output: { malformed_field: true },
           schema_valid: false,
-          usage: { tokens_in: 12, tokens_out: 6 }
+          usage: { tokens_in: 0, tokens_out: 0 }
         };
       }
 

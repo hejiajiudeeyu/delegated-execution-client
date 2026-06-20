@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import http from "node:http";
 
 import { buildStructuredError, canonicalizeResultPackageForSignature } from "@delexec/contracts";
+import { ensureTaskFilesDir } from "@delexec/runtime-utils";
 import {
   createConfiguredHotlineExecutor,
   createExampleFunctionExecutor,
@@ -350,12 +351,23 @@ async function heartbeatPlatform(state, platform, status = "healthy") {
     return { ok: false, skipped: true };
   }
 
+  const completedTasks = Array.from(state.tasks?.values?.() || []).filter((task) => task.completed_at && task.started_at);
+  const elapsedSeconds = completedTasks
+    .map((task) => Math.max(0, (Date.parse(task.completed_at) - Date.parse(task.started_at)) / 1000))
+    .filter((value) => Number.isFinite(value));
+  const estExecP95 =
+    elapsedSeconds.length > 0
+      ? elapsedSeconds.sort((left, right) => left - right)[Math.min(elapsedSeconds.length - 1, Math.floor(elapsedSeconds.length * 0.95))]
+      : null;
+
   const response = await postJson(platform.baseUrl, `/v1/responders/${state.identity.responder_id}/heartbeat`, {
     headers: {
       Authorization: `Bearer ${platform.apiKey}`
     },
     body: {
-      status
+      status,
+      queue_depth: Array.isArray(state.queue) ? state.queue.length : 0,
+      est_exec_p95_s: estExecP95
     }
   });
 
@@ -391,9 +403,11 @@ function createTaskRecord(input, state, overrides = {}) {
   const requestId = input.request_id || `req_${crypto.randomUUID()}`;
   const acceptedAt = nowIso();
   const payload = input.payload ?? input.task_input ?? null;
+  const taskId = input.task_id || `task_${crypto.randomUUID()}`;
+  const taskFilesDir = ensureTaskFilesDir(taskId);
 
   return {
-    task_id: input.task_id || `task_${crypto.randomUUID()}`,
+    task_id: taskId,
     request_id: requestId,
     hotline_id: input.hotline_id || state.identity.hotline_ids[0],
     task_type: input.task_type || null,
@@ -409,6 +423,7 @@ function createTaskRecord(input, state, overrides = {}) {
     accepted_at: acceptedAt,
     enqueued_at: acceptedAt,
     updated_at: acceptedAt,
+    task_files_dir: taskFilesDir,
     result_package: null,
     result_delivery: overrides.result_delivery ?? input.result_delivery ?? null,
     verification: overrides.verification ?? input.verification ?? null,
@@ -635,7 +650,22 @@ async function runQueuedTask(task, state, { executor, transport = null, platform
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(task.delay_ms || 0))));
 
   try {
-    const execution = await executor.execute(createExecutorContext(task));
+    const hooks = {
+      onSoftTimeout: async () => {
+        task.soft_timeout_at = nowIso();
+        task.updated_at = task.soft_timeout_at;
+        try {
+          await postRequestLifecycleEvent(task, platform, "SOFT_TIMEOUT", {
+            status: "running",
+            message: "task exceeded soft timeout and is still running"
+          });
+        } catch {
+          // observational only
+        }
+        await persistResponderState(onStateChanged, state);
+      }
+    };
+    const execution = await executor.execute(createExecutorContext(task), hooks);
     if (execution?.deferred === true) {
       task.status = "RUNNING";
       task.updated_at = nowIso();
@@ -1016,11 +1046,13 @@ export function createResponderControllerServer({
             task_delivery_address: body.task_delivery_address || `local://relay/${responderId}/${hotlineId}`,
             responder_public_key_pem: state.signing.publicKeyPem,
             task_types: body.task_types || [],
-            capabilities: body.capabilities || [],
-            tags: body.tags || [],
+            tags: Array.from(new Set([...(body.tags || []), ...(body.capabilities || [])])),
+            trust_tier: body.trust_tier || null,
+            responder_description: body.responder_description || body.description || null,
+            service_domain: body.service_domain || [],
             input_schema: body.input_schema || null,
             output_schema: body.output_schema || null,
-            contact_email: body.contact_email || null,
+            delivery_email: body.delivery_email || body.contact_email || null,
             support_email: body.support_email || null
           });
 

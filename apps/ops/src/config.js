@@ -616,12 +616,21 @@ export function saveOpsState({ envFile, opsConfigFile, env, config }) {
   return updateEnvFile(envFile, updates, { removeNull: true });
 }
 
-export function ensureResponderIdentity(state, { responderId = null, displayName = null } = {}) {
+export function ensureResponderIdentity(state, { responderId = null, displayName = null, description = null, serviceDomain = null, trustTier = null } = {}) {
   const { env, config } = state;
   const currentResponderId = responderId || config.responder?.responder_id || env.RESPONDER_ID || randomResponderId();
   config.responder ||= {};
   config.responder.responder_id = currentResponderId;
   config.responder.display_name = displayName || config.responder.display_name || "Local Responder";
+  if (description) {
+    config.responder.description = description;
+  }
+  if (Array.isArray(serviceDomain) && serviceDomain.length > 0) {
+    config.responder.service_domain = serviceDomain;
+  }
+  if (trustTier) {
+    config.responder.trust_tier = trustTier;
+  }
   config.responder.hotlines ||= [];
 
   if (!env.RESPONDER_SIGNING_PUBLIC_KEY_PEM || !env.RESPONDER_SIGNING_PRIVATE_KEY_PEM) {
@@ -1000,8 +1009,7 @@ function buildDefaultContractProfile(definition = {}) {
 export function buildHotlineRegistrationDraft(state, definition, existingDraft = null) {
   const fallbackContactEmail = state?.config?.caller?.contact_email || state?.env?.CALLER_CONTACT_EMAIL || null;
   const taskTypes = ensureStringList(definition.task_types);
-  const capabilities = ensureStringList(definition.capabilities);
-  const tags = ensureStringList(definition.tags);
+  const mergedTags = Array.from(new Set([...ensureStringList(definition.tags), ...ensureStringList(definition.capabilities)]));
   const profile = buildDefaultContractProfile(definition);
   const generatedProfileKey = String(profile.profile_key || "generic_task");
   const existingProfileKey = String(existingDraft?.draft_meta?.generated_profile || "").trim();
@@ -1018,8 +1026,6 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
         "template_ref",
         "input_schema",
         "output_schema",
-        "input_attachments",
-        "output_attachments",
         "input_examples",
         "output_examples",
         "input_summary",
@@ -1028,8 +1034,11 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
         "not_recommended_for",
         "limitations",
         "pricing_hint",
-        "contact_email",
-        "support_email"
+        "trust_tier",
+        "delivery_email",
+        "support_email",
+        "responder_description",
+        "service_domain"
       ]
     },
     hotline_id: definition.hotline_id,
@@ -1038,8 +1047,7 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
     summary: profile.summary,
     template_ref: profile.template_ref,
     task_types: taskTypes,
-    capabilities,
-    tags,
+    tags: mergedTags,
     input_schema: profile.input_schema,
     output_schema: profile.output_schema,
     input_attachments: null,
@@ -1052,8 +1060,11 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
     not_recommended_for: Array.isArray(profile.not_recommended_for) ? profile.not_recommended_for : [],
     limitations: Array.isArray(profile.limitations) ? profile.limitations : [],
     pricing_hint: definition.pricing_hint === undefined ? null : definition.pricing_hint,
-    contact_email: fallbackContactEmail,
-    support_email: null
+    trust_tier: state?.config?.responder?.trust_tier || definition.trust_tier || "untrusted",
+    delivery_email: fallbackContactEmail,
+    support_email: null,
+    responder_description: state?.config?.responder?.description || null,
+    service_domain: Array.isArray(state?.config?.responder?.service_domain) ? state.config.responder.service_domain : []
   };
   return {
     ...generated,
@@ -1065,8 +1076,7 @@ export function buildHotlineRegistrationDraft(state, definition, existingDraft =
     hotline_id: definition.hotline_id,
     display_name: reusableDraft?.display_name || definition.display_name || definition.hotline_id,
     task_types: taskTypes,
-    capabilities,
-    tags,
+    tags: mergedTags,
     pricing_hint:
       definition.pricing_hint === undefined
         ? reusableDraft?.pricing_hint === undefined
@@ -1141,6 +1151,17 @@ export function validateHotlineRegistrationDraft(draft) {
   return { ok: true, fields: [] };
 }
 
+function isPlaceholderDeliveryEmail(email) {
+  if (!email || typeof email !== "string") {
+    return false;
+  }
+  const domain = email.split("@")[1]?.trim().toLowerCase();
+  if (!domain) {
+    return false;
+  }
+  return ["test.local", "example.com", "example.local"].some((placeholder) => domain === placeholder || domain.endsWith(`.${placeholder}`));
+}
+
 export function buildHotlineOnboardingBody(state, hotline, responderIdentity) {
   let { draft_file, draft } = loadHotlineRegistrationDraft(state, hotline);
   if (!draft) {
@@ -1156,6 +1177,8 @@ export function buildHotlineOnboardingBody(state, hotline, responderIdentity) {
     throw error;
   }
   const source = draft || {};
+  const rawDeliveryEmail = source.delivery_email || source.contact_email || state?.config?.caller?.contact_email || null;
+  const deliveryEmail = isPlaceholderDeliveryEmail(rawDeliveryEmail) ? null : rawDeliveryEmail;
   return {
     draft_file,
     used_draft: Boolean(draft),
@@ -1168,8 +1191,7 @@ export function buildHotlineOnboardingBody(state, hotline, responderIdentity) {
       summary: source.summary || null,
       template_ref: source.template_ref || `docs/templates/hotlines/${hotline.hotline_id}/`,
       task_types: ensureStringList(source.task_types, hotline.task_types || []),
-      capabilities: ensureStringList(source.capabilities, hotline.capabilities || []),
-      tags: ensureStringList(source.tags, hotline.tags || []),
+      tags: ensureStringList(source.tags, [...(hotline.tags || []), ...(hotline.capabilities || [])]),
       input_schema: source.input_schema || null,
       output_schema: source.output_schema || null,
       input_attachments: source.input_attachments || null,
@@ -1180,10 +1202,17 @@ export function buildHotlineOnboardingBody(state, hotline, responderIdentity) {
       not_recommended_for: Array.isArray(source.not_recommended_for) ? source.not_recommended_for : null,
       limitations: Array.isArray(source.limitations) ? source.limitations : null,
       pricing_hint: source.pricing_hint === undefined ? undefined : source.pricing_hint,
+      trust_tier: source.trust_tier || state?.config?.responder?.trust_tier || "untrusted",
       input_summary: source.input_summary || null,
       output_summary: source.output_summary || null,
-      contact_email: source.contact_email || state?.config?.caller?.contact_email || null,
-      support_email: source.support_email || null
+      delivery_email: deliveryEmail,
+      support_email: source.support_email || null,
+      responder_description: source.responder_description || state?.config?.responder?.description || null,
+      service_domain: Array.isArray(source.service_domain)
+        ? source.service_domain
+        : Array.isArray(state?.config?.responder?.service_domain)
+          ? state.config.responder.service_domain
+          : []
     }
   };
 }

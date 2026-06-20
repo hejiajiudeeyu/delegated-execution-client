@@ -309,9 +309,9 @@ describe("ops cli integration", () => {
         currency: "PTS",
         fixed_price_cents: 50,
         max_total_cents: 50,
-        billing_disclosure_url: "https://callanything.xyz/marketplace/responders/cli-register",
-        trust_tier: "untrusted"
+        billing_disclosure_url: "https://callanything.xyz/marketplace/responders/cli-register"
       });
+      expect(draft.trust_tier).toBe("untrusted");
       fs.writeFileSync(draftFile, `${JSON.stringify(draft, null, 2)}\n`);
 
       const enabled = JSON.parse((await execFileAsync(process.execPath, [CLI_PATH, "enable-responder"], { env })).stdout);
@@ -345,9 +345,9 @@ describe("ops cli integration", () => {
         currency: "PTS",
         fixed_price_cents: 50,
         max_total_cents: 50,
-        billing_disclosure_url: "https://callanything.xyz/marketplace/responders/cli-register",
-        trust_tier: "untrusted"
+        billing_disclosure_url: "https://callanything.xyz/marketplace/responders/cli-register"
       });
+      expect(platformState.responders.get("responder_cli_register")?.trust_tier || platformState.responders.values().next().value?.trust_tier).toBe("untrusted");
     } finally {
       await closeServer(platformServer);
     }
@@ -430,7 +430,7 @@ describe("ops cli integration", () => {
             pricing_model: "fixed_price",
             currency: "PTS",
             max_charge_cents: 750,
-            trust_tier: "untrusted"
+            trust_tier_seen: "untrusted"
           }
         });
         send(res, 201, {

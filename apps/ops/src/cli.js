@@ -392,22 +392,25 @@ function parsePricingHint(args = {}) {
   if (maxTotalCents < fixedPriceCents) {
     throw new Error("max_total_cents_must_be_greater_than_or_equal_to_fixed_price_cents");
   }
-  const trustTier = String(args["trust-tier"] || DEFAULT_TRUST_TIER).trim() || DEFAULT_TRUST_TIER;
-  if (!TRUST_TIERS.includes(trustTier)) {
-    throw new Error("trust_tier_unsupported");
-  }
   const pricingHint = {
     pricing_model: FIXED_PRICE_MODEL,
     currency: String(args.currency || DEFAULT_PRICING_CURRENCY).trim() || DEFAULT_PRICING_CURRENCY,
     fixed_price_cents: fixedPriceCents,
-    max_total_cents: maxTotalCents,
-    trust_tier: trustTier
+    max_total_cents: maxTotalCents
   };
   const billingDisclosureUrl = String(args["billing-disclosure-url"] || "").trim();
   if (billingDisclosureUrl) {
     pricingHint.billing_disclosure_url = billingDisclosureUrl;
   }
   return pricingHint;
+}
+
+function parseTrustTier(args = {}) {
+  const trustTier = String(args["trust-tier"] || DEFAULT_TRUST_TIER).trim() || DEFAULT_TRUST_TIER;
+  if (!TRUST_TIERS.includes(trustTier)) {
+    throw new Error("trust_tier_unsupported");
+  }
+  return trustTier;
 }
 
 function resolveUiConfig(args = {}) {
@@ -627,14 +630,14 @@ function parseHotlineDefinition(args) {
     display_name: String(args["display-name"] || hotlineId),
     enabled: true,
     task_types: getValues(args["task-type"]),
-    capabilities: getValues(args.capability),
-    tags: getValues(args.tag),
+    tags: Array.from(new Set([...getValues(args.tag), ...getValues(args.capability)])),
     adapter_type: type,
     timeouts: {
       soft_timeout_s: Number(args["soft-timeout-s"] || 60),
       hard_timeout_s: Number(args["hard-timeout-s"] || 180)
     },
     pricing_hint: parsePricingHint(args),
+    trust_tier: parseTrustTier(args),
     review_status: "local_only",
     submitted_for_review: false
   };
@@ -675,17 +678,15 @@ function buildProjectHotlineDefinition(args) {
   const projectDescription = String(args["project-description"] || args.description || "").trim();
   const adapterType = String(args.type || (args.url ? "http" : "process")).trim();
   const hotlineId = String(args["hotline-id"] || `local.${sanitizeIdSegment(projectName)}.v1`).trim();
-  const tags = Array.from(new Set(["local", "project", ...getValues(args.tag)]));
+  const tags = Array.from(new Set(["local", "project", ...getValues(args.tag), ...getValues(args.capability)]));
   const taskTypes = getValues(args["task-type"]);
-  const capabilities = getValues(args.capability);
 
   const definition = {
     hotline_id: hotlineId,
     display_name: String(args["display-name"] || projectName).trim(),
     enabled: true,
     task_types: taskTypes.length > 0 ? taskTypes : ["project_task"],
-    capabilities: capabilities.length > 0 ? capabilities : [`project.${sanitizeIdSegment(projectName)}`],
-    tags,
+    tags: tags.length > 0 ? tags : [`project.${sanitizeIdSegment(projectName)}`],
     adapter_type: adapterType,
     timeouts: {
       soft_timeout_s: Number(args["soft-timeout-s"] || 60),
@@ -917,7 +918,10 @@ async function commandEnableResponder(args) {
   state.config.responder.enabled = true;
   ensureResponderIdentity(state, {
     responderId: args["responder-id"] ? String(args["responder-id"]) : null,
-    displayName: args["display-name"] ? String(args["display-name"]) : null
+    displayName: args["display-name"] ? String(args["display-name"]) : null,
+    description: args.description ? String(args.description) : null,
+    serviceDomain: getValues(args["service-domain"]),
+    trustTier: args["trust-tier"] ? parseTrustTier(args) : null
   });
   state.env = saveOpsState(state);
   try {
@@ -925,7 +929,10 @@ async function commandEnableResponder(args) {
       method: "POST",
       body: {
         responder_id: state.config.responder.responder_id,
-        display_name: state.config.responder.display_name
+        display_name: state.config.responder.display_name,
+        description: state.config.responder.description || null,
+        service_domain: state.config.responder.service_domain || [],
+        trust_tier: state.config.responder.trust_tier || null
       }
     });
     emit(response.body);
@@ -1306,10 +1313,7 @@ async function commandCallHotline(args) {
   const requestId = String(args["request-id"] || `req_${crypto.randomUUID()}`).trim();
   const maxChargeCents = parseOptionalNonNegativeInteger(args["max-charge-cents"], "max_charge_cents") ?? 500;
   const currency = String(args.currency || DEFAULT_PRICING_CURRENCY).trim() || DEFAULT_PRICING_CURRENCY;
-  const trustTier = String(args["trust-tier"] || DEFAULT_TRUST_TIER).trim() || DEFAULT_TRUST_TIER;
-  if (!TRUST_TIERS.includes(trustTier)) {
-    throw new Error("trust_tier_unsupported");
-  }
+  const trustTier = parseTrustTier(args);
   const callerBaseUrl = normalizeBaseUrl(
     args["caller-base-url"] || `http://127.0.0.1:${process.env.OPS_PORT_CALLER || state.config.runtime.ports.caller || 8081}`,
     "caller_base_url"
@@ -1325,7 +1329,8 @@ async function commandCallHotline(args) {
     pricing_model: FIXED_PRICE_MODEL,
     currency,
     max_charge_cents: maxChargeCents,
-    trust_tier: trustTier
+    trust_tier_seen: trustTier,
+    consent_at: new Date().toISOString()
   };
 
   const tokenResponse = await requestJson(platformUrl, "/v1/tokens/task", {

@@ -2907,7 +2907,10 @@ function buildResponderRegisterHeaders() {
         const body = await parseJsonBody(req);
         ensureResponderIdentity(state, {
           responderId: body.responder_id || state.config.responder.responder_id || null,
-          displayName: body.display_name || state.config.responder.display_name || null
+          displayName: body.display_name || state.config.responder.display_name || null,
+          description: body.description || null,
+          serviceDomain: Array.isArray(body.service_domain) ? body.service_domain : [],
+          trustTier: body.trust_tier || null
         });
         state.config.responder.enabled = true;
         if (body.hotline_id) {
@@ -2916,8 +2919,7 @@ function buildResponderRegisterHeaders() {
             display_name: body.display_name || body.hotline_id,
             enabled: true,
             task_types: body.task_types || [],
-            capabilities: body.capabilities || [],
-            tags: body.tags || [],
+            tags: Array.from(new Set([...(body.tags || []), ...(body.capabilities || [])])),
             adapter_type: body.adapter_type || "process",
             adapter: body.adapter || { cmd: body.cmd || "" },
             timeouts: body.timeouts || { soft_timeout_s: 60, hard_timeout_s: 180 },

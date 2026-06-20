@@ -241,8 +241,20 @@ export function ensureOpsDirectories() {
   fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
   fs.mkdirSync(path.join(homeDir, "logs"), { recursive: true, mode: 0o700 });
   fs.mkdirSync(path.join(homeDir, "run"), { recursive: true, mode: 0o700 });
+  fs.mkdirSync(path.join(homeDir, "task-files"), { recursive: true, mode: 0o700 });
   migrateLegacySqliteFile(homeDir);
   return homeDir;
+}
+
+export function getTaskFilesDir(taskId) {
+  return path.join(getOpsHomeDir(), "task-files", String(taskId || "unknown"));
+}
+
+export function ensureTaskFilesDir(taskId) {
+  ensureOpsDirectories();
+  const dir = getTaskFilesDir(taskId);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
 }
 
 export function buildOpsEnvSearchPaths(rootDir, profileName = null) {
