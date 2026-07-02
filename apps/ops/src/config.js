@@ -961,13 +961,14 @@ function buildDefaultContractProfile(definition = {}) {
     input_schema: {
       type: "object",
       additionalProperties: false,
-      required: ["prompt"],
+      required: ["text"],
       properties: {
-        prompt: {
+        text: {
           type: "string",
-          description: "Describe the task you want the hotline to complete in one clear instruction."
+          description: "Describe the task you want the hotline to complete in one clear instruction.",
+          minLength: 1
         },
-        context: {
+        instruction: {
           type: "string",
           description: "Optional: add background, constraints, or extra context the hotline should consider when completing the task."
         }
@@ -976,9 +977,9 @@ function buildDefaultContractProfile(definition = {}) {
     output_schema: {
       type: "object",
       additionalProperties: false,
-      required: ["result"],
+      required: ["summary"],
       properties: {
-        result: {
+        summary: {
           type: "string",
           description: "Primary response returned by the hotline."
         }
@@ -988,8 +989,8 @@ function buildDefaultContractProfile(definition = {}) {
       {
         title: "Basic request",
         input: {
-          prompt: "Review this implementation plan and identify the next concrete step.",
-          context: "The goal is to improve the responder registration workflow."
+          text: "Review this implementation plan and identify the next concrete step.",
+          instruction: "The goal is to improve the responder registration workflow."
         }
       }
     ],
@@ -997,12 +998,12 @@ function buildDefaultContractProfile(definition = {}) {
       {
         title: "Basic response",
         output: {
-          result: "The next concrete step is wiring the registration draft flow into the responder review UI."
+          summary: "The next concrete step is wiring the registration draft flow into the responder review UI."
         }
       }
     ],
-    input_summary: "Describe the task you want completed. Add any optional context, constraints, or background the hotline should consider.",
-    output_summary: "You will receive the primary task result produced from your prompt and context."
+    input_summary: "Describe the task you want completed. Add any optional instruction, constraints, or background the hotline should consider.",
+    output_summary: "You will receive the primary task result produced from your text and optional instruction."
   };
 }
 

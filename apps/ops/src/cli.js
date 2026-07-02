@@ -155,21 +155,51 @@ function sanitizeIdSegment(value) {
   );
 }
 
+function formatRequestFailure(method, url, error) {
+  const cause =
+    error instanceof Error && error.cause instanceof Error
+      ? error.cause.message
+      : error instanceof Error
+        ? error.message
+        : String(error);
+  const hint =
+    cause.includes("ECONNREFUSED") || cause.includes("fetch failed")
+      ? " (is the local runtime running? try `delexec-ops start` in another terminal)"
+      : "";
+  return `request_failed:${method} ${url}:${cause}${hint}`;
+}
+
 async function requestJson(baseUrl, pathname, { method = "GET", headers = {}, body } = {}) {
   const base = String(baseUrl || "").endsWith("/") ? String(baseUrl) : `${baseUrl}/`;
   const relativePath = String(pathname || "").replace(/^\/+/, "");
-  const response = await fetch(new URL(relativePath, base), {
-    method,
-    headers: {
-      ...headers,
-      ...(body === undefined ? {} : { "content-type": "application/json; charset=utf-8" })
-    },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
+  const url = new URL(relativePath, base).toString();
+  let response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: {
+        ...headers,
+        ...(body === undefined ? {} : { "content-type": "application/json; charset=utf-8" })
+      },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+  } catch (error) {
+    throw new Error(formatRequestFailure(method, url, error));
+  }
   const text = await response.text();
+  let parsedBody = null;
+  if (text) {
+    try {
+      parsedBody = JSON.parse(text);
+    } catch {
+      parsedBody = { raw: text.slice(0, 240) };
+    }
+  }
   return {
     status: response.status,
-    body: text ? JSON.parse(text) : null
+    body: parsedBody,
+    url,
+    method
   };
 }
 
@@ -378,7 +408,10 @@ function ensureSuccess(response, expectedStatus, code) {
   const expected = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus];
   if (!expected.includes(response.status)) {
     const upstreamCode = response.body?.error?.code || code;
-    throw new Error(`${code}:${response.status}:${upstreamCode}`);
+    const upstreamMessage = response.body?.error?.message || null;
+    const target = response.url ? ` at ${response.method || "GET"} ${response.url}` : "";
+    const detail = upstreamMessage ? `${upstreamCode}: ${upstreamMessage}` : upstreamCode;
+    throw new Error(`${code}:${response.status}:${detail}${target}`);
   }
   return response.body;
 }

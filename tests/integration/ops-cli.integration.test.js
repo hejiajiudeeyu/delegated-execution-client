@@ -664,6 +664,74 @@ describe("ops cli integration", () => {
     }
   });
 
+  it("reports request_failed when caller runtime is unreachable during call-hotline", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-call-hotline-down-"));
+    cleanupDirs.push(opsHome);
+    const requestId = "req_ops_paid_cli_unreachable";
+    const apiKey = "sk_paid_cli_unreachable";
+
+    function send(res, statusCode, body) {
+      res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(body));
+    }
+
+    const platformServer = http.createServer(async (req, res) => {
+      if (req.method === "POST" && req.url === "/platform/v1/tokens/task") {
+        send(res, 201, {
+          task_token: "task_token_unreachable",
+          claims: { request_id: requestId, max_charge_cents: 50 }
+        });
+        return;
+      }
+      if (req.method === "POST" && req.url === `/platform/v1/requests/${requestId}/delivery-meta`) {
+        send(res, 200, {
+          request_id: requestId,
+          responder_public_key_pem: "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
+          result_delivery: { kind: "relay_http", address: "local://relay/caller-controller/req" }
+        });
+        return;
+      }
+      send(res, 404, { error: { code: "not_found" } });
+    });
+
+    const platformUrl = `${await listenServer(platformServer)}/platform`;
+    const deadCallerUrl = "http://127.0.0.1:1";
+
+    try {
+      const env = {
+        ...(await createIsolatedCliEnv(opsHome)),
+        CALLER_PLATFORM_API_KEY: apiKey
+      };
+
+      await expect(
+        execFileAsync(
+          process.execPath,
+          [
+            CLI_PATH,
+            "call-hotline",
+            "--platform",
+            platformUrl,
+            "--caller-base-url",
+            deadCallerUrl,
+            "--request-id",
+            requestId,
+            "--responder-id",
+            "responder_paid_cli",
+            "--hotline-id",
+            "paid.summary.v1",
+            "--text",
+            "This should fail before dispatch.",
+            "--max-charge-cents",
+            "50"
+          ],
+          { env }
+        )
+      ).rejects.toThrow(/request_failed:POST .*\/controller\/requests/);
+    } finally {
+      await closeServer(platformServer);
+    }
+  });
+
   it("shows a responder draft and submits a single hotline draft", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-cli-draft-"));
     cleanupDirs.push(opsHome);
@@ -697,6 +765,8 @@ describe("ops cli integration", () => {
       expect(draftView.hotline_id).toBe("cli.draft.one.v1");
       expect(draftView.draft_file).toContain("cli.draft.one.v1.registration.json");
       expect(draftView.draft.hotline_id).toBe("cli.draft.one.v1");
+      expect(draftView.draft.input_schema.required).toEqual(["text"]);
+      expect(draftView.draft.output_schema.required).toEqual(["summary"]);
 
       const submitted = JSON.parse(
         (await execFileAsync(process.execPath, [CLI_PATH, "responder", "submit-draft", "--hotline-id", "cli.draft.one.v1"], { env })).stdout
