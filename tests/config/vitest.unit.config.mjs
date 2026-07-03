@@ -17,7 +17,8 @@ export default mergeConfig(
       }
     },
     test: {
-      include: ["tests/unit/**/*.test.{js,tsx}"]
+      include: ["tests/unit/**/*.test.{js,tsx}"],
+      setupFiles: ["tests/unit/setup.web-storage.js"]
     }
   })
 );
