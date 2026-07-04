@@ -64,7 +64,10 @@ function renderCard(props: {
 
 describe("NextUpCard", () => {
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true })
+    // Pin the clock to local noon: the card's "today" count compares calendar
+    // days, so now-relative fixtures built minutes after midnight would land
+    // on yesterday (observed failing in CI at 00:04 UTC).
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date("2026-01-15T12:00:00") })
   })
 
   afterEach(() => {
