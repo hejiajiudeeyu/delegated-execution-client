@@ -8,6 +8,7 @@
     "croc-ops": "src/cli.js"
   },
   "bundleDependencies": [
+    "@delexec/artifact-client",
     "@delexec/caller-controller",
     "@delexec/caller-controller-core",
     "@delexec/caller-skill-mcp-adapter",
@@ -45,6 +46,7 @@
     "cli"
   ],
   "dependencies": {
+    "@delexec/artifact-client": "0.1.0",
     "@delexec/caller-controller": "0.1.0",
     "@delexec/caller-controller-core": "0.1.0",
     "@delexec/caller-skill-adapter": "0.1.0",

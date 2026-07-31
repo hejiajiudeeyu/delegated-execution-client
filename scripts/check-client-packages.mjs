@@ -9,6 +9,10 @@ const ROOT_DIR = process.cwd();
 
 const LIBRARY_PACKAGES = [
   {
+    workspace: "@delexec/artifact-client",
+    assertExpression: '(mod) => typeof mod.uploadArtifact === "function" && typeof mod.downloadArtifact === "function"'
+  },
+  {
     workspace: "@delexec/caller-controller-core",
     assertExpression: '(mod) => typeof mod.createCallerState === "function"'
   },

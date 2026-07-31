@@ -21,6 +21,7 @@
     "runtime"
   ],
   "dependencies": {
+    "@delexec/artifact-client": "0.1.0",
     "@delexec/contracts": "^0.1.0"
   }
 }

@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+
+import { canUseArtifactChannel, resolveArtifactDescriptors } from "@delexec/artifact-client";
 import http from "node:http";
 
 import { buildStructuredError, canonicalizeResultPackageForSignature } from "@delexec/contracts";
@@ -777,8 +779,27 @@ async function pollCallerInbox(
     }
     const platformClient = typeof platformClientResolver === "function" ? platformClientResolver(request) : null;
 
+    // A-01: artifacts may arrive as descriptors instead of inline bytes. Fetch
+    // and verify them here so both transports converge on one verification
+    // path — a descriptor whose bytes fail their checksum yields no attachment
+    // and the binding check then fails, exactly as a corrupt inline one would.
+    let resolvedAttachments = attachments;
+    const descriptors = envelope.artifact_descriptors || envelope.payload?.artifact_descriptors || null;
+    if (Array.isArray(descriptors) && descriptors.length > 0) {
+      const platform = { baseUrl: platformClient?.config?.baseUrl, apiKey: platformClient?.config?.apiKey };
+      if (canUseArtifactChannel(platform)) {
+        const resolved = await resolveArtifactDescriptors({ platform, descriptors });
+        for (const failure of resolved.failures) {
+          console.warn(`[caller-artifacts] ${failure.artifact_id}: ${failure.code}`);
+        }
+        resolvedAttachments = [...attachments, ...resolved.attachments];
+      } else {
+        console.warn("[caller-artifacts] result carries artifact descriptors but no platform credentials are configured");
+      }
+    }
+
     if (!TERMINAL_STATUS_SET.has(request.status)) {
-      const transition = applyResultPackage(request, resultPackage, { attachments });
+      const transition = applyResultPackage(request, resultPackage, { attachments: resolvedAttachments });
       if (transition?.eventType) {
         await reportCallerMetric(platformClient, request, transition.eventType, { code: transition.code });
       }

@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+
+import { canUseArtifactChannel, uploadExecutionArtifacts } from "@delexec/artifact-client";
 import http from "node:http";
 
 import { buildStructuredError, canonicalizeResultPackageForSignature } from "@delexec/contracts";
@@ -284,10 +286,42 @@ function signResultPayload(payload, state) {
   };
 }
 
-async function sendResultEnvelope(task, state, transport) {
+async function sendResultEnvelope(task, state, transport, platform = null) {
   const target = task.result_delivery?.address || task.return_route || task.reply_to;
   if (!transport || !target || !task.result_package) {
     return;
+  }
+
+  // A-01: when a platform binding exists, artifact bytes go through the
+  // artifact channel and only descriptors ride the envelope. Without a
+  // platform (local-only runs) the inline path is kept unchanged.
+  const executionArtifacts = task.execution_artifacts || [];
+  let artifactDescriptors = null;
+  let inlineAttachments = executionArtifacts.map((artifact) => ({
+    name: artifact.name,
+    media_type: artifact.media_type,
+    content_base64: artifact.content_base64,
+    byte_size: artifact.byte_size
+  }));
+
+  if (executionArtifacts.length > 0 && canUseArtifactChannel(platform)) {
+    const { descriptors, failures } = await uploadExecutionArtifacts({
+      platform,
+      requestId: task.request_id,
+      artifacts: executionArtifacts
+    });
+    if (failures.length === 0) {
+      artifactDescriptors = descriptors;
+      // bytes are in the channel now; do not also inline them
+      inlineAttachments = [];
+    } else {
+      // Fall back to inline rather than delivering a result whose artifacts
+      // the caller cannot fetch. A partial artifact set must never look like
+      // a complete delivery.
+      for (const failure of failures) {
+        console.warn(`[responder-artifacts] upload failed for ${failure.name}: ${failure.code}`);
+      }
+    }
   }
 
   await transport.send({
@@ -301,12 +335,8 @@ async function sendResultEnvelope(task, state, transport) {
     hotline_id: task.hotline_id,
     verification: task.verification || null,
     body_text: JSON.stringify(task.result_package),
-    attachments: ((task.execution_artifacts || []) || []).map((artifact) => ({
-      name: artifact.name,
-      media_type: artifact.media_type,
-      content_base64: artifact.content_base64,
-      byte_size: artifact.byte_size
-    })),
+    attachments: inlineAttachments,
+    ...(artifactDescriptors ? { artifact_descriptors: artifactDescriptors } : {}),
     result_package: task.result_package,
     sent_at: nowIso()
   });
@@ -527,7 +557,7 @@ async function finalizeTask(task, state, transport, platform, execution) {
   task.updated_at = task.completed_at;
   task.execution_artifacts = Array.isArray(executionWithArtifacts.artifacts) ? executionWithArtifacts.artifacts : [];
   task.result_package = signResultPayload(buildResultPayload(task, executionWithArtifacts), state);
-  await sendResultEnvelope(task, state, transport);
+  await sendResultEnvelope(task, state, transport, platform);
   const lifecycleEvent =
     task.result_package.status === "ok"
       ? { eventType: "COMPLETED", detail: { status: "ok", finished_at: task.completed_at } }
@@ -788,7 +818,8 @@ async function processResponderInbox(state, {
             thread_id: envelope.thread_id || existing.thread_id
           },
           state,
-          transport
+          transport,
+          platform
         );
       }
 
@@ -830,7 +861,7 @@ async function processResponderInbox(state, {
         state
       );
       rememberTask(state, task);
-      await sendResultEnvelope(task, state, transport);
+      await sendResultEnvelope(task, state, transport, platform);
       await reportResponderMetric(platform, task, "responder.task.rejected", {
         code: introspection.error?.code || introspection.error || "AUTH_TOKEN_INVALID"
       });
@@ -843,7 +874,7 @@ async function processResponderInbox(state, {
         task.updated_at = task.completed_at;
         task.result_package = signResultPayload(buildResultPayload(task, guardrailError), state);
         rememberTask(state, task);
-        await sendResultEnvelope(task, state, transport);
+        await sendResultEnvelope(task, state, transport, platform);
         await reportResponderMetric(platform, task, "responder.task.rejected", {
           code: guardrailError.error.code
         });
