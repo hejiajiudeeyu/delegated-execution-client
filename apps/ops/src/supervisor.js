@@ -1258,7 +1258,14 @@ export function createOpsSupervisorServer() {
       HOTLINE_IDS: (state.config.responder.hotlines || []).map((item) => item.hotline_id).join(","),
       RESPONDER_PLATFORM_API_KEY: resolvedSecrets.responder_platform_api_key || "",
       TRANSPORT_BASE_URL: relayBaseUrl,
-      TRANSPORT_AUTH_TOKEN: transportEnv.TRANSPORT_AUTH_TOKEN || getManagedRelayToken(),
+      // Only mint a credential for the relay we manage ourselves. Against an
+      // external relay an invented token is worse than none: it would be
+      // rejected, so the operator-provided one must win and absence must stay
+      // absence.
+      TRANSPORT_AUTH_TOKEN:
+        transportEnv.TRANSPORT_AUTH_TOKEN ||
+        normalizedString(process.env.TRANSPORT_AUTH_TOKEN) ||
+        (usesManagedRelay() ? getManagedRelayToken() : ""),
       TRANSPORT_TYPE: runtimeTransport.type,
       TRANSPORT_PROVIDER: transportEnv.TRANSPORT_PROVIDER || "",
       TRANSPORT_EMAIL_PROVIDER: transportEnv.TRANSPORT_EMAIL_PROVIDER || "",
