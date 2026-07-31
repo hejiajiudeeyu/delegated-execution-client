@@ -110,14 +110,54 @@ describe("responder-controller integration", () => {
     expect(replayReady.body.result_package.request_id).toBe(result.body.result_package.request_id);
   });
 
+  it("refuses to self-enroll without a platform credential", async () => {
+    const platformState = createPlatformState({ bootstrapEnabled: true });
+    const platformServer = createPlatformServer({
+      serviceName: "platform-responder-register-unauth-test",
+      state: platformState
+    });
+    const platformUrl = await listenServer(platformServer);
+    const responderServer = createResponderControllerServer({
+      serviceName: "responder-controller-register-unauth-test",
+      platform: { baseUrl: platformUrl },
+      state: createResponderState({
+        responderId: "responder_register_unauth",
+        hotlineIds: ["register.unauth.v1"]
+      })
+    });
+    const responderUrl = await listenServer(responderServer);
+
+    try {
+      const registered = await jsonRequest(responderUrl, "/controller/register", {
+        method: "POST",
+        body: { display_name: "No Credential Responder" }
+      });
+
+      // fails fast and names the missing credential rather than surfacing a bare 401
+      expect(registered.status).toBeGreaterThanOrEqual(400);
+      expect(JSON.stringify(registered.body)).toMatch(/api_key_required_for_enrollment/);
+      expect(platformState.responders.has("responder_register_unauth")).toBe(false);
+    } finally {
+      await closeServer(responderServer);
+      await closeServer(platformServer);
+    }
+  });
+
   it("registers responder identities through responder-controller", async () => {
     const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-responder-register-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
+    // Enrollment requires a controlled credential (FR-002). A device carries
+    // the credential its owner gave it; there is no anonymous self-enrollment.
+    const owner = await jsonRequest(platformUrl, "/v1/users/register", {
+      method: "POST",
+      body: { contact_email: "responder-register-owner@test.local" }
+    });
     const responderServer = createResponderControllerServer({
       serviceName: "responder-controller-register-test",
       platform: {
-        baseUrl: platformUrl
+        baseUrl: platformUrl,
+        apiKey: owner.body.api_key
       },
       state: createResponderState({
         responderId: "responder_register_test",

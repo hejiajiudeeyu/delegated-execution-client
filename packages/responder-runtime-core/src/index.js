@@ -87,13 +87,18 @@ async function registerResponderOnPlatform(platform, body) {
   if (!platform?.baseUrl) {
     throw new Error("responder_platform_base_url_required");
   }
+  // Enrollment requires a controlled credential (FR-002). Sending an
+  // unauthenticated request here would just earn a bare 401; say what is
+  // actually missing instead. A first-time device is enrolled by its owner
+  // through the caller, which is where its key comes from.
+  if (!platform.apiKey) {
+    throw new Error("responder_platform_api_key_required_for_enrollment");
+  }
 
   const response = await postJson(platform.baseUrl, "/v2/responders/register", {
-    headers: platform.apiKey
-      ? {
-          Authorization: `Bearer ${platform.apiKey}`
-        }
-      : {},
+    headers: {
+      Authorization: `Bearer ${platform.apiKey}`
+    },
     body
   });
 

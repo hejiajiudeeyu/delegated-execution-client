@@ -716,8 +716,10 @@ describe("caller-controller integration", () => {
       body: { contact_email: "caller-capability@test.local" }
     });
 
+    // enrollment requires a credential (FR-002)
     const responderRegistration = await jsonRequest(platformUrl, "/v2/responders/register", {
       method: "POST",
+      headers: { Authorization: `Bearer ${registered.body.api_key}` },
       body: {
         responder_id: "responder_legalworks",
         hotline_id: "legalworks.contract.extractor.v1",
