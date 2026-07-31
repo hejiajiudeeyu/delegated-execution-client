@@ -298,7 +298,7 @@ describe("caller-controller integration", () => {
   });
 
   it("builds task contract drafts from prepared requests", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-caller-contract-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const bootstrapResponder = platformState.bootstrap.responders[0];
@@ -395,7 +395,7 @@ describe("caller-controller integration", () => {
   });
 
   it("reports caller metrics for dispatch, ack, and result", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-caller-metrics-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const registered = await jsonRequest(platformUrl, "/v1/users/register", {
@@ -491,7 +491,7 @@ describe("caller-controller integration", () => {
   });
 
   it("captures platform COMPLETED observation without overriding final result source", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-caller-platform-observation-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const registered = await jsonRequest(platformUrl, "/v1/users/register", {
@@ -575,7 +575,7 @@ describe("caller-controller integration", () => {
   });
 
   it("orchestrates catalog, prepare, dispatch, and ACK sync through platform", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-caller-orch-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const hub = createLocalTransportHub();
@@ -708,7 +708,7 @@ describe("caller-controller integration", () => {
   });
 
   it("filters controller catalog by capability through platform", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-caller-capability-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const registered = await jsonRequest(platformUrl, "/v1/users/register", {
@@ -770,7 +770,7 @@ describe("caller-controller integration", () => {
   });
 
   it("parses signed result JSON from email body and validates attachments", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const bootstrap = platformState.bootstrap.responders[0];
     const catalogItem = platformState.catalog.get(bootstrap.hotline_id);
     catalogItem.task_delivery_address = "responder@example.com";
@@ -901,7 +901,7 @@ describe("caller-controller integration", () => {
   });
 
   it("marks email result as UNVERIFIED when display_code mismatches", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const bootstrap = platformState.bootstrap.responders[0];
     const catalogItem = platformState.catalog.get(bootstrap.hotline_id);
     catalogItem.task_delivery_address = "responder@example.com";
@@ -1008,7 +1008,7 @@ describe("caller-controller integration", () => {
   });
 
   it("marks email result as UNVERIFIED when attachment hash mismatches", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const bootstrap = platformState.bootstrap.responders[0];
     const catalogItem = platformState.catalog.get(bootstrap.hotline_id);
     catalogItem.task_delivery_address = "responder@example.com";
@@ -1134,7 +1134,7 @@ describe("caller-controller integration", () => {
   });
 
   it("marks malformed email body as UNVERIFIED", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const bootstrap = platformState.bootstrap.responders[0];
     const catalogItem = platformState.catalog.get(bootstrap.hotline_id);
     catalogItem.task_delivery_address = "responder@example.com";
@@ -1206,7 +1206,7 @@ describe("caller-controller integration", () => {
   });
 
   it("registers responder identities through caller-controller using the caller api key", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-caller-responder-register-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const caller = await jsonRequest(platformUrl, "/v1/users/register", {
@@ -1276,7 +1276,7 @@ describe("caller-controller integration", () => {
   });
 
   it("uses batched platform event sync for active background requests", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-caller-batch-sync-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const caller = await jsonRequest(platformUrl, "/v1/users/register", {

@@ -111,7 +111,7 @@ describe("responder-controller integration", () => {
   });
 
   it("registers responder identities through responder-controller", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-responder-register-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const responderServer = createResponderControllerServer({
@@ -174,7 +174,7 @@ describe("responder-controller integration", () => {
   });
 
   it("registers through responder-controller with a caller api key and stores the issued responder credentials", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-responder-register-owned-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const caller = await jsonRequest(platformUrl, "/v1/users/register", {
@@ -369,7 +369,7 @@ describe("responder-controller integration", () => {
   });
 
   it("introspects inbound token, auto-acks platform, and sends result to caller queue", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-auto-ack-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const hub = createLocalTransportHub();
@@ -453,7 +453,7 @@ describe("responder-controller integration", () => {
   });
 
   it("accepts local-issued task tokens without platform introspection even when platform credentials exist", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-local-token-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const hub = createLocalTransportHub();
@@ -509,7 +509,7 @@ describe("responder-controller integration", () => {
   });
 
   it("reports FAILED event to platform when execution returns error", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-failed-event-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const hub = createLocalTransportHub();
@@ -764,7 +764,7 @@ describe("responder-controller integration", () => {
   });
 
   it("applies guardrails and reports responder metrics", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-responder-guardrail-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const responder = platformState.bootstrap.responders[0];
@@ -849,7 +849,7 @@ describe("responder-controller integration", () => {
   });
 
   it("starts heartbeat loop and updates platform availability", async () => {
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-responder-heartbeat-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     const responder = platformState.bootstrap.responders[0];

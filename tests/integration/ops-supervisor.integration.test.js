@@ -229,7 +229,7 @@ describe("ops supervisor integration", () => {
     process.env.OPS_PORT_MCP_ADAPTER = String(mcpAdapterPort);
     process.env.DELEXEC_HOME = opsHome;
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-local-catalog-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.PLATFORM_API_BASE_URL = platformUrl;
@@ -327,7 +327,7 @@ describe("ops supervisor integration", () => {
     process.env.OPS_PORT_MCP_ADAPTER = String(mcpAdapterPort);
     process.env.DELEXEC_HOME = opsHome;
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-local-example-catalog-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.PLATFORM_API_BASE_URL = platformUrl;
@@ -415,7 +415,7 @@ describe("ops supervisor integration", () => {
     process.env.OPS_PORT_MCP_ADAPTER = String(mcpAdapterPort);
     process.env.DELEXEC_HOME = opsHome;
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     let platformServer = createPlatformServer({ serviceName: "platform-local-example-catalog-down-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.PLATFORM_API_BASE_URL = platformUrl;
@@ -555,7 +555,7 @@ server.listen(port, "127.0.0.1");
     process.env.OPS_PORT_CALLER = String(24000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(25000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-ops-review-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;
@@ -638,7 +638,7 @@ server.listen(port, "127.0.0.1");
     process.env.OPS_PORT_CALLER = String(28000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(29000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-ops-draft-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;
@@ -728,7 +728,7 @@ server.listen(port, "127.0.0.1");
     process.env.OPS_PORT_CALLER = String(32000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(33000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-ops-invalid-guidance-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;
@@ -800,7 +800,7 @@ server.listen(port, "127.0.0.1");
     process.env.OPS_PORT_CALLER = String(34000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(35000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-ops-toggle-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;
@@ -858,7 +858,7 @@ server.listen(port, "127.0.0.1");
     process.env.OPS_PORT_CALLER = String(28000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(29000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-ops-session-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;
@@ -931,7 +931,7 @@ server.listen(port, "127.0.0.1");
     process.env.OPS_PORT_CALLER = String(38000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(39000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-ops-remove-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;
@@ -983,7 +983,7 @@ server.listen(port, "127.0.0.1");
     process.env.OPS_PORT_CALLER = String(42000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(43000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-ops-debug-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;
@@ -1040,7 +1040,7 @@ server.listen(port, "127.0.0.1");
     process.env.OPS_PORT_CALLER = String(46000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(47000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-ops-transport-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;
@@ -1128,7 +1128,7 @@ server.listen(port, "127.0.0.1");
     process.env.OPS_PORT_CALLER = String(50000 + Math.floor(Math.random() * 1000));
     process.env.OPS_PORT_RESPONDER = String(51000 + Math.floor(Math.random() * 1000));
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "platform-ops-gmail-test", state: platformState });
     const platformUrl = await listenServer(platformServer);
     process.env.DELEXEC_HOME = opsHome;

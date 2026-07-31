@@ -236,7 +236,7 @@ describe("ops cli integration", () => {
   it("submits pending hotlines explicitly and persists responder api key", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-register-"));
     cleanupDirs.push(opsHome);
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "ops-cli-platform", state: platformState });
     const platformUrl = await listenServer(platformServer);
 
@@ -735,7 +735,7 @@ describe("ops cli integration", () => {
   it("shows a responder draft and submits a single hotline draft", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-cli-draft-"));
     cleanupDirs.push(opsHome);
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "ops-cli-draft", state: platformState });
     const platformUrl = await listenServer(platformServer);
 
@@ -788,7 +788,7 @@ describe("ops cli integration", () => {
   it("rejects submit-review when any input field is missing caller guidance", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-cli-invalid-guidance-"));
     cleanupDirs.push(opsHome);
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "ops-cli-invalid-guidance", state: platformState });
     const platformUrl = await listenServer(platformServer);
 
@@ -827,7 +827,7 @@ describe("ops cli integration", () => {
   it("rejects single submit-draft when any input field is missing caller guidance", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-cli-invalid-single-draft-"));
     cleanupDirs.push(opsHome);
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "ops-cli-invalid-single-draft", state: platformState });
     const platformUrl = await listenServer(platformServer);
 
@@ -869,7 +869,7 @@ describe("ops cli integration", () => {
   it("reuses the cached local ops session token for submit-review when the secret store is locked", async () => {
     const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-session-submit-"));
     cleanupDirs.push(opsHome);
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "ops-cli-session-submit", state: platformState });
     const platformUrl = await listenServer(platformServer);
 
@@ -1047,7 +1047,7 @@ describe("ops cli integration", () => {
 
     const [supervisorPort, relayPort, callerPort, responderPort] = (await reserveFreePorts(4)).map(String);
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "ops-cli-bootstrap-awaiting", state: platformState });
     const platformUrl = await listenServer(platformServer);
 
@@ -1101,7 +1101,7 @@ describe("ops cli integration", () => {
 
     const [supervisorPort, relayPort, callerPort, responderPort] = (await reserveFreePorts(4)).map(String);
 
-    const platformState = createPlatformState();
+    const platformState = createPlatformState({ bootstrapEnabled: true });
     const platformServer = createPlatformServer({ serviceName: "ops-cli-bootstrap-success", state: platformState });
     const platformUrl = await listenServer(platformServer);
 
