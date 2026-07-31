@@ -28,12 +28,19 @@ function resolveReceiver(target) {
   return target;
 }
 
-async function requestJson(baseUrl, pathname, { method = "GET", body } = {}) {
+async function requestJson(baseUrl, pathname, { method = "GET", body, authToken } = {}) {
   const base = String(baseUrl || "").endsWith("/") ? String(baseUrl) : `${baseUrl}/`;
   const relativePath = String(pathname || "").replace(/^\/+/, "");
+  const headers = {};
+  if (body !== undefined) {
+    headers["content-type"] = "application/json; charset=utf-8";
+  }
+  if (authToken) {
+    headers.authorization = `Bearer ${authToken}`;
+  }
   const response = await fetch(new URL(relativePath, base), {
     method,
-    headers: body === undefined ? undefined : { "content-type": "application/json; charset=utf-8" },
+    headers: Object.keys(headers).length > 0 ? headers : undefined,
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   const text = await response.text();
@@ -43,7 +50,10 @@ async function requestJson(baseUrl, pathname, { method = "GET", body } = {}) {
   };
 }
 
-export function createRelayHttpTransportAdapter({ baseUrl, receiver }) {
+// authToken is the relay bearer credential: either the operator/admin token or
+// a receiver-scoped token minted for this device's inbox. Optional so a local
+// in-process relay on a trusted network keeps working without one.
+export function createRelayHttpTransportAdapter({ baseUrl, receiver, authToken = null }) {
   if (!baseUrl) {
     throw new Error("relay_http_base_url_required");
   }
@@ -62,6 +72,7 @@ export function createRelayHttpTransportAdapter({ baseUrl, receiver }) {
       };
       const response = await requestJson(baseUrl, "/v1/messages/send", {
         method: "POST",
+        authToken,
         body: {
           receiver: target,
           envelope: message
@@ -76,6 +87,7 @@ export function createRelayHttpTransportAdapter({ baseUrl, receiver }) {
     async poll({ limit = 10, receiver: overrideReceiver } = {}) {
       const response = await requestJson(baseUrl, "/v1/messages/poll", {
         method: "POST",
+        authToken,
         body: {
           receiver: overrideReceiver || receiver,
           limit
@@ -87,12 +99,16 @@ export function createRelayHttpTransportAdapter({ baseUrl, receiver }) {
       return response.body;
     },
 
-    async ack(messageId, { receiver: overrideReceiver } = {}) {
+    async ack(messageId, { receiver: overrideReceiver, leaseId } = {}) {
       const response = await requestJson(baseUrl, "/v1/messages/ack", {
         method: "POST",
+        authToken,
         body: {
           receiver: overrideReceiver || receiver,
-          message_id: messageId
+          message_id: messageId,
+          // the lease guard is opt-in: sent only when the caller tracked one,
+          // so an older relay and an unleased flow both keep working
+          ...(leaseId ? { lease_id: leaseId } : {})
         }
       });
       if (response.status !== 200) {
@@ -108,7 +124,7 @@ export function createRelayHttpTransportAdapter({ baseUrl, receiver }) {
       if (thread_id) {
         params.set("thread_id", thread_id);
       }
-      const response = await requestJson(baseUrl, `/v1/messages/peek?${params.toString()}`);
+      const response = await requestJson(baseUrl, `/v1/messages/peek?${params.toString()}`, { authToken });
       if (response.status !== 200) {
         throw new Error(`relay_http_peek_failed:${response.status}`);
       }
@@ -116,7 +132,7 @@ export function createRelayHttpTransportAdapter({ baseUrl, receiver }) {
     },
 
     async health() {
-      const response = await requestJson(baseUrl, `/v1/receivers/${encodeURIComponent(receiver)}/health`);
+      const response = await requestJson(baseUrl, `/v1/receivers/${encodeURIComponent(receiver)}/health`, { authToken });
       if (response.status !== 200) {
         throw new Error(`relay_http_health_failed:${response.status}`);
       }

@@ -166,7 +166,8 @@ function loadTransportConfigFromEnv() {
 
   return createRelayHttpTransportAdapter({
     baseUrl,
-    receiver: process.env.TRANSPORT_RECEIVER || process.env.RESPONDER_ID || "responder-controller"
+    receiver: process.env.TRANSPORT_RECEIVER || process.env.RESPONDER_ID || "responder-controller",
+    authToken: process.env.TRANSPORT_AUTH_TOKEN || null
   });
 }
 

@@ -1212,6 +1212,20 @@ export function createOpsSupervisorServer() {
     }
   }
 
+  // The relay authenticates its business routes, so the managed local relay
+  // runs authenticated too rather than opting out: local dev then exercises
+  // the same path as a real deployment. The credential is per supervisor
+  // process, so relay, caller and responder always agree, and it never
+  // outlives the session.
+  let managedRelayToken = null;
+  function getManagedRelayToken() {
+    if (!managedRelayToken) {
+      managedRelayToken =
+        normalizedString(process.env.OPS_RELAY_ADMIN_TOKEN) || `relay_local_${crypto.randomBytes(24).toString("hex")}`;
+    }
+    return managedRelayToken;
+  }
+
   function serviceEnv(name) {
     const ports = state.config.runtime.ports;
     const runtimeTransport = getRuntimeTransport(state);
@@ -1244,6 +1258,7 @@ export function createOpsSupervisorServer() {
       HOTLINE_IDS: (state.config.responder.hotlines || []).map((item) => item.hotline_id).join(","),
       RESPONDER_PLATFORM_API_KEY: resolvedSecrets.responder_platform_api_key || "",
       TRANSPORT_BASE_URL: relayBaseUrl,
+      TRANSPORT_AUTH_TOKEN: transportEnv.TRANSPORT_AUTH_TOKEN || getManagedRelayToken(),
       TRANSPORT_TYPE: runtimeTransport.type,
       TRANSPORT_PROVIDER: transportEnv.TRANSPORT_PROVIDER || "",
       TRANSPORT_EMAIL_PROVIDER: transportEnv.TRANSPORT_EMAIL_PROVIDER || "",
@@ -1264,7 +1279,9 @@ export function createOpsSupervisorServer() {
       return {
         ...base,
         PORT: String(ports.relay),
-        SERVICE_NAME: "transport-relay"
+        SERVICE_NAME: "transport-relay",
+        RELAY_ADMIN_TOKEN: getManagedRelayToken(),
+        RELAY_TOKEN_SECRET: getManagedRelayToken()
       };
     }
     if (name === "caller") {

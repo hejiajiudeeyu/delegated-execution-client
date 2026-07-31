@@ -115,7 +115,8 @@ function defaultTransportConfig() {
   return {
     type: DEFAULT_TRANSPORT_TYPE,
     relay_http: {
-      base_url: null
+      base_url: null,
+      auth_token: null
     },
     email: {
       provider: DEFAULT_EMAIL_PROVIDER,
@@ -154,7 +155,12 @@ export function normalizeTransportConfig(config = {}, env = {}) {
   return {
     type,
     relay_http: {
-      base_url: normalizedString(source?.relay_http?.base_url) || (type === "relay_http" ? legacyBaseUrl : null)
+      base_url: normalizedString(source?.relay_http?.base_url) || (type === "relay_http" ? legacyBaseUrl : null),
+      // bearer credential for an authenticated relay; null keeps a local
+      // in-process relay on a trusted network working unchanged
+      auth_token:
+        normalizedString(source?.relay_http?.auth_token) ||
+        (type === "relay_http" ? normalizedString(env.TRANSPORT_AUTH_TOKEN) : null)
     },
     email: {
       provider,
@@ -221,6 +227,10 @@ export function buildTransportEnvUpdates(transportConfig = {}, env = {}) {
       transport.type === "relay_http"
         ? transport.relay_http.base_url
         : env.TRANSPORT_BASE_URL || null,
+    TRANSPORT_AUTH_TOKEN:
+      transport.type === "relay_http"
+        ? transport.relay_http.auth_token
+        : env.TRANSPORT_AUTH_TOKEN || null,
     TRANSPORT_EMAIL_PROVIDER: transport.type === "email" ? transport.email.provider : env.TRANSPORT_EMAIL_PROVIDER || null,
     TRANSPORT_EMAIL_MODE: transport.type === "email" ? transport.email.mode : env.TRANSPORT_EMAIL_MODE || null,
     TRANSPORT_EMAIL_SENDER: transport.type === "email" ? transport.email.sender : env.TRANSPORT_EMAIL_SENDER || null,

@@ -71,7 +71,8 @@ function loadTransportConfigFromEnv(serviceName) {
 
   return createRelayHttpTransportAdapter({
     baseUrl,
-    receiver: process.env.TRANSPORT_RECEIVER || serviceName
+    receiver: process.env.TRANSPORT_RECEIVER || serviceName,
+    authToken: process.env.TRANSPORT_AUTH_TOKEN || null
   });
 }
 
