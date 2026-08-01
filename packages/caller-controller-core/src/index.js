@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { canUseArtifactChannel, resolveArtifactDescriptors } from "@delexec/artifact-client";
+import { canUseArtifactChannel, resolveArtifactDescriptors, uploadExecutionArtifacts } from "@delexec/artifact-client";
 import http from "node:http";
 
 import { buildStructuredError, canonicalizeResultPackageForSignature } from "@delexec/contracts";
@@ -1001,6 +1001,44 @@ export async function prepareCallerRequest(request, platformClient, options = {}
   };
 }
 
+/**
+ * Move caller-supplied input bytes onto the artifact channel before dispatch
+ * (A-01, FR-032). The envelope then carries descriptors only, which is what
+ * makes a real document — a PDF for MinerU, say — possible at all: inline
+ * base64 puts the bytes through the relay and past every size limit on the way.
+ *
+ * Unlike the output path, an upload failure here is fatal rather than a
+ * fall-back to inline. The asymmetry is deliberate: a failed output upload
+ * happens after the work is done and falling back preserves it, while a failed
+ * input upload has nothing invested yet and inlining would either blow the
+ * envelope limit or quietly ship a task whose input the responder cannot read.
+ * Failing at dispatch tells the caller immediately, with nothing half-done.
+ */
+export async function uploadCallerInputArtifacts(request, platform, body = {}) {
+  const inputs = Array.isArray(body.input_artifacts) ? body.input_artifacts : [];
+  if (inputs.length === 0) {
+    return { descriptors: [], skipped: false };
+  }
+  if (!canUseArtifactChannel(platform)) {
+    // Local-only runs have no platform binding; the inline path still applies.
+    return { descriptors: [], skipped: true };
+  }
+
+  const { descriptors, failures } = await uploadExecutionArtifacts({
+    platform,
+    requestId: request.request_id,
+    artifacts: inputs,
+    role: "input"
+  });
+  if (failures.length > 0) {
+    const error = new Error("caller_input_artifact_upload_failed");
+    error.code = "caller_input_artifact_upload_failed";
+    error.failures = failures;
+    throw error;
+  }
+  return { descriptors, skipped: false };
+}
+
 export function buildDispatchEnvelope(request, body = {}) {
   const taskDelivery = getTaskDelivery(request, body);
   const resultDelivery = getResultDelivery(request, body);
@@ -1020,6 +1058,11 @@ export function buildDispatchEnvelope(request, body = {}) {
     result_delivery: resultDelivery,
     verification: request.verification || request.delivery_meta?.verification || null,
     payload: body.payload || {},
+    // Descriptors only — never the bytes. Absent when the caller sent no input
+    // artifacts, so an envelope from the inline path is unchanged.
+    ...(Array.isArray(body.input_artifact_descriptors) && body.input_artifact_descriptors.length > 0
+      ? { input_artifact_descriptors: body.input_artifact_descriptors }
+      : {}),
     simulate: body.simulate || "success",
     delay_ms: Number(body.delay_ms || 80),
     lease_ttl_s: Number(body.lease_ttl_s || 30),
@@ -1344,6 +1387,15 @@ export function createCallerControllerServer({
             sendError(res, 400, "CONTRACT_INVALID_PREPARE_REQUEST", "responder_id and hotline_id are required");
             return;
           }
+          if (error instanceof Error && error.code === "caller_input_artifact_upload_failed") {
+            // Nothing was dispatched, so the caller can retry cleanly rather
+            // than chase a task whose input the responder could never read.
+            sendError(res, 502, "INPUT_ARTIFACT_UPLOAD_FAILED", "could not upload input artifacts; nothing was dispatched", {
+              retryable: true,
+              failures: error.failures || []
+            });
+            return;
+          }
           if (error instanceof Error && error.message === "caller_signer_binding_mismatch") {
             sendError(res, 409, "SIGNER_BINDING_MISMATCH", "expected signer public key does not match catalog");
             return;
@@ -1376,9 +1428,15 @@ export function createCallerControllerServer({
 
           const prepared = await prepareCallerRequest(request, platformClient, body);
           const contract = createTaskContractDraft(request, body);
+          const inputArtifacts = await uploadCallerInputArtifacts(
+            request,
+            { baseUrl: platformConfig?.baseUrl, apiKey: platformConfig?.apiKey },
+            body
+          );
           const envelope = buildDispatchEnvelope(request, {
             ...body,
-            task_token: prepared.task_token
+            task_token: prepared.task_token,
+            input_artifact_descriptors: inputArtifacts.descriptors
           });
 
           await transport.send(envelope);

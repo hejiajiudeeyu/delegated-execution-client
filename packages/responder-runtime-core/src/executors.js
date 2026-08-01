@@ -215,6 +215,10 @@ async function runProcessAdapter(adapter, context, timeouts = {}, hooks = {}) {
         input: context.taskInput,
         payload: context.payload,
         constraints: context.constraints,
+        // Input artifacts arrive as verified bytes, base64 on stdin, so a
+        // worker never needs platform credentials of its own to read the
+        // caller's document.
+        input_artifacts: context.inputArtifacts || [],
         task: context.task
       })
     );

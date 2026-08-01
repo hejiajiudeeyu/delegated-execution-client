@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { canUseArtifactChannel, uploadExecutionArtifacts } from "@delexec/artifact-client";
+import { canUseArtifactChannel, resolveArtifactDescriptors, uploadExecutionArtifacts } from "@delexec/artifact-client";
 import http from "node:http";
 
 import {
@@ -519,8 +519,44 @@ function createTaskRecord(input, state, overrides = {}) {
     thread_id: overrides.thread_id ?? input.thread_id ?? `req:${requestId}`,
     task_token: input.task_token || null,
     responder_id: input.responder_id || state.identity.responder_id,
+    // Descriptors as they arrived. The bytes are fetched later, just before
+    // execution, so a task that never runs never pulls a document down.
+    input_artifact_descriptors: Array.isArray(input.input_artifact_descriptors)
+      ? input.input_artifact_descriptors
+      : [],
+    input_artifacts: [],
     raw_envelope: input.raw_envelope || null
   };
+}
+
+/**
+ * Fetch the caller's input artifacts and hand the executor real bytes (A-01,
+ * FR-032). downloadArtifact verifies each against the checksum the platform
+ * holds and throws rather than returning unverified bytes, so an executor
+ * either sees the document the caller uploaded or the task fails — it never
+ * sees a corrupted one.
+ */
+async function resolveTaskInputArtifacts(task, platform) {
+  const descriptors = Array.isArray(task.input_artifact_descriptors) ? task.input_artifact_descriptors : [];
+  if (descriptors.length === 0) {
+    return null;
+  }
+  if (!canUseArtifactChannel(platform)) {
+    return {
+      code: "INPUT_ARTIFACT_CHANNEL_UNAVAILABLE",
+      message: "task carries input artifact descriptors but no platform credentials are configured"
+    };
+  }
+
+  const { attachments, failures } = await resolveArtifactDescriptors({ platform, descriptors });
+  if (failures.length > 0) {
+    return {
+      code: "INPUT_ARTIFACT_UNAVAILABLE",
+      message: failures.map((failure) => `${failure.artifact_id}: ${failure.code}`).join("; ")
+    };
+  }
+  task.input_artifacts = attachments;
+  return null;
 }
 
 function createExecutorContext(task) {
@@ -532,6 +568,8 @@ function createExecutorContext(task) {
     taskInput: task.task_input,
     payload: task.payload,
     constraints: task.constraints,
+    // Verified bytes, already checksum-checked against what the platform holds.
+    inputArtifacts: Array.isArray(task.input_artifacts) ? task.input_artifacts : [],
     rawEnvelope: task.raw_envelope,
     task
   };
@@ -940,6 +978,21 @@ async function runQueuedTask(task, state, { executor, transport = null, platform
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(task.delay_ms || 0))));
 
   try {
+    // Pull the caller's input bytes down first. Failing here rather than
+    // running the hotline on a missing document is the honest outcome: the
+    // executor would otherwise produce a confident result from nothing.
+    const inputFailure = await resolveTaskInputArtifacts(task, platform);
+    if (inputFailure) {
+      await finalizeTask(task, state, transport, platform, {
+        status: "error",
+        error: { ...inputFailure, retryable: true },
+        schema_valid: true,
+        usage: { tokens_in: 0, tokens_out: 0 }
+      });
+      await persistResponderState(onStateChanged, state);
+      return;
+    }
+
     const hooks = {
       onSoftTimeout: async () => {
         task.soft_timeout_at = nowIso();
