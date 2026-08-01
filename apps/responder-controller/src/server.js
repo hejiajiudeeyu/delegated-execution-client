@@ -7,10 +7,11 @@ import {
   createResponderControllerServer,
   createResponderState,
   hydrateResponderState,
+  reconcileInterruptedAttempts,
   serializeResponderState,
   startResponderHeartbeatLoop
 } from "@delexec/responder-runtime-core";
-import { createSqliteSnapshotStore } from "@delexec/sqlite-store";
+import { createSqliteExecutionJournal, createSqliteSnapshotStore } from "@delexec/sqlite-store";
 import { createEmailEngineTransportAdapter } from "@delexec/transport-emailengine";
 import { createGmailTransportAdapter } from "@delexec/transport-gmail";
 import { createRelayHttpTransportAdapter } from "@delexec/transport-relay-http";
@@ -185,6 +186,22 @@ async function createOptionalPersistence(serviceName) {
   return store;
 }
 
+// Shares the snapshot database file but not its semantics: the snapshot is
+// overwritten every save, the journal only ever grows.
+async function createOptionalJournal(serviceName) {
+  const sqlitePath = process.env.SQLITE_DATABASE_PATH || null;
+  if (!sqlitePath) {
+    return null;
+  }
+
+  const journal = await createSqliteExecutionJournal({
+    databasePath: sqlitePath,
+    serviceName
+  });
+  await journal.migrate();
+  return journal;
+}
+
 if (isDirectRun()) {
   const port = Number(process.env.PORT || 8082);
   const serviceName = process.env.SERVICE_NAME || "responder-controller";
@@ -197,6 +214,7 @@ if (isDirectRun()) {
   if (persistence) {
     hydrateResponderState(state, await persistence.loadSnapshot());
   }
+  state.journal = await createOptionalJournal(serviceName);
   let stopHeartbeat = () => {};
   const persistSnapshot = persistence
     ? async (currentState) => {
@@ -240,9 +258,36 @@ if (isDirectRun()) {
     }
   });
 
-  server.listen(port, "0.0.0.0", () => {
+  server.listen(port, "0.0.0.0", async () => {
     restartHeartbeatLoop();
     console.log(`[${serviceName}] listening on ${port}`);
+
+    // After the heartbeat is up, so the platform already knows this device is
+    // back before it starts hearing about work the last boot left behind.
+    try {
+      const reconciliation = await reconcileInterruptedAttempts({
+        state,
+        platform,
+        executor,
+        transport,
+        onStateChanged: persistSnapshot
+      });
+      if (reconciliation.inspected > 0) {
+        console.log(
+          `[${serviceName}] reconciled ${reconciliation.inspected} interrupted attempt(s): ` +
+            `${reconciliation.rerun.length} re-run, ${reconciliation.reported.length} reported failed, ` +
+            `${reconciliation.unreported.length} still open`
+        );
+      }
+      for (const open of reconciliation.unreported) {
+        console.warn(
+          `[${serviceName}] call ${open.call_id} attempt ${open.attempt_id} could not be reconciled ` +
+            `and stays open on purpose${open.status ? ` (platform said ${open.status})` : ""}`
+        );
+      }
+    } catch (error) {
+      console.error(`[${serviceName}] reconciliation pass failed:`, error);
+    }
   });
 
   server.on("close", () => {
@@ -250,6 +295,9 @@ if (isDirectRun()) {
     if (persistence) {
       void persistence.saveSnapshot(serializeResponderState(state));
       void persistence.close();
+    }
+    if (state.journal) {
+      void state.journal.close();
     }
   });
 }

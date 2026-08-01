@@ -3,7 +3,15 @@ import crypto from "node:crypto";
 import { canUseArtifactChannel, uploadExecutionArtifacts } from "@delexec/artifact-client";
 import http from "node:http";
 
-import { buildStructuredError, canonicalizeResultPackageForSignature } from "@delexec/contracts";
+import {
+  EXECUTION_STATUS,
+  RECOVERABILITY_CLASS,
+  buildStructuredError,
+  canonicalizeResultPackageForSignature,
+  mayAutoRerun,
+  recoverabilityOf,
+  validateReconciliationReport
+} from "@delexec/contracts";
 import { ensureTaskFilesDir } from "@delexec/runtime-utils";
 import {
   createConfiguredHotlineExecutor,
@@ -17,6 +25,20 @@ import {
 function nowIso() {
   return new Date().toISOString();
 }
+
+/**
+ * The journal vocabulary, restated here because the runtime owns the meaning
+ * and the store is only a port — pulling in @delexec/sqlite-store would drag a
+ * native dependency into the execution engine for four string literals.
+ * `tests/unit/execution-journal.test.js` asserts the two definitions agree, so
+ * the duplication cannot drift.
+ */
+export const JOURNAL_ENTRY = Object.freeze({
+  ATTEMPT_STARTED: "attempt_started",
+  ATTEMPT_TERMINAL: "attempt_terminal",
+  ATTEMPT_RECONCILED: "attempt_reconciled",
+  ATTEMPT_SUPERSEDED: "attempt_superseded"
+});
 
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -111,6 +133,33 @@ async function registerResponderOnPlatform(platform, body) {
   }
 
   return response.body;
+}
+
+/**
+ * Journal writes are never allowed to take down an execution: a responder
+ * that refuses to work because it cannot write history is worse than one that
+ * loses history. The cost is that a broken journal degrades silently into
+ * "nothing to reconcile", so it is surfaced on the state instead of swallowed.
+ */
+function appendJournalEntry(state, entry) {
+  if (!state.journal) {
+    return null;
+  }
+  try {
+    return state.journal.append({ bootId: state.boot_id, ...entry });
+  } catch (error) {
+    state.journal_error = error instanceof Error ? error.message : String(error);
+    return null;
+  }
+}
+
+function recoverabilityForTask(state, task) {
+  const hotline = (state.hotlines || []).find((entry) => entry?.hotline_id === task.hotline_id);
+  return recoverabilityOf({
+    hotline_id: task.hotline_id,
+    version: hotline?.version || task.hotline_version || "unknown",
+    recoverability: hotline?.recoverability ?? task.recoverability ?? undefined
+  });
 }
 
 async function persistResponderState(onStateChanged, state) {
@@ -444,6 +493,9 @@ function createTaskRecord(input, state, overrides = {}) {
   return {
     task_id: taskId,
     request_id: requestId,
+    // One execution attempt of this task. A re-run after a restart mints a new
+    // one, so the journal can tell "tried twice" from "reported twice".
+    attempt_id: input.attempt_id || `attempt_${crypto.randomUUID()}`,
     hotline_id: input.hotline_id || state.identity.hotline_ids[0],
     task_type: input.task_type || null,
     task_input: input.task_input ?? input.payload ?? null,
@@ -580,6 +632,17 @@ async function finalizeTask(task, state, transport, platform, execution) {
     task.result_package.status === "ok" ? "responder.task.succeeded" : "responder.task.failed",
     task.result_package.status === "error" ? { code: task.result_package.error?.code || "EXEC_UNKNOWN" } : {}
   );
+  // Last, and only after the result envelope has actually been sent: this row
+  // is what stops the next boot from reopening an attempt that did finish.
+  appendJournalEntry(state, {
+    callId: task.request_id,
+    attemptId: task.attempt_id,
+    entryType: JOURNAL_ENTRY.ATTEMPT_TERMINAL,
+    observedExecution:
+      task.result_package.status === "ok" ? EXECUTION_STATUS.DELIVERED : EXECUTION_STATUS.FAILED,
+    recoverability: task.recoverability || null,
+    detail: { task_id: task.task_id, error_code: task.result_package.error?.code || null }
+  });
 }
 
 async function failTask(task, state, transport, platform, error) {
@@ -617,6 +680,11 @@ export function createResponderState(options = {}) {
     activeTaskIds: [],
     workerConcurrency,
     signing,
+    // Identifies this process lifetime. Deliberately not restored by
+    // hydrateResponderState: a boot_id that survived the restart could not
+    // distinguish work this process is running from work the dead one was.
+    boot_id: options.bootId || `boot_${crypto.randomUUID()}`,
+    journal: options.journal || null,
     identity: {
       responder_id: options.responderId || "responder_starlight",
       hotline_ids: options.hotlineIds || ["starlight.creative.studio.v1"]
@@ -666,6 +734,183 @@ export function hydrateResponderState(state, snapshot) {
   return state;
 }
 
+// ------------------------------------------------------- reconciliation (A-03)
+
+/**
+ * Deterministic bytes for the report signature. Sorting the keys means the
+ * platform can rebuild exactly what was signed without agreeing on JSON key
+ * order with whatever serializer this runtime happens to use.
+ */
+export function canonicalizeReconciliationReport(report) {
+  const ordered = {};
+  for (const key of Object.keys(report).sort()) {
+    if (report[key] !== undefined) {
+      ordered[key] = report[key];
+    }
+  }
+  return ordered;
+}
+
+export function signReconciliationReport(report, state) {
+  const canonical = canonicalizeReconciliationReport(report);
+  const signature = crypto.sign(null, Buffer.from(JSON.stringify(canonical), "utf8"), state.signing.privateKey);
+  return {
+    report: canonical,
+    signature: {
+      signature_algorithm: "Ed25519",
+      signer_public_key_pem: state.signing.publicKeyPem,
+      signature_base64: signature.toString("base64")
+    }
+  };
+}
+
+async function postReconciliationReport(platform, requestId, envelope) {
+  if (!platform?.baseUrl || !platform.apiKey) {
+    return { ok: false, skipped: true };
+  }
+  const response = await postJson(platform.baseUrl, `/v1/requests/${encodeURIComponent(requestId)}/reconcile`, {
+    headers: { Authorization: `Bearer ${platform.apiKey}` },
+    body: envelope
+  });
+  return { ok: response.status >= 200 && response.status < 300, response };
+}
+
+/**
+ * Close out attempts that were running when a previous process died (A-03,
+ * PRD Flow E).
+ *
+ * The rule that shapes everything here: an interrupted attempt has an *unknown*
+ * outcome, and unknown is not the same as failed-and-therefore-cheap or
+ * done-and-therefore-billable. So only a hotline version that explicitly
+ * declares itself restartable is re-run; everything else is reported to the
+ * platform as a terminal `failed` and never silently retried, never settled.
+ *
+ * Reporting `failed` for work that may in fact have completed is the deliberate
+ * asymmetry: the responder cannot prove delivery it never observed, and the
+ * caller must not be charged for a result nobody can produce. If the work did
+ * finish, the evidence for that would have been the delivered result envelope,
+ * and there isn't one.
+ */
+export async function reconcileInterruptedAttempts({
+  state,
+  platform = null,
+  executor = null,
+  transport = null,
+  onStateChanged = null
+} = {}) {
+  const summary = { inspected: 0, rerun: [], reported: [], unreported: [] };
+  if (!state?.journal) {
+    return summary;
+  }
+
+  let interrupted = [];
+  try {
+    interrupted = state.journal.listInterruptedAttempts({ excludeBootId: state.boot_id });
+  } catch (error) {
+    state.journal_error = error instanceof Error ? error.message : String(error);
+    return summary;
+  }
+  summary.inspected = interrupted.length;
+
+  for (const attempt of interrupted) {
+    const task = getTaskByRequestId(state, attempt.call_id);
+    const recoverable = mayAutoRerun({
+      hotline_id: attempt.detail?.hotline_id || task?.hotline_id || "unknown",
+      version: attempt.detail?.hotline_version || "unknown",
+      recoverability: attempt.recoverability
+    });
+
+    if (recoverable && task && executor) {
+      // The old attempt is closed as superseded rather than terminal: nothing
+      // observed its outcome, and the fresh attempt gets its own id so the two
+      // never collapse into one row.
+      appendJournalEntry(state, {
+        callId: attempt.call_id,
+        attemptId: attempt.attempt_id,
+        entryType: JOURNAL_ENTRY.ATTEMPT_SUPERSEDED,
+        recoverability: attempt.recoverability,
+        detail: { superseded_by_boot: state.boot_id, reason: "restartable_after_interruption" }
+      });
+      task.attempt_id = `attempt_${crypto.randomUUID()}`;
+      task.status = "QUEUED";
+      task.updated_at = nowIso();
+      if (!state.queue.includes(task.task_id)) {
+        state.queue.push(task.task_id);
+      }
+      summary.rerun.push({ call_id: attempt.call_id, attempt_id: task.attempt_id });
+      continue;
+    }
+
+    const report = {
+      call_id: attempt.call_id,
+      attempt_id: attempt.attempt_id,
+      boot_id: attempt.boot_id,
+      observed_execution: EXECUTION_STATUS.FAILED,
+      reconciled_by_boot_id: state.boot_id,
+      reconciled_at: nowIso(),
+      reason: "interrupted_attempt_outcome_unobserved",
+      recoverability: attempt.recoverability || RECOVERABILITY_CLASS.NON_RECOVERABLE
+    };
+
+    const validation = validateReconciliationReport(report);
+    if (!validation.valid) {
+      // A report the protocol rejects is not sent and not journaled as closed:
+      // leaving the attempt open is honest, and the next boot tries again.
+      summary.unreported.push({ call_id: attempt.call_id, attempt_id: attempt.attempt_id, errors: validation.errors });
+      continue;
+    }
+
+    const envelope = signReconciliationReport(report, state);
+    let delivered = false;
+    try {
+      const result = await postReconciliationReport(platform, attempt.call_id, envelope);
+      delivered = Boolean(result.ok);
+      if (!delivered) {
+        summary.unreported.push({
+          call_id: attempt.call_id,
+          attempt_id: attempt.attempt_id,
+          status: result.response?.status ?? null,
+          skipped: Boolean(result.skipped)
+        });
+      }
+    } catch (error) {
+      summary.unreported.push({
+        call_id: attempt.call_id,
+        attempt_id: attempt.attempt_id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    // Only a report the platform actually accepted closes the attempt. An
+    // unreachable platform must leave it open, or a restart during an outage
+    // would quietly erase the call from both sides.
+    if (delivered) {
+      appendJournalEntry(state, {
+        callId: attempt.call_id,
+        attemptId: attempt.attempt_id,
+        entryType: JOURNAL_ENTRY.ATTEMPT_RECONCILED,
+        observedExecution: EXECUTION_STATUS.FAILED,
+        recoverability: attempt.recoverability,
+        detail: { reconciled_by_boot: state.boot_id }
+      });
+      if (task) {
+        task.status = "FAILED";
+        task.updated_at = nowIso();
+        task.reconciled = true;
+      }
+      summary.reported.push({ call_id: attempt.call_id, attempt_id: attempt.attempt_id });
+    }
+  }
+
+  if (summary.rerun.length > 0 || summary.reported.length > 0) {
+    await persistResponderState(onStateChanged, state);
+  }
+  if (summary.rerun.length > 0 && executor) {
+    scheduleProcessQueue(state, { executor, transport, platform, onStateChanged });
+  }
+  return summary;
+}
+
 function getTaskByRequestId(state, requestId) {
   const taskId = state.requestIndex.get(requestId);
   return taskId ? state.tasks.get(taskId) || null : null;
@@ -681,6 +926,16 @@ function workerConcurrencyForState(state, override = null) {
 }
 
 async function runQueuedTask(task, state, { executor, transport = null, platform = null, onStateChanged = null } = {}) {
+  // Written before the executor runs, so a process killed one line later still
+  // leaves the evidence that this attempt was in flight.
+  task.recoverability = recoverabilityForTask(state, task);
+  appendJournalEntry(state, {
+    callId: task.request_id,
+    attemptId: task.attempt_id,
+    entryType: JOURNAL_ENTRY.ATTEMPT_STARTED,
+    recoverability: task.recoverability,
+    detail: { task_id: task.task_id, hotline_id: task.hotline_id, responder_id: task.responder_id }
+  });
   await persistResponderState(onStateChanged, state);
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(task.delay_ms || 0))));
 
