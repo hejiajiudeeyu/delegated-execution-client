@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -69,6 +70,93 @@ async function createIsolatedCliEnv(opsHome) {
   };
 }
 
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+// Everything the CLI leaves running past its own exit — the supervisor and the
+// ops console — is spawned detached, so each tracked pid leads its own process
+// group. Signalling the group also reaches the services the supervisor spawned
+// in turn, should any of them survive the supervisor's own shutdown.
+function signalProcessTree(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+    return;
+  } catch {}
+  try {
+    process.kill(pid, signal);
+  } catch {}
+}
+
+async function terminateProcessTree(pid, { timeoutMs = 8000 } = {}) {
+  if (!Number.isInteger(pid) || pid <= 0 || !processAlive(pid)) {
+    return;
+  }
+  signalProcessTree(pid, "SIGTERM");
+  const deadline = Date.now() + timeoutMs;
+  while (processAlive(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (processAlive(pid)) {
+    signalProcessTree(pid, "SIGKILL");
+  }
+}
+
+function isPortListening(port) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: "127.0.0.1", port });
+    const settle = (listening) => {
+      socket.destroy();
+      resolve(listening);
+    };
+    socket.once("connect", () => settle(true));
+    socket.once("error", () => settle(false));
+    socket.setTimeout(500, () => settle(false));
+  });
+}
+
+// Returns the ports still held once the deadline passes, so a caller can assert
+// on an empty list and name the offender when a service outlives the test.
+async function waitForPortsClosed(ports, { timeoutMs = 10000 } = {}) {
+  const watched = ports.map(Number).filter((port) => Number.isInteger(port) && port > 0);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const open = [];
+    for (const port of watched) {
+      if (await isPortListening(port)) {
+        open.push(port);
+      }
+    }
+    if (open.length === 0 || Date.now() >= deadline) {
+      return open;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+// Returns the ports that came up before the deadline.
+async function waitForPortsListening(ports, { timeoutMs = 20000 } = {}) {
+  const watched = ports.map(Number).filter((port) => Number.isInteger(port) && port > 0);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const open = [];
+    for (const port of watched) {
+      if (await isPortListening(port)) {
+        open.push(port);
+      }
+    }
+    if (open.length === watched.length || Date.now() >= deadline) {
+      return open;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 describe("ops cli integration", () => {
   const cleanupDirs = [];
   const cleanupPids = [];
@@ -76,10 +164,7 @@ describe("ops cli integration", () => {
   afterEach(async () => {
     clearOpsEnv();
     while (cleanupPids.length > 0) {
-      const pid = cleanupPids.pop();
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {}
+      await terminateProcessTree(cleanupPids.pop());
     }
     while (cleanupDirs.length > 0) {
       const dir = cleanupDirs.pop();
@@ -1337,6 +1422,43 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     }
   }, 150000);
 
+  it("takes its managed services down when the started supervisor is signalled", async () => {
+    const opsHome = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-start-shutdown-"));
+    cleanupDirs.push(opsHome);
+
+    const [supervisorPort, relayPort, callerPort, responderPort, skillAdapterPort, mcpAdapterPort] = (
+      await reserveFreePorts(6)
+    ).map(String);
+
+    const env = {
+      ...process.env,
+      DELEXEC_HOME: opsHome,
+      OPS_PORT_SUPERVISOR: supervisorPort,
+      OPS_PORT_RELAY: relayPort,
+      OPS_PORT_CALLER: callerPort,
+      OPS_PORT_RESPONDER: responderPort,
+      OPS_PORT_SKILL_ADAPTER: skillAdapterPort,
+      OPS_PORT_MCP_ADAPTER: mcpAdapterPort
+    };
+
+    const supervisor = spawn(process.execPath, [CLI_PATH, "start"], { env, detached: true, stdio: "ignore" });
+    supervisor.unref();
+    cleanupPids.push(supervisor.pid);
+
+    const managedPorts = [relayPort, callerPort, skillAdapterPort, mcpAdapterPort];
+    const listening = await waitForPortsListening([supervisorPort, ...managedPorts]);
+    expect(listening.sort()).toEqual([supervisorPort, ...managedPorts].map(Number).sort());
+
+    // Deliberately signals the supervisor alone rather than its process group:
+    // the point of the assertion below is that the supervisor itself carries
+    // the shutdown to the services it spawned. Killing the group would pass
+    // even with an ops CLI that ignores signals entirely.
+    process.kill(supervisor.pid, "SIGTERM");
+
+    const stillOpen = await waitForPortsClosed([supervisorPort, ...managedPorts]);
+    expect(stillOpen).toEqual([]);
+  }, 60000);
+
   it("packs into a clean-room installable cli tarball", async () => {
     const packDir = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-pack-"));
     const installDir = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-clean-room-"));
@@ -1379,64 +1501,90 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     };
     const cliPath = path.join(installDir, "node_modules/.bin/delexec-ops");
 
-    await execFileAsync(cliPath, ["responder", "init", "--responder-id", "responder_cli_test"], {
-      cwd: installDir,
-      env: cleanRoomEnv
-    });
+    // `bootstrap` starts a supervisor that outlives the CLI process, and that
+    // supervisor owns caller, responder and both adapters. Nothing else in this
+    // test tears it down, so track its pid and shut the tree down at the end.
+    let supervisorPid = null;
+    try {
+      await execFileAsync(cliPath, ["responder", "init", "--responder-id", "responder_cli_test"], {
+        cwd: installDir,
+        env: cleanRoomEnv
+      });
 
-    const doctor = await execFileAsync(cliPath, ["doctor"], {
-      cwd: installDir,
-      env: cleanRoomEnv
-    });
-    const output = JSON.parse(doctor.stdout);
-    expect(output.config.platform.base_url).toBe("http://127.0.0.1:8080");
-    expect(output.config.responder.responder_id).toBe("responder_cli_test");
+      const doctor = await execFileAsync(cliPath, ["doctor"], {
+        cwd: installDir,
+        env: cleanRoomEnv
+      });
+      const output = JSON.parse(doctor.stdout);
+      expect(output.config.platform.base_url).toBe("http://127.0.0.1:8080");
+      expect(output.config.responder.responder_id).toBe("responder_cli_test");
 
-    const bootstrap = JSON.parse(
-      (
-        await execFileAsync(
-          cliPath,
-          ["bootstrap", "--email", "clean-room@test.local", "--text", "Summarize this bootstrap request."],
-          {
-            cwd: installDir,
-            env: cleanRoomEnv,
-            timeout: 20000
+      const bootstrap = JSON.parse(
+        (
+          await execFileAsync(
+            cliPath,
+            ["bootstrap", "--email", "clean-room@test.local", "--text", "Summarize this bootstrap request."],
+            {
+              cwd: installDir,
+              env: cleanRoomEnv,
+              timeout: 20000
+            }
+          )
+        ).stdout
+      );
+      expect(bootstrap.ok).toBe(true);
+      expect(bootstrap.status).toBe("SUCCEEDED");
+
+      const supervisorStep = bootstrap.steps?.find((step) => step.step === "supervisor_started");
+      expect(supervisorStep?.started).toBe(true);
+      expect(typeof supervisorStep?.pid).toBe("number");
+      supervisorPid = supervisorStep.pid;
+      cleanupPids.push(supervisorPid);
+
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        try {
+          const health = await fetch(`http://127.0.0.1:${supervisorPort}/healthz`);
+          if (health.status === 200) {
+            break;
           }
-        )
-      ).stdout
-    );
-    expect(bootstrap.ok).toBe(true);
-    expect(bootstrap.status).toBe("SUCCEEDED");
+        } catch {}
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
 
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      try {
-        const health = await fetch(`http://127.0.0.1:${supervisorPort}/healthz`);
-        if (health.status === 200) {
-          break;
-        }
-      } catch {}
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      const mcpSpec = JSON.parse(
+        (
+          await execFileAsync(cliPath, ["mcp", "spec"], {
+            cwd: installDir,
+            env: cleanRoomEnv
+          })
+        ).stdout
+      );
+      expect(mcpSpec.ok).toBe(true);
+      expect(mcpSpec.spec.stdio.args[0]).toContain(path.join("node_modules", "@delexec", "caller-skill-mcp-adapter"));
+      expect(fs.existsSync(mcpSpec.spec.stdio.args[0])).toBe(true);
+
+      const uiStart = await execFileAsync(cliPath, ["ui", "start", "--no-browser"], {
+        cwd: installDir,
+        env: cleanRoomEnv
+      }).catch((error) => error);
+      expect(uiStart.code).toBe(1);
+      expect(uiStart.stderr || uiStart.stdout).toContain("Ops Console UI requires a source checkout");
+    } finally {
+      await terminateProcessTree(supervisorPid);
     }
 
-    const mcpSpec = JSON.parse(
-      (
-        await execFileAsync(cliPath, ["mcp", "spec"], {
-          cwd: installDir,
-          env: cleanRoomEnv
-        })
-      ).stdout
-    );
-    expect(mcpSpec.ok).toBe(true);
-    expect(mcpSpec.spec.stdio.args[0]).toContain(path.join("node_modules", "@delexec", "caller-skill-mcp-adapter"));
-    expect(fs.existsSync(mcpSpec.spec.stdio.args[0])).toBe(true);
-
-    const uiStart = await execFileAsync(cliPath, ["ui", "start", "--no-browser"], {
-      cwd: installDir,
-      env: cleanRoomEnv
-    }).catch((error) => error);
-    expect(uiStart.code).toBe(1);
-    expect(uiStart.stderr || uiStart.stdout).toContain("Ops Console UI requires a source checkout");
-  }, 30000);
+    // Guards the leak directly: a supervisor that fails to take its services
+    // down with it leaves these ports held for the rest of the workspace run.
+    const stillOpen = await waitForPortsClosed([
+      supervisorPort,
+      relayPort,
+      callerPort,
+      responderPort,
+      skillAdapterPort,
+      mcpAdapterPort
+    ]);
+    expect(stillOpen).toEqual([]);
+  }, 45000);
 
   it("packs into a globally installable cli tarball", async () => {
     const packDir = fs.mkdtempSync(path.join(os.tmpdir(), "delexec-ops-global-pack-"));

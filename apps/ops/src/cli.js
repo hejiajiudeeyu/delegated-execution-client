@@ -787,7 +787,9 @@ async function ensureSupervisorAvailable(baseUrl, env) {
     }
     return health;
   });
-  return { started: true };
+  // Reported so whoever triggered the implicit start can shut the supervisor
+  // down again; it outlives this CLI process by design.
+  return { started: true, pid: child.pid };
 }
 
 async function maybeApproveExample({ platformUrl, adminApiKey, responderId }) {
@@ -850,11 +852,55 @@ async function commandStart() {
   state.env = saveOpsState(state);
   const server = createOpsSupervisorServer();
   await new Promise((resolve) => server.listen(state.config.runtime.ports.supervisor, "127.0.0.1", resolve));
-  await server.startManagedServices();
-  console.log(`[ops-supervisor] listening on ${state.config.runtime.ports.supervisor}`);
+
+  // caller, responder and the two adapters are plain children of this process.
+  // Signalling only the supervisor reparents them to init and leaves their
+  // ports held, so shutting them down is part of this command's contract.
+  // Wired up before the services start: bringing them all up takes seconds, and
+  // a signal arriving inside that window used to orphan whatever was already
+  // running.
+  let shuttingDown = null;
+  const shutdown = (signal) => {
+    if (shuttingDown) {
+      return shuttingDown;
+    }
+    shuttingDown = (async () => {
+      try {
+        await server.stopManagedServices({ final: true });
+        server.closeAllConnections?.();
+        await new Promise((resolve) => server.close(resolve));
+      } finally {
+        process.exit(signal === "SIGINT" ? 130 : 0);
+      }
+    })();
+    return shuttingDown;
+  };
+
+  // Exits that never reach these handlers (uncaught throw, explicit
+  // process.exit) fall back to the supervisor's own process-exit sweep.
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.on(signal, () => {
+      void shutdown(signal);
+    });
+  }
   server.on("close", () => {
-    void server.stopManagedServices();
+    if (!shuttingDown) {
+      void server.stopManagedServices({ final: true });
+    }
   });
+
+  try {
+    await server.startManagedServices();
+  } catch (error) {
+    // A shutdown that interrupts the startup sequence aborts the remaining
+    // launches on purpose; the shutdown itself is already in flight.
+    if (!shuttingDown) {
+      throw error;
+    }
+    await shuttingDown;
+    return;
+  }
+  console.log(`[ops-supervisor] listening on ${state.config.runtime.ports.supervisor}`);
 }
 
 async function commandStatus() {
@@ -1747,6 +1793,7 @@ async function commandUiStart(args) {
     ok: true,
     supervisor_url: supervisorUrl,
     supervisor_started: supervisor.started,
+    supervisor_pid: supervisor.pid ?? null,
     ui,
     next_steps: {
       reopen_web_ui: "delexec-ops ui start --open",

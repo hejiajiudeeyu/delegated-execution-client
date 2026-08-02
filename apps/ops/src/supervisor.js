@@ -907,6 +907,31 @@ function logSeverity(message) {
   return null;
 }
 
+// Managed services are ordinary children, so any process that hosts a
+// supervisor — the ops CLI, but equally a test runner embedding one — leaves
+// them reparented to init if it exits without sweeping them. A single shared
+// exit hook covers the paths no `finally` can reach: an uncaught throw, a fatal
+// worker error, an explicit process.exit.
+const supervisorExitSweeps = new Set();
+let supervisorExitHookInstalled = false;
+
+function registerSupervisorExitSweep(sweep) {
+  supervisorExitSweeps.add(sweep);
+  if (supervisorExitHookInstalled) {
+    return;
+  }
+  supervisorExitHookInstalled = true;
+  process.on("exit", () => {
+    for (const pending of supervisorExitSweeps) {
+      try {
+        pending();
+      } catch {
+        // nothing useful to do while the process is already unwinding
+      }
+    }
+  });
+}
+
 export function createOpsSupervisorServer() {
   const state = ensureOpsState();
   appendSupervisorEvent({
@@ -916,6 +941,9 @@ export function createOpsSupervisorServer() {
   const runtime = {
     processes: new Map(),
     starting: new Map(),
+    // Set once shutdown begins, so a launch racing the shutdown cannot spawn a
+    // service into a supervisor that is already on its way out.
+    stopping: false,
     relayQueues: new Map(),
     auth: {
       sessions: new Map(),
@@ -1195,6 +1223,14 @@ export function createOpsSupervisorServer() {
     return processInfo;
   }
 
+  async function waitForProcessExit(processInfo, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (!processInfo.exited && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return processInfo.exited;
+  }
+
   async function stopProcessInfo(processInfo) {
     if (!processInfo || processInfo.exited) {
       return;
@@ -1203,13 +1239,17 @@ export function createOpsSupervisorServer() {
       await processInfo.close();
       return;
     }
-    if (processInfo.child) {
-      processInfo.child.kill();
-      const deadline = Date.now() + 3000;
-      while (!processInfo.exited && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 100));
-      }
+    if (!processInfo.child) {
+      return;
     }
+    processInfo.child.kill("SIGTERM");
+    if (await waitForProcessExit(processInfo, 3000)) {
+      return;
+    }
+    // A service that never honours SIGTERM used to be abandoned here: it then
+    // outlived the supervisor and kept holding its port. Escalate instead.
+    processInfo.child.kill("SIGKILL");
+    await waitForProcessExit(processInfo, 2000);
   }
 
   // The relay authenticates its business routes, so the managed local relay
@@ -1406,6 +1446,9 @@ export function createOpsSupervisorServer() {
   }
 
   async function ensureService(name) {
+    if (runtime.stopping) {
+      throw new Error("supervisor_stopping");
+    }
     const current = runtime.processes.get(name);
     if (current && !current.exited) {
       return current;
@@ -3089,12 +3132,50 @@ function buildResponderRegisterHeaders() {
     appendSupervisorEvent({ type: "managed_services_started" });
   };
 
-  server.stopManagedServices = async () => {
-    for (const processInfo of runtime.processes.values()) {
-      await stopProcessInfo(processInfo);
+  // `final: true` keeps the launch fence up after the sweep, for a supervisor
+  // that is going away. The default lifts it again so stop/start restarts and
+  // transport switches keep working on a supervisor that stays up.
+  server.stopManagedServices = async ({ final = false } = {}) => {
+    runtime.stopping = true;
+    try {
+      // A shutdown can land while services are still coming up. An in-flight
+      // launch is not in runtime.processes yet, so drain the pending starts
+      // first — otherwise those children are spawned and then never stopped.
+      // Bounded because runtime.stopping blocks any further launch.
+      for (let drain = 0; drain < 16 && runtime.starting.size > 0; drain += 1) {
+        await Promise.allSettled([...runtime.starting.values()]);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      for (const processInfo of runtime.processes.values()) {
+        await stopProcessInfo(processInfo);
+      }
+      appendSupervisorEvent({ type: "managed_services_stopped" });
+    } finally {
+      runtime.stopping = final;
     }
-    appendSupervisorEvent({ type: "managed_services_stopped" });
   };
+
+  // Synchronous last resort for `process.on("exit")`, where nothing async can
+  // still run.
+  server.killManagedServicesSync = () => {
+    for (const processInfo of runtime.processes.values()) {
+      if (processInfo.exited || !processInfo.child) {
+        continue;
+      }
+      try {
+        processInfo.child.kill("SIGKILL");
+      } catch {
+        // the child is already gone
+      }
+    }
+  };
+
+  server.listManagedServicePids = () =>
+    [...runtime.processes.values()]
+      .filter((processInfo) => !processInfo.exited && processInfo.child?.pid)
+      .map((processInfo) => processInfo.child.pid);
+
+  registerSupervisorExitSweep(server.killManagedServicesSync);
 
   return server;
 }
