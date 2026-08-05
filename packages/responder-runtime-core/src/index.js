@@ -5,12 +5,15 @@ import http from "node:http";
 
 import {
   EXECUTION_STATUS,
+  OBSERVATIONAL_REQUEST_EVENT,
   RECOVERABILITY_CLASS,
+  REQUEST_PROGRESS_STAGE,
   buildStructuredError,
   canonicalizeResultPackageForSignature,
   mayAutoRerun,
   recoverabilityOf,
-  validateReconciliationReport
+  validateReconciliationReport,
+  validateRequestProgress
 } from "@delexec/contracts";
 import { ensureTaskFilesDir } from "@delexec/runtime-utils";
 import {
@@ -354,6 +357,7 @@ async function sendResultEnvelope(task, state, transport, platform = null) {
   }));
 
   if (executionArtifacts.length > 0 && canUseArtifactChannel(platform)) {
+    await postTaskProgress(task, platform, REQUEST_PROGRESS_STAGE.OUTPUT_UPLOADING);
     const { descriptors, failures } = await uploadExecutionArtifacts({
       platform,
       requestId: task.request_id,
@@ -428,6 +432,42 @@ async function postRequestLifecycleEvent(task, platform, eventType, detail = {})
   });
 
   return { ok: response.status >= 200 && response.status < 300, response };
+}
+
+/**
+ * Best-effort progress observation (FR-036). Progress must never change a
+ * task's outcome: a failed or slow post is swallowed, and the payload is
+ * validated locally first so a runtime bug surfaces as a skipped beat rather
+ * than a platform 400 storm.
+ */
+async function postTaskProgress(task, platform, stage, { percent, message } = {}) {
+  if (!platform?.baseUrl || !platform.apiKey) {
+    return { ok: false, skipped: true };
+  }
+
+  const seq = task.progress_seq ?? 0;
+  task.progress_seq = seq + 1;
+  const progress = {
+    seq,
+    stage,
+    attempt_id: task.attempt_id
+  };
+  if (percent !== undefined && percent !== null) {
+    progress.percent = Math.min(100, Math.max(0, Number(percent)));
+  }
+  if (message !== undefined && message !== null) {
+    progress.message = String(message).slice(0, 280);
+  }
+
+  if (!validateRequestProgress(progress).valid) {
+    return { ok: false, skipped: true };
+  }
+
+  try {
+    return await postRequestLifecycleEvent(task, platform, OBSERVATIONAL_REQUEST_EVENT.PROGRESS, { progress });
+  } catch {
+    return { ok: false, skipped: true };
+  }
 }
 
 async function heartbeatPlatform(state, platform, status = "healthy") {
@@ -525,6 +565,8 @@ function createTaskRecord(input, state, overrides = {}) {
       ? input.input_artifact_descriptors
       : [],
     input_artifacts: [],
+    // Next progress observation sequence for this attempt (FR-036).
+    progress_seq: 0,
     raw_envelope: input.raw_envelope || null
   };
 }
@@ -981,6 +1023,9 @@ async function runQueuedTask(task, state, { executor, transport = null, platform
     // Pull the caller's input bytes down first. Failing here rather than
     // running the hotline on a missing document is the honest outcome: the
     // executor would otherwise produce a confident result from nothing.
+    if ((task.input_artifact_descriptors || []).length > 0) {
+      await postTaskProgress(task, platform, REQUEST_PROGRESS_STAGE.INPUT_FETCHING);
+    }
     const inputFailure = await resolveTaskInputArtifacts(task, platform);
     if (inputFailure) {
       await finalizeTask(task, state, transport, platform, {
@@ -998,7 +1043,7 @@ async function runQueuedTask(task, state, { executor, transport = null, platform
         task.soft_timeout_at = nowIso();
         task.updated_at = task.soft_timeout_at;
         try {
-          await postRequestLifecycleEvent(task, platform, "SOFT_TIMEOUT", {
+          await postRequestLifecycleEvent(task, platform, OBSERVATIONAL_REQUEST_EVENT.SOFT_TIMEOUT, {
             status: "running",
             message: "task exceeded soft timeout and is still running"
           });
@@ -1006,8 +1051,14 @@ async function runQueuedTask(task, state, { executor, transport = null, platform
           // observational only
         }
         await persistResponderState(onStateChanged, state);
-      }
+      },
+      // Optional finer-grained beats from inside the executor (FR-036); a
+      // hotline adapter that knows "page 4 of 10" may say so. Ignoring the
+      // hook is fine — the stage-level beats around it still exist.
+      reportProgress: async ({ percent, message } = {}) =>
+        postTaskProgress(task, platform, REQUEST_PROGRESS_STAGE.EXECUTING, { percent, message })
     };
+    await postTaskProgress(task, platform, REQUEST_PROGRESS_STAGE.EXECUTING);
     const execution = await executor.execute(createExecutorContext(task), hooks);
     if (execution?.deferred === true) {
       task.status = "RUNNING";
