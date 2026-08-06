@@ -19,6 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const MINERU_BIN = process.env.MINERU_BIN || "mineru";
 const MINERU_BACKEND = process.env.MINERU_BACKEND || "pipeline";
@@ -163,7 +164,140 @@ function locateResult(outputDir, stem) {
   return null;
 }
 
+// ------------------------------------------------------------------ contract
+//
+// The declaration lives here, next to the code that has to satisfy it.
+//
+// It used to be inferred by the client from the hotline id — `buildDefaultContractProfile`
+// matched `hotlineId.includes("mineru")` and produced a contract describing a
+// `pdf_path` local-file interface this worker has not accepted since the
+// artifact channel landed (CHG-2026-192). A declaration that lives away from
+// the implementation goes stale without anyone noticing, because nothing breaks
+// when it does.
+//
+// `--contract` is how a process adapter answers "what do you accept", the same
+// way it would answer `--version`. Any worker can implement it; nothing about
+// this is MinerU-specific.
+export const HOTLINE_CONTRACT = {
+  contract_version: 1,
+  input_summary:
+    "Send the PDF as an input artifact. Optionally restrict the page range. The document is never inlined into the task envelope for a real call.",
+  output_summary:
+    "Returns the parsed markdown as an output artifact, any images MinerU extracted, and a summary of what was parsed.",
+  input_schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      start_page: { type: "integer", minimum: 0, description: "First page to parse, 0-based. Omit to parse from the start." },
+      end_page: { type: "integer", minimum: 0, description: "Last page to parse, 0-based. Omit to parse to the end." }
+    }
+  },
+  output_schema: {
+    type: "object",
+    required: ["markdown_sha256", "markdown_bytes", "block_count", "image_count", "source_document"],
+    additionalProperties: true,
+    properties: {
+      markdown_sha256: { type: "string", description: "sha256 of the markdown artifact bytes." },
+      markdown_bytes: { type: "integer", minimum: 0 },
+      markdown_preview: { type: "string", description: "First 500 characters, for a quick look without fetching the artifact." },
+      block_count: { type: "integer", minimum: 0, description: "Content blocks MinerU identified." },
+      image_count: { type: "integer", minimum: 0, description: "Images returned as separate artifacts." },
+      source_document: {
+        type: "object",
+        required: ["name", "bytes", "sha256"],
+        additionalProperties: true,
+        properties: {
+          name: { type: "string" },
+          origin: { type: "string", enum: ["artifact", "inline"] },
+          bytes: { type: "integer", minimum: 0 },
+          sha256: { type: "string" }
+        }
+      },
+      mineru: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          backend: { type: "string" },
+          method: { type: "string" },
+          model_source: { type: "string" },
+          elapsed_ms: { type: "integer", minimum: 0 }
+        }
+      }
+    }
+  },
+  input_attachments: {
+    accepts_files: true,
+    max_files: 1,
+    accepted_mime_types: ["application/pdf"],
+    file_roles: [
+      {
+        role: "source_document",
+        required: true,
+        description: "The PDF to parse. Sent through the artifact channel; the worker verifies it before executing.",
+        accepted_types: ["application/pdf"]
+      }
+    ]
+  },
+  output_attachments: {
+    includes_files: true,
+    max_total_size_bytes: MAX_OUTPUT_ARTIFACT_BYTES,
+    possible_mime_types: ["text/markdown", "image/png", "image/jpeg"],
+    file_roles: [
+      { role: "mineru_markdown", required: true, description: "The parsed document as markdown.", accepted_types: ["text/markdown"] },
+      { role: "extracted_image", required: false, description: "Images MinerU extracted, one artifact each.", accepted_types: ["image/png", "image/jpeg"] }
+    ]
+  },
+  input_examples: [
+    {
+      title: "Parse a whole PDF",
+      description: "The PDF rides the artifact channel; the input body carries only options.",
+      input: {}
+    },
+    {
+      title: "Parse the first ten pages",
+      input: { start_page: 0, end_page: 9 }
+    }
+  ],
+  output_examples: [
+    {
+      title: "Parsed document",
+      output: {
+        markdown_sha256: "d32164a07c9fc1dc839bfc33f26afd6c08ce1d1d42f092de7cf5571378592c60",
+        markdown_bytes: 3248,
+        markdown_preview: "# Title\n\nFirst paragraph of the parsed document...",
+        block_count: 42,
+        image_count: 2,
+        source_document: { name: "paper.pdf", origin: "artifact", bytes: 336919, sha256: "f3b3be345bf2df8979f2491ca9466e078e4fd1d6a216611faa8566e4c44d474b" },
+        mineru: { backend: "pipeline", method: "auto", model_source: "local", elapsed_ms: 16300 }
+      }
+    }
+  ],
+  recommended_for: [
+    "Turning a PDF you hold into markdown you can search, diff or feed to something else",
+    "Papers, reports and slide exports where layout matters and copy-paste does not survive it"
+  ],
+  not_recommended_for: [
+    "Answering questions about a document — this parses, it does not read",
+    "Formats other than PDF",
+    "Anything needing the original page images at full fidelity: extracted images are what MinerU emitted, not a page render"
+  ],
+  limitations: [
+    "One PDF per call.",
+    `Output is capped at ${Math.floor(MAX_OUTPUT_ARTIFACT_BYTES / (1024 * 1024))}MB total; over that, the extracted images are dropped and the markdown is still returned.`,
+    "Inline base64 input exists only for local runs and is capped at the same size — a real call must use the artifact channel.",
+    "Scanned pages depend entirely on MinerU's OCR path; quality is whatever the configured backend produces.",
+    "Runs on one machine, so availability follows that machine."
+  ]
+};
+
 async function main() {
+  // A process adapter answers "what do you accept" the same way it answers
+  // --version: cheaply, without stdin, and without side effects.
+  if (process.argv.includes("--contract")) {
+    process.stdout.write(JSON.stringify(HOTLINE_CONTRACT, null, 2));
+    return;
+  }
+
   const raw = await readStdin();
   let payload;
   try {
@@ -296,6 +430,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  fail("MINERU_WORKER_ERROR", error instanceof Error ? error.message : String(error));
-});
+// Only run when invoked as a command; HOTLINE_CONTRACT is imported by tests.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    fail("MINERU_WORKER_ERROR", error instanceof Error ? error.message : String(error));
+  });
+}

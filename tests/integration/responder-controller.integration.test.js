@@ -9,6 +9,7 @@ import { createResponderControllerServer, createResponderState } from "@delexec/
 import { createFunctionExecutor, createHotlineRouterExecutor, startResponderHeartbeatLoop } from "@delexec/responder-runtime-core";
 import { createLocalTransportAdapter, createLocalTransportHub } from "@delexec/transport-local";
 import { closeServer, jsonRequest, listenServer, waitFor } from "../helpers/http.js";
+import { declarableContract } from "../helpers/hotline-contract.js";
 
 describe("responder-controller integration", () => {
   let server;
@@ -173,6 +174,7 @@ describe("responder-controller integration", () => {
           display_name: "Register Test Responder",
           task_types: ["contract_extract"],
           capabilities: ["contract.extract"],
+          ...declarableContract(),
           tags: ["legal"]
         }
       });

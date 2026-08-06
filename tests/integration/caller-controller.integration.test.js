@@ -10,6 +10,7 @@ import { createFunctionExecutor } from "@delexec/responder-runtime-core";
 import { InMemoryEmailTransport } from "@delexec/transport-email";
 import { createLocalTransportAdapter, createLocalTransportHub } from "@delexec/transport-local";
 import { closeServer, jsonRequest, listenServer, waitFor } from "../helpers/http.js";
+import { declarableContract } from "../helpers/hotline-contract.js";
 
 function normalizePemForAssert(value) {
   return typeof value === "string" ? value.replace(/\r\n/g, "\n").trim() : value;
@@ -726,6 +727,7 @@ describe("caller-controller integration", () => {
         display_name: "LegalWorks Contract Extractor",
         responder_public_key_pem: platformState.bootstrap.responders[0].signing.publicKeyPem,
         capabilities: ["contract.extract"],
+        ...declarableContract(),
         task_types: ["contract_extract"],
         tags: ["legal"]
       }

@@ -1445,8 +1445,24 @@ export function createResponderControllerServer({
             trust_tier: body.trust_tier || null,
             responder_description: body.responder_description || body.description || null,
             service_domain: body.service_domain || [],
+            // The whole contract, not half of it. This path used to forward
+            // only the two schemas and had no field at all for examples or
+            // limits, so a device enrolled through it arrived declaring
+            // nothing — which is how the one hotline doing real work ended up
+            // with no contract while a richer registration path sat unused in
+            // another package. A hotline that cannot state its contract here
+            // cannot be published at all (FR-010/FR-013).
             input_schema: body.input_schema || null,
             output_schema: body.output_schema || null,
+            input_attachments: body.input_attachments || null,
+            output_attachments: body.output_attachments || null,
+            input_examples: Array.isArray(body.input_examples) ? body.input_examples : null,
+            output_examples: Array.isArray(body.output_examples) ? body.output_examples : null,
+            input_summary: body.input_summary || null,
+            output_summary: body.output_summary || null,
+            recommended_for: Array.isArray(body.recommended_for) ? body.recommended_for : null,
+            not_recommended_for: Array.isArray(body.not_recommended_for) ? body.not_recommended_for : null,
+            limitations: Array.isArray(body.limitations) ? body.limitations : null,
             delivery_email: body.delivery_email || body.contact_email || null,
             support_email: body.support_email || null
           });

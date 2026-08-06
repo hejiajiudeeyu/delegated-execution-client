@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -808,7 +809,83 @@ export function ensureHotlineLocalIntegration(definition) {
   };
 }
 
+/**
+ * Ask a process adapter what it accepts.
+ *
+ * A worker declares its contract next to the code that has to satisfy it and
+ * answers `--contract` the same way it would answer `--version`. Anything the
+ * worker says wins over the guesses below, because those guess from the hotline
+ * id — `hotlineId.includes("mineru")` — and a guess cannot notice when the
+ * implementation changes underneath it. That is not hypothetical: the pdf-parse
+ * guess still described a `pdf_path` local-file interface long after the worker
+ * moved to the artifact channel.
+ *
+ * A worker that does not implement `--contract` simply does not answer, and the
+ * guesses remain as a starting point for the operator to edit.
+ */
+export function readProcessAdapterContract(definition = {}, { timeoutMs = 5000 } = {}) {
+  const cmd = definition?.adapter?.cmd;
+  if ((definition.adapter_type || "process") !== "process" || !cmd) {
+    return null;
+  }
+  const result = spawnSync(`${cmd} --contract`, {
+    cwd: definition.adapter.cwd || process.cwd(),
+    env: { ...process.env, ...(definition.adapter.env || {}) },
+    shell: true,
+    encoding: "utf8",
+    timeout: timeoutMs,
+    maxBuffer: 4 * 1024 * 1024
+  });
+  if (result.status !== 0 || !result.stdout?.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(result.stdout);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    // `contract_version` is the positive signal that this worker answered the
+    // question that was asked. A worker with no --contract support ignores the
+    // flag, reads empty stdin and prints its ordinary result payload — which is
+    // also valid JSON, and would otherwise be mistaken for a contract. Silence
+    // has to be distinguishable from an answer.
+    if (!Number.isInteger(parsed.contract_version) || parsed.contract_version < 1) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    // A worker that answers with something unparseable is treated as one that
+    // did not answer. Half a contract is worse than none.
+    return null;
+  }
+}
+
 function buildDefaultContractProfile(definition = {}) {
+  // The worker's own declaration outranks everything guessed below.
+  const declared = definition.__declared_contract ?? readProcessAdapterContract(definition);
+  if (declared) {
+    return {
+      profile_key: "declared_by_worker",
+      description: definition.description || `Use ${definition.display_name || definition.hotline_id} as its worker declares it.`,
+      summary: declared.summary || definition.summary || declared.input_summary || `Call ${definition.display_name || definition.hotline_id}.`,
+      template_ref: definition.template_ref || `docs/templates/hotlines/${definition.hotline_id}/`,
+      input_schema: declared.input_schema || null,
+      output_schema: declared.output_schema || null,
+      input_attachments: declared.input_attachments || null,
+      output_attachments: declared.output_attachments || null,
+      input_examples: Array.isArray(declared.input_examples) ? declared.input_examples : [],
+      output_examples: Array.isArray(declared.output_examples) ? declared.output_examples : [],
+      input_summary: declared.input_summary || null,
+      output_summary: declared.output_summary || null,
+      recommended_for: Array.isArray(declared.recommended_for) ? declared.recommended_for : [],
+      not_recommended_for: Array.isArray(declared.not_recommended_for) ? declared.not_recommended_for : [],
+      limitations: Array.isArray(declared.limitations) ? declared.limitations : []
+    };
+  }
+  return buildGuessedContractProfile(definition);
+}
+
+function buildGuessedContractProfile(definition = {}) {
   const hotlineId = String(definition.hotline_id || "").trim();
   const displayName = String(definition.display_name || hotlineId || "Local Hotline").trim();
   const taskTypes = ensureStringList(definition.task_types);
