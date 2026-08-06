@@ -1,6 +1,6 @@
 {
   "name": "@delexec/ops",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Unified operator CLI for delegated execution clients",
   "type": "module",
   "bin": {
@@ -51,7 +51,7 @@
     "@delexec/caller-controller-core": "0.1.0",
     "@delexec/caller-skill-adapter": "0.1.0",
     "@delexec/caller-skill-mcp-adapter": "0.1.0",
-    "@delexec/contracts": "^0.1.0",
+    "@delexec/contracts": "^0.1.5",
     "@delexec/responder-controller": "0.1.0",
     "@delexec/responder-runtime-core": "0.1.0",
     "@delexec/runtime-utils": "0.1.0",
